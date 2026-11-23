@@ -36,7 +36,8 @@ from django.conf import settings
 from django.db import transaction
 from django.http import HttpRequest
 
-from glowderma.accounts.console import state, twofactor
+from glowderma.accounts import second_factor
+from glowderma.accounts.console import state
 from glowderma.accounts.models import StaffUser
 from glowderma.core import audit, enums, timeutils
 from glowderma.core.api.exceptions import Conflict
@@ -119,7 +120,7 @@ def open_enrolment(
     or ``None`` when nothing was written (no access, a device already, or a window still open)."""
     if (
         not user.is_staff
-        or twofactor.has_second_factor(user, scope=twofactor.CONSOLE)
+        or second_factor.has_second_factor(user, scope=second_factor.CONSOLE)
         or enrolment_window(user) is not None
     ):
         return None
@@ -140,7 +141,7 @@ def open_enrolment(
 def revoke(
     user: StaffUser, *, actor: StaffUser | None, reason: str, request: HttpRequest | None = None
 ) -> dict[str, int]:
-    removed = twofactor.reset_devices(user, scope=twofactor.CONSOLE)
+    removed = second_factor.reset_devices(user, scope=second_factor.CONSOLE)
     sessions = state.end_console_sessions(user)
     if user.is_staff:
         user.is_staff = False
@@ -161,7 +162,7 @@ def reset_two_factor(
 ) -> dict[str, int]:
     """Delete the devices and recovery codes, end every console session of ``user`` (a sign-in pending with
     the old factor included) and open the enrolment window."""
-    removed = twofactor.reset_devices(user, scope=twofactor.CONSOLE)
+    removed = second_factor.reset_devices(user, scope=second_factor.CONSOLE)
     result = {**removed, "sessions": state.end_console_sessions(user)}
     _record(
         "ops_access.2fa_reset",
@@ -257,8 +258,8 @@ def status(user: StaffUser) -> AccessStatus:
         is_active=user.is_active,
         is_staff=user.is_staff,
         is_manager=user.is_manager,
-        totp_confirmed=twofactor.CONSOLE.totp_devices(user).filter(confirmed=True).exists(),
-        totp_pending=twofactor.CONSOLE.totp_devices(user).filter(confirmed=False).exists(),
-        recovery_codes_left=twofactor.recovery_codes_left(user, scope=twofactor.CONSOLE),
+        totp_confirmed=second_factor.CONSOLE.totp_devices(user).filter(confirmed=True).exists(),
+        totp_pending=second_factor.CONSOLE.totp_devices(user).filter(confirmed=False).exists(),
+        recovery_codes_left=second_factor.recovery_codes_left(user, scope=second_factor.CONSOLE),
         last_login=user.last_login.isoformat() if user.last_login else "-",
     )

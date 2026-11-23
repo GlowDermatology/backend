@@ -21,8 +21,7 @@ from django_otp.plugins.otp_static.models import StaticDevice, StaticToken
 from django_otp.plugins.otp_totp.models import TOTPDevice
 from rest_framework.test import APIClient
 
-from glowderma.accounts import mfa, services, tokens
-from glowderma.accounts.console import twofactor
+from glowderma.accounts import mfa, second_factor, services, tokens
 from glowderma.accounts.models import AuthSession, SocialIdentity, StaffUser
 from glowderma.accounts.security.login_lockout import LoginGuard, email_hash
 from glowderma.accounts.tests.factories import TEST_PASSWORD, AuthSessionFactory, StaffUserFactory
@@ -46,7 +45,7 @@ ALERTS = override_settings(ALERT_WEBHOOK_URL="https://alerts.example.uz/hook")
 def panel_device(user: StaffUser, key: str = PANEL_KEY, *, confirmed: bool = True) -> TOTPDevice:
     return TOTPDevice.objects.create(
         user=user,
-        name=twofactor.PANEL_DEVICE_NAME,
+        name=second_factor.PANEL_DEVICE_NAME,
         key=key,
         confirmed=confirmed,
         step=30,
@@ -57,7 +56,7 @@ def panel_device(user: StaffUser, key: str = PANEL_KEY, *, confirmed: bool = Tru
 
 def enable(user: StaffUser) -> tuple[TOTPDevice, list[str]]:
     """A confirmed panel device on ``PANEL_KEY`` plus ten panel recovery codes."""
-    return panel_device(user), twofactor.issue_recovery_codes(user, scope=twofactor.PANEL)
+    return panel_device(user), second_factor.issue_recovery_codes(user, scope=second_factor.PANEL)
 
 
 def rewind(device: TOTPDevice) -> None:
@@ -104,44 +103,47 @@ def user() -> StaffUser:
 
 def test_panel_and_console_devices_are_separate_scopes(user: StaffUser) -> None:
     console = ops_staff(user.email, key=CONSOLE_KEY)
-    assert twofactor.has_second_factor(console, scope=twofactor.CONSOLE)
-    assert not twofactor.has_second_factor(console, scope=twofactor.PANEL)
+    assert second_factor.has_second_factor(console, scope=second_factor.CONSOLE)
+    assert not second_factor.has_second_factor(console, scope=second_factor.PANEL)
     assert not mfa.enabled(console)
     device, panel_codes = enable(user)
-    console_codes = twofactor.issue_recovery_codes(user, scope=twofactor.CONSOLE)
-    assert twofactor.confirmed_totp(user, scope=twofactor.PANEL) == device
-    assert twofactor.confirmed_totp(user, scope=twofactor.CONSOLE) != device
+    console_codes = second_factor.issue_recovery_codes(user, scope=second_factor.CONSOLE)
+    assert second_factor.confirmed_totp(user, scope=second_factor.PANEL) == device
+    assert second_factor.confirmed_totp(user, scope=second_factor.CONSOLE) != device
     # the panel's recovery codes did not replace the console's (and vice versa)
-    assert twofactor.recovery_codes_left(user, scope=twofactor.PANEL) == 10
-    assert twofactor.recovery_codes_left(user, scope=twofactor.CONSOLE) == 10
-    assert twofactor.use_recovery_code(user, console_codes[0], scope=twofactor.PANEL) is None
-    assert twofactor.use_recovery_code(user, panel_codes[0], scope=twofactor.CONSOLE) is None
+    assert second_factor.recovery_codes_left(user, scope=second_factor.PANEL) == 10
+    assert second_factor.recovery_codes_left(user, scope=second_factor.CONSOLE) == 10
+    assert second_factor.use_recovery_code(user, console_codes[0], scope=second_factor.PANEL) is None
+    assert second_factor.use_recovery_code(user, panel_codes[0], scope=second_factor.CONSOLE) is None
     # a console code is no panel code and the other way round
-    assert twofactor.verify_totp(user, totp_code_for_key(CONSOLE_KEY), scope=twofactor.PANEL) is None
-    assert twofactor.verify_totp(user, totp_code_for_key(PANEL_KEY), scope=twofactor.CONSOLE) is None
+    assert second_factor.verify_totp(user, totp_code_for_key(CONSOLE_KEY), scope=second_factor.PANEL) is None
+    assert second_factor.verify_totp(user, totp_code_for_key(PANEL_KEY), scope=second_factor.CONSOLE) is None
     # resetting one scope leaves the other
-    assert twofactor.reset_devices(user, scope=twofactor.PANEL) == {"totp_devices": 1, "recovery_codes": 10}
-    assert twofactor.has_second_factor(user, scope=twofactor.CONSOLE)
-    assert twofactor.recovery_codes_left(user, scope=twofactor.CONSOLE) == 10
+    assert second_factor.reset_devices(user, scope=second_factor.PANEL) == {
+        "totp_devices": 1,
+        "recovery_codes": 10,
+    }
+    assert second_factor.has_second_factor(user, scope=second_factor.CONSOLE)
+    assert second_factor.recovery_codes_left(user, scope=second_factor.CONSOLE) == 10
     enable(user)
-    twofactor.reset_devices(user, scope=twofactor.CONSOLE)
-    assert mfa.enabled(user) and twofactor.recovery_codes_left(user, scope=twofactor.PANEL) == 10
+    second_factor.reset_devices(user, scope=second_factor.CONSOLE)
+    assert mfa.enabled(user) and second_factor.recovery_codes_left(user, scope=second_factor.PANEL) == 10
 
 
 def test_a_console_enrolment_keeps_the_panel_device(user: StaffUser) -> None:
     device, _ = enable(user)
-    pending = twofactor.enrolment_device(user, None, scope=twofactor.CONSOLE)
-    assert pending.name == twofactor.DEVICE_NAME
-    done = twofactor.confirm_enrolment(user, pending.pk, totp_code(pending), scope=twofactor.CONSOLE)
+    pending = second_factor.enrolment_device(user, None, scope=second_factor.CONSOLE)
+    assert pending.name == second_factor.DEVICE_NAME
+    done = second_factor.confirm_enrolment(user, pending.pk, totp_code(pending), scope=second_factor.CONSOLE)
     assert done is not None
     assert TOTPDevice.objects.filter(pk=device.pk, confirmed=True).exists()
-    assert twofactor.recovery_codes_left(user, scope=twofactor.PANEL) == 10
+    assert second_factor.recovery_codes_left(user, scope=second_factor.PANEL) == 10
     # and a panel enrolment keeps the console device
-    twofactor.reset_devices(user, scope=twofactor.PANEL)
-    panel_pending = twofactor.enrolment_device(user, None, scope=twofactor.PANEL)
-    assert twofactor.CONSOLE.totp_devices(user).filter(confirmed=False).count() == 0
-    assert twofactor.confirm_enrolment(
-        user, panel_pending.pk, totp_code(panel_pending), scope=twofactor.PANEL
+    second_factor.reset_devices(user, scope=second_factor.PANEL)
+    panel_pending = second_factor.enrolment_device(user, None, scope=second_factor.PANEL)
+    assert second_factor.CONSOLE.totp_devices(user).filter(confirmed=False).count() == 0
+    assert second_factor.confirm_enrolment(
+        user, panel_pending.pk, totp_code(panel_pending), scope=second_factor.PANEL
     )
     assert TOTPDevice.objects.filter(pk=done.device.pk, confirmed=True).exists()
 
@@ -157,16 +159,18 @@ def test_a_panel_device_does_not_open_the_console() -> None:
 
 def test_the_panel_uri_names_the_admin_issuer_and_the_console_keeps_its_own(user: StaffUser) -> None:
     device = panel_device(user, confirmed=False)
-    uri = twofactor.otpauth_uri(device, scope=twofactor.PANEL)
+    uri = second_factor.otpauth_uri(device, scope=second_factor.PANEL)
     parsed = urlparse(uri)
     assert parsed.scheme == "otpauth" and parsed.netloc == "totp"
     assert unquote(parsed.path) == "/Glow Derma Admin:ali@x.uz"
     query = parse_qs(parsed.query)
     assert query["issuer"] == ["Glow Derma Admin"] and query["digits"] == ["6"] and query["period"] == ["30"]
-    assert query["secret"] == [twofactor.manual_key(device).replace(" ", "")]
+    assert query["secret"] == [second_factor.manual_key(device).replace(" ", "")]
     console = ops_staff("ops@x.uz", key=CONSOLE_KEY)
-    console_device = twofactor.confirmed_totp(console, scope=twofactor.CONSOLE)
-    assert "issuer=Glow%20Derma%20Ops" in twofactor.otpauth_uri(console_device, scope=twofactor.CONSOLE)
+    console_device = second_factor.confirmed_totp(console, scope=second_factor.CONSOLE)
+    assert "issuer=Glow%20Derma%20Ops" in second_factor.otpauth_uri(
+        console_device, scope=second_factor.CONSOLE
+    )
 
 
 # --- status, setup and confirm -----------------------------------------------------------------------------
@@ -212,10 +216,10 @@ def test_setup_and_confirm_enable_mfa(user: StaffUser) -> None:
     second = client.post(MFA + "setup/", {"current_password": TEST_PASSWORD}, format="json")
     assert second.data["device_id"] != first.data["device_id"]
     assert list(TOTPDevice.objects.filter(user=user).values_list("pk", "name", "confirmed")) == [
-        (second.data["device_id"], twofactor.PANEL_DEVICE_NAME, False)
+        (second.data["device_id"], second_factor.PANEL_DEVICE_NAME, False)
     ]
     device = TOTPDevice.objects.get(pk=second.data["device_id"])
-    assert twofactor.manual_key(device) == second.data["manual_key"]
+    assert second_factor.manual_key(device) == second.data["manual_key"]
     answer = client.post(MFA + "confirm/", {"device_id": device.pk, "code": totp_code(device)}, format="json")
     assert answer.status_code == 200, answer.data
     codes = answer.data["recovery_codes"]
@@ -229,7 +233,7 @@ def test_setup_and_confirm_enable_mfa(user: StaffUser) -> None:
     assert session.mfa_verified_at is not None
     entry = AuditEntry.objects.get(action="auth.mfa_enabled")
     assert entry.after == {"recovery_codes": 10} and entry.actor_id == user.pk
-    assert StaticDevice.objects.get(user=user).name == twofactor.PANEL_RECOVERY_DEVICE_NAME
+    assert StaticDevice.objects.get(user=user).name == second_factor.PANEL_RECOVERY_DEVICE_NAME
     # already on
     assert client.post(MFA + "setup/", {"current_password": TEST_PASSWORD}, format="json").status_code == 409
     again = client.post(MFA + "confirm/", {"device_id": device.pk, "code": "123456"}, format="json")
@@ -252,7 +256,7 @@ def test_confirm_refuses_a_wrong_code_and_a_foreign_device(user: StaffUser) -> N
     )
     assert code_of(answer) == "mfa_code_invalid"
     console = TOTPDevice.objects.create(
-        user=user, name=twofactor.DEVICE_NAME, key=CONSOLE_KEY, confirmed=False
+        user=user, name=second_factor.DEVICE_NAME, key=CONSOLE_KEY, confirmed=False
     )
     answer = client.post(
         MFA + "confirm/", {"device_id": console.pk, "code": totp_code(console)}, format="json"
@@ -340,17 +344,17 @@ def test_a_recovery_code_signs_in_once(user: StaffUser) -> None:
     assert AuditEntry.objects.get(action="auth.login_succeeded").after["mfa"] == "recovery"  # type: ignore[index]
     again = verify(challenge_for(user), recovery_code=codes[0])
     assert code_of(again) == "mfa_code_invalid"
-    assert twofactor.recovery_codes_left(user, scope=twofactor.PANEL) == 9
+    assert second_factor.recovery_codes_left(user, scope=second_factor.PANEL) == 9
 
 
 def test_a_console_code_or_recovery_code_does_not_pass_the_panel_step(user: StaffUser) -> None:
     enable(user)
     console = ops_staff(user.email, key=CONSOLE_KEY)
-    console_codes = twofactor.issue_recovery_codes(console, scope=twofactor.CONSOLE)
+    console_codes = second_factor.issue_recovery_codes(console, scope=second_factor.CONSOLE)
     challenge = challenge_for(user)
     assert code_of(verify(challenge, code=totp_code_for_key(CONSOLE_KEY))) == "mfa_code_invalid"
     assert code_of(verify(challenge, recovery_code=console_codes[0])) == "mfa_code_invalid"
-    assert twofactor.recovery_codes_left(console, scope=twofactor.CONSOLE) == 10
+    assert second_factor.recovery_codes_left(console, scope=second_factor.CONSOLE) == 10
 
 
 def test_a_wrong_code_is_audited_and_keeps_the_challenge(user: StaffUser) -> None:
@@ -461,7 +465,7 @@ def test_the_challenge_dies_with_the_account_state(user: StaffUser, change: str)
         manager = StaffUserFactory.create(email="boss@x.uz", is_manager=True)
         services.reset_staff_mfa(user, actor=manager)
     else:
-        twofactor.reset_devices(user, scope=twofactor.PANEL)
+        second_factor.reset_devices(user, scope=second_factor.PANEL)
     answer = verify(challenge, code=totp_code_for_key(PANEL_KEY))
     assert answer.status_code == 400 and code_of(answer) == "mfa_challenge_invalid"
     assert not AuthSession.objects.filter(staff=user, revoked_at__isnull=True).exists()
@@ -613,7 +617,7 @@ def test_disable_needs_the_password_and_a_code(user: StaffUser) -> None:
         "totp_devices": 1,
         "recovery_codes": 10,
     }
-    assert twofactor.has_second_factor(user, scope=twofactor.CONSOLE)  # the console's device stays
+    assert second_factor.has_second_factor(user, scope=second_factor.CONSOLE)  # the console's device stays
     assert set(login(user.email).data) == LOGIN_KEYS  # no challenge any more
     off = client.post(
         MFA + "disable/", {"current_password": TEST_PASSWORD, "code_or_recovery": "1"}, format="json"
@@ -643,12 +647,12 @@ def test_new_recovery_codes_replace_the_old_ones(user: StaffUser) -> None:
     )
     assert answer.status_code == 200 and len(answer.data["recovery_codes"]) == 10
     assert not set(answer.data["recovery_codes"]) & set(old)
-    assert twofactor.use_recovery_code(user, old[0], scope=twofactor.PANEL) is None
-    assert twofactor.use_recovery_code(user, answer.data["recovery_codes"][0], scope=twofactor.PANEL)
+    assert second_factor.use_recovery_code(user, old[0], scope=second_factor.PANEL) is None
+    assert second_factor.use_recovery_code(user, answer.data["recovery_codes"][0], scope=second_factor.PANEL)
     assert AuditEntry.objects.get(action="auth.mfa_recovery_codes_regenerated").after == {
         "recovery_codes": 10
     }
-    twofactor.reset_devices(user, scope=twofactor.PANEL)
+    second_factor.reset_devices(user, scope=second_factor.PANEL)
     off = client.post(
         MFA + "recovery-codes/", {"current_password": TEST_PASSWORD, "code": "1"}, format="json"
     )
@@ -674,7 +678,7 @@ def test_a_manager_resets_mfa(user: StaffUser, django_capture_on_commit_callback
     assert answer.status_code == 200, answer.data
     assert cache.get(lock) is None  # the code lockout ended with the reset
     assert answer.data["mfa_enabled"] is False
-    assert not mfa.enabled(user) and twofactor.has_second_factor(console, scope=twofactor.CONSOLE)
+    assert not mfa.enabled(user) and second_factor.has_second_factor(console, scope=second_factor.CONSOLE)
     open_session.refresh_from_db()
     assert open_session.revoke_reason == "admin_revoked"
     entry = AuditEntry.objects.get(action="auth.mfa_reset")

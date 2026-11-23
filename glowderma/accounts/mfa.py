@@ -1,14 +1,15 @@
 """The admin panel's optional TOTP second factor (feat/admin-ux, admin contract §2.1 "MFA").
 
 Each staff member's own choice, off by default (nobody can mandate it). The devices live in the
-:data:`~glowderma.accounts.console.twofactor.PANEL` scope of ``console.twofactor`` — separate from the ops
+:data:`~glowderma.accounts.second_factor.PANEL` scope of ``accounts.second_factor`` — separate from the ops
 console's: enabling, using or disabling the panel factor never touches a console device, and the console never
 accepts a panel code, so the console's enrolment window and four-eyes rule stay what they are.
 
 * **Enable** (``auth/mfa/setup/`` → ``confirm/``): the current password, then a new unconfirmed device (it
-  replaces an earlier unconfirmed one) shown as an ``otpauth://`` URI (issuer :data:`twofactor.PANEL_ISSUER`)
-  and a manual key; the first valid code confirms it, removes the scope's other TOTP devices and issues ten
-  recovery codes (shown once, stored as keyed hashes, single use). Audited ``auth.mfa_enabled``.
+  replaces an earlier unconfirmed one) shown as an ``otpauth://`` URI (issuer
+  :data:`second_factor.PANEL_ISSUER`) and a manual key; the first valid code confirms it, removes the scope's
+  other TOTP devices and issues ten recovery codes (shown once, stored as keyed hashes, single use). Audited
+  ``auth.mfa_enabled``.
 * **Disable** / **new recovery codes**: the current password plus a code (disable also takes a recovery
   code). Audited ``auth.mfa_disabled`` / ``auth.mfa_recovery_codes_regenerated``.
 * **Sign-in**: a correct password (``auth/login/``) or a social sign-in (``auth/oauth/{provider}/``) of an
@@ -53,7 +54,7 @@ from django.core.cache import cache
 from django.db import transaction
 from rest_framework.exceptions import ErrorDetail, Throttled, ValidationError
 
-from glowderma.accounts.console import twofactor
+from glowderma.accounts import second_factor
 from glowderma.accounts.errors import MfaCodeInvalid
 from glowderma.accounts.models import AuthSession, StaffUser
 from glowderma.accounts.security.login_lockout import LoginGuard, email_hash
@@ -63,7 +64,7 @@ from glowderma.core.uzsource import N_
 
 logger = logging.getLogger(__name__)
 
-SCOPE = twofactor.PANEL
+SCOPE = second_factor.PANEL
 GUARD_SCOPE = "panel_otp"
 PASSWORD_GUARD_SCOPE = "change_password"  # noqa: S105 - a lockout scope name, shared with change-password
 CHALLENGE_TTL_SECONDS = 300
@@ -82,7 +83,7 @@ PASSWORD_INCORRECT = N_("Joriy parol noto‘g‘ri.")
 
 def enabled(user: StaffUser) -> bool:
     """Whether ``user`` has a confirmed admin panel TOTP device (``me.mfa_enabled``)."""
-    return twofactor.has_second_factor(user, scope=SCOPE)
+    return second_factor.has_second_factor(user, scope=SCOPE)
 
 
 @dataclass(frozen=True)
@@ -93,7 +94,7 @@ class Status:
 
 def status(user: StaffUser) -> Status:
     on = enabled(user)
-    return Status(on, twofactor.recovery_codes_left(user, scope=SCOPE) if on else 0)
+    return Status(on, second_factor.recovery_codes_left(user, scope=SCOPE) if on else 0)
 
 
 # --- guards ------------------------------------------------------------------------------------------------
@@ -176,14 +177,14 @@ def use_factor(
         totp = code
 
         def verify_code() -> FactorUse | None:
-            device = twofactor.verify_totp(user, totp, scope=SCOPE)
+            device = second_factor.verify_totp(user, totp, scope=SCOPE)
             return FactorUse(FACTOR_TOTP, None) if device is not None else None
 
         return guarded(user, request, factor=FACTOR_TOTP, context=context, attempt=verify_code)
     recovery = recovery_code or ""
 
     def verify_recovery() -> FactorUse | None:
-        used = twofactor.use_recovery_code(user, recovery, scope=SCOPE)
+        used = second_factor.use_recovery_code(user, recovery, scope=SCOPE)
         return FactorUse(FACTOR_RECOVERY, used.remaining) if used is not None else None
 
     return guarded(user, request, factor=FACTOR_RECOVERY, context=context, attempt=verify_recovery)
@@ -225,12 +226,12 @@ def begin_setup(user: StaffUser) -> Setup:
     The caller checked the current password."""
     if enabled(user):
         raise Conflict(MFA_ALREADY_ENABLED)
-    device = twofactor.enrolment_device(user, None, scope=SCOPE)
+    device = second_factor.enrolment_device(user, None, scope=SCOPE)
     device.user = user
     return Setup(
         device_id=int(device.pk),
-        otpauth_uri=twofactor.otpauth_uri(device, scope=SCOPE),
-        manual_key=twofactor.manual_key(device),
+        otpauth_uri=second_factor.otpauth_uri(device, scope=SCOPE),
+        manual_key=second_factor.manual_key(device),
     )
 
 
@@ -243,8 +244,8 @@ def confirm_setup(
     if enabled(user):
         raise Conflict(MFA_ALREADY_ENABLED)
 
-    def confirm() -> twofactor.Enrolment | None:
-        return twofactor.confirm_enrolment(user, device_id, code, scope=SCOPE)
+    def confirm() -> second_factor.Enrolment | None:
+        return second_factor.confirm_enrolment(user, device_id, code, scope=SCOPE)
 
     enrolment = guarded(user, request, factor=FACTOR_TOTP, context="setup", attempt=confirm)
     with transaction.atomic():
@@ -260,12 +261,12 @@ def disable(user: StaffUser, *, code_or_recovery: str, request: Any = None) -> d
     if not enabled(user):
         raise Conflict(MFA_NOT_ENABLED)
     value = code_or_recovery.strip()
-    if twofactor.TOTP_CODE.match(value):
+    if second_factor.TOTP_CODE.match(value):
         used = use_factor(user, request, code=value, context="disable")
     else:
         used = use_factor(user, request, recovery_code=value, context="disable")
     with transaction.atomic():
-        removed = twofactor.reset_devices(user, scope=SCOPE)
+        removed = second_factor.reset_devices(user, scope=SCOPE)
         _record("auth.mfa_disabled", user, request, factor=used.factor, **removed)
     return removed
 
@@ -276,7 +277,7 @@ def regenerate_recovery_codes(user: StaffUser, *, code: str, request: Any = None
         raise Conflict(MFA_NOT_ENABLED)
     use_factor(user, request, code=code.strip(), context="recovery_codes")
     with transaction.atomic():
-        codes = twofactor.issue_recovery_codes(user, scope=SCOPE)
+        codes = second_factor.issue_recovery_codes(user, scope=SCOPE)
         _record("auth.mfa_recovery_codes_regenerated", user, request, recovery_codes=len(codes))
     return codes
 

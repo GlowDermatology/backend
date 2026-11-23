@@ -5058,7 +5058,7 @@ msgstr "Only a superuser can turn off a superuser's two-step verification."
 msgid "Surat"
 msgstr "Photo"
 
-#: glowderma/accounts/console/twofactor.py
+#: glowderma/accounts/second_factor/provisioning.py
 msgid "TOTP QR kod"
 msgstr "TOTP QR code"
 

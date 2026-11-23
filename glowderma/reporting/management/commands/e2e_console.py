@@ -35,7 +35,8 @@ from django.utils.text import capfirst
 from django_otp import DEVICE_ID_SESSION_KEY
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
-from glowderma.accounts.console import access, state, twofactor
+from glowderma.accounts import second_factor
+from glowderma.accounts.console import access, state
 from glowderma.accounts.models import AuthSession, Customer, StaffUser
 from glowderma.accounts.security.login_lockout import email_hash
 from glowderma.core import integration_modes, timeutils
@@ -304,7 +305,7 @@ def facts(data: dict[str, Any]) -> Any:
 def _new_device(user: StaffUser) -> TOTPDevice:
     key = secrets.token_hex(20)
     return TOTPDevice.objects.create(
-        user=user, name=twofactor.DEVICE_NAME, key=key, confirmed=True, step=30, tolerance=1, digits=6
+        user=user, name=second_factor.DEVICE_NAME, key=key, confirmed=True, step=30, tolerance=1, digits=6
     )
 
 
@@ -334,7 +335,7 @@ def staff(data: dict[str, Any]) -> Any:
         out["key_hex"] = device.key
         out["key_base32"] = base64.b32encode(device.bin_key).decode().rstrip("=")
         if data.get("recovery"):
-            out["recovery_codes"] = twofactor.issue_recovery_codes(user, scope=twofactor.CONSOLE)
+            out["recovery_codes"] = second_factor.issue_recovery_codes(user, scope=second_factor.CONSOLE)
     elif data.get("enrol_window"):
         until = access.open_enrolment(user, actor=None, reason="e2e")
         out["enrol_until"] = _plain(until)
@@ -374,7 +375,7 @@ def session(data: dict[str, Any]) -> Any:
     store[BACKEND_SESSION_KEY] = state.BACKEND
     store[HASH_SESSION_KEY] = user.get_session_auth_hash()
     if data.get("verified", True):
-        device = twofactor.CONSOLE.totp_devices(user).filter(confirmed=True).first() or _new_device(user)
+        device = second_factor.CONSOLE.totp_devices(user).filter(confirmed=True).first() or _new_device(user)
         store[DEVICE_ID_SESSION_KEY] = device.persistent_id
     store[state.STARTED] = now
     store[state.SEEN] = now
@@ -585,9 +586,9 @@ def auth_sessions(data: dict[str, Any]) -> Any:
 def two_factor(data: dict[str, Any]) -> Any:
     user = StaffUser.objects.get(email=str(data["email"]).lower())
     return {
-        "confirmed": twofactor.CONSOLE.totp_devices(user).filter(confirmed=True).count(),
-        "unconfirmed": twofactor.CONSOLE.totp_devices(user).filter(confirmed=False).count(),
-        "recovery_codes": twofactor.CONSOLE.recovery_tokens(user).count(),
+        "confirmed": second_factor.CONSOLE.totp_devices(user).filter(confirmed=True).count(),
+        "unconfirmed": second_factor.CONSOLE.totp_devices(user).filter(confirmed=False).count(),
+        "recovery_codes": second_factor.CONSOLE.recovery_tokens(user).count(),
     }
 
 

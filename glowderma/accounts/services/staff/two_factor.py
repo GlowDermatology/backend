@@ -9,8 +9,7 @@ from typing import Any
 
 from django.db import transaction
 
-from glowderma.accounts import mfa
-from glowderma.accounts.console import twofactor
+from glowderma.accounts import mfa, second_factor
 from glowderma.accounts.errors import MfaChallengeInvalid
 from glowderma.accounts.models import AuthSession, SocialIdentity, StaffUser
 from glowderma.accounts.services.common import revocation
@@ -127,10 +126,10 @@ def reset_staff_mfa(
     stored = StaffUser.objects.select_for_update().get(pk=user.pk)
     if protect_superuser and not credentials.superuser_may_be_taken_by(stored, actor):
         raise Conflict(messages.MFA_SUPERUSER_RESET)
-    panel = twofactor.PANEL
+    panel = second_factor.PANEL
     if not panel.totp_devices(stored).exists() and not panel.recovery_devices(stored).exists():
         raise Conflict(messages.MFA_NOT_ENABLED_FOR)
-    removed = twofactor.reset_devices(stored, scope=twofactor.PANEL)
+    removed = second_factor.reset_devices(stored, scope=second_factor.PANEL)
     sessions = auth_sessions.revoke_user_sessions_locked(stored, "admin_revoked")
     credentials.unlock_on_commit(stored.email, scopes=(mfa.GUARD_SCOPE,))
     details: dict[str, Any] = {**removed, "revoked_count": len(sessions), "via": via}

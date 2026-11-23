@@ -26,7 +26,7 @@ from django.db.models.functions import Cast, Coalesce, Lower, NullIf, TruncDay
 from django.db.models.lookups import Contains
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
-from glowderma.accounts.console import twofactor
+from glowderma.accounts import second_factor
 from glowderma.accounts.models import (
     AuthSession,
     Customer,
@@ -105,7 +105,9 @@ def invite_of(user: StaffUser) -> Invite:
 def _panel_mfa() -> Exists:
     """A confirmed admin panel TOTP device (feat/admin-ux; the ops console's devices do not count)."""
     return Exists(
-        TOTPDevice.objects.filter(user_id=OuterRef("pk"), confirmed=True, name=twofactor.PANEL_DEVICE_NAME)
+        TOTPDevice.objects.filter(
+            user_id=OuterRef("pk"), confirmed=True, name=second_factor.PANEL_DEVICE_NAME
+        )
     )
 
 

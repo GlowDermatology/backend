@@ -16,7 +16,8 @@ from django_otp import DEVICE_ID_SESSION_KEY
 from django_otp.plugins.otp_static.models import StaticDevice, StaticToken
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
-from glowderma.accounts.console import access, state, twofactor
+from glowderma.accounts import second_factor
+from glowderma.accounts.console import access, state
 from glowderma.accounts.models import StaffUser
 from glowderma.accounts.security.login_lockout import email_hash
 from glowderma.accounts.tests.factories import TEST_PASSWORD, StaffUserFactory
@@ -81,7 +82,7 @@ def test_first_login_enrols_a_totp_device_and_shows_ten_recovery_codes_once() ->
     assert "<img" not in content.split("ops-qr-frame")[1].split("</div>")[0]
     device = TOTPDevice.objects.get(user=user)
     assert not device.confirmed and (device.step, device.tolerance, device.digits) == (30, 1, 6)
-    assert twofactor.manual_key(device) in content
+    assert second_factor.manual_key(device) in content
     assert "no-store" in page["Cache-Control"]
     # reloading keeps the same pending secret
     client.get(ENROL)
@@ -103,7 +104,7 @@ def test_first_login_enrols_a_totp_device_and_shows_ten_recovery_codes_once() ->
     stored = set(StaticToken.objects.filter(device__user=user).values_list("token", flat=True))
     assert len(stored) == 10
     assert not {code.replace("-", "") for code in codes} & stored
-    assert {twofactor.recovery_hash(code) for code in codes} == stored
+    assert {second_factor.recovery_hash(code) for code in codes} == stored
     assert is_verified_console(client)
     assert client.session[DEVICE_ID_SESSION_KEY] == device.persistent_id
     # shown once: the enrolment page is gone for a user with a device, and the index never repeats them
@@ -292,7 +293,7 @@ def test_without_the_2fa_requirement_the_password_logs_in() -> None:
 
 def test_a_recovery_code_works_once_and_is_audited() -> None:
     user = ops_staff("ops@x.uz")
-    codes = twofactor.issue_recovery_codes(user, scope=twofactor.CONSOLE)
+    codes = second_factor.issue_recovery_codes(user, scope=second_factor.CONSOLE)
     client = Client()
     password_step(client, "ops@x.uz")
     assert client.get(RECOVERY).status_code == 200
@@ -310,30 +311,30 @@ def test_a_recovery_code_works_once_and_is_audited() -> None:
 
 def test_a_stored_hash_is_not_a_recovery_code() -> None:
     user = ops_staff("ops@x.uz")
-    twofactor.issue_recovery_codes(user, scope=twofactor.CONSOLE)
+    second_factor.issue_recovery_codes(user, scope=second_factor.CONSOLE)
     stored = StaticToken.objects.filter(device__user=user).values_list("token", flat=True).first()
     assert stored is not None
     client = Client()
     password_step(client, "ops@x.uz")
     assert client.post(RECOVERY, {"code": stored}).status_code == 200
-    assert twofactor.use_recovery_code(user, stored, scope=twofactor.CONSOLE) is None
+    assert second_factor.use_recovery_code(user, stored, scope=second_factor.CONSOLE) is None
     assert StaticToken.objects.filter(token=stored).exists()
 
 
 def test_recovery_codes_survive_a_secret_key_rotation(settings: Any) -> None:
     user = ops_staff("ops@x.uz")
-    codes = twofactor.issue_recovery_codes(user, scope=twofactor.CONSOLE)
+    codes = second_factor.issue_recovery_codes(user, scope=second_factor.CONSOLE)
     old = settings.SECRET_KEY
     settings.SECRET_KEY = "rotated-" + old
     settings.SECRET_KEY_FALLBACKS = [old]
-    assert twofactor.use_recovery_code(user, codes[1], scope=twofactor.CONSOLE) is not None
+    assert second_factor.use_recovery_code(user, codes[1], scope=second_factor.CONSOLE) is not None
 
 
 def test_few_recovery_codes_left_warns() -> None:
     user = ops_staff("ops@x.uz")
-    codes = twofactor.issue_recovery_codes(user, scope=twofactor.CONSOLE)
+    codes = second_factor.issue_recovery_codes(user, scope=second_factor.CONSOLE)
     for code in codes[:7]:
-        assert twofactor.use_recovery_code(user, code, scope=twofactor.CONSOLE) is not None
+        assert second_factor.use_recovery_code(user, code, scope=second_factor.CONSOLE) is not None
     client = Client()
     password_step(client, "ops@x.uz")
     answer = client.post(RECOVERY, {"code": codes[7]}, follow=True)
@@ -366,7 +367,7 @@ def test_a_session_verified_by_a_deleted_device_is_unverified() -> None:
     client = Client()
     login_through_forms(client, "ops@x.uz")
     assert is_verified_console(client)
-    twofactor.reset_devices(user, scope=twofactor.CONSOLE)
+    second_factor.reset_devices(user, scope=second_factor.CONSOLE)
     assert client.get("/django-admin/").status_code == 302
 
 

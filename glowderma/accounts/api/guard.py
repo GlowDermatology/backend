@@ -19,7 +19,8 @@ from django.utils.translation import gettext, ngettext
 from rest_framework.exceptions import Throttled
 from unfold.forms import AuthenticationForm as UnfoldAuthenticationForm
 
-from glowderma.accounts.console import events, state, twofactor
+from glowderma.accounts import second_factor
+from glowderma.accounts.console import events, state
 from glowderma.accounts.security.address_budget import IpFailureBudget, IpThrottled, client_bucket
 from glowderma.accounts.security.login_lockout import LoginGuard, email_hash
 from glowderma.core import alerts
@@ -106,7 +107,7 @@ class ConsolePasswordView(LoginView):
         events.record("console.password_verified", self.request, user)
         step = (
             "ops_2fa_verify"
-            if twofactor.has_second_factor(user, scope=twofactor.CONSOLE)
+            if second_factor.has_second_factor(user, scope=second_factor.CONSOLE)
             else "ops_2fa_enrol"
         )
         return HttpResponseRedirect(reverse(step))

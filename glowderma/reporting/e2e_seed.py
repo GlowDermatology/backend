@@ -20,7 +20,7 @@ from django.db import models, transaction
 from django_otp.plugins.otp_static.models import StaticDevice
 from PIL import Image
 
-from glowderma.accounts.console import twofactor
+from glowderma.accounts import second_factor
 from glowderma.accounts.models import Customer, CustomerSocialIdentity, Device, SocialIdentity, StaffUser
 from glowderma.core import enums, timeutils
 from glowderma.core.models import IdempotencyRecord
@@ -116,10 +116,10 @@ def fill_empty_models() -> dict[str, Any]:
         if customer is not None:
             created.extend(_delivery_rows(customer, owner, now))
         if _empty("otp_totp.totpdevice"):
-            twofactor.enrolment_device(owner, None, scope=twofactor.CONSOLE)
+            second_factor.enrolment_device(owner, None, scope=second_factor.CONSOLE)
             created.append("otp_totp.totpdevice")
         if not StaticDevice.objects.filter(user=owner).exists():
-            twofactor.issue_recovery_codes(owner, scope=twofactor.CONSOLE)
+            second_factor.issue_recovery_codes(owner, scope=second_factor.CONSOLE)
             created.append("otp_static.staticdevice")
         # Secret columns the demo leaves blank: a customer password hash and Apple's sealed refresh token.
         if not Customer.objects.exclude(password="").exists():

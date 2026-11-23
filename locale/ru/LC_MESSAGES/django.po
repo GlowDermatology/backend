@@ -5136,7 +5136,7 @@ msgstr "Двухэтапную защиту суперадмина может о
 msgid "Surat"
 msgstr "Фотография"
 
-#: glowderma/accounts/console/twofactor.py
+#: glowderma/accounts/second_factor/provisioning.py
 msgid "TOTP QR kod"
 msgstr "QR-код TOTP"
 

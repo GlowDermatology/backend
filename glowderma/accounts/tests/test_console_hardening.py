@@ -16,9 +16,9 @@ from django.core.management import call_command
 from django.test import Client, RequestFactory, override_settings
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
+from glowderma.accounts import second_factor, topics
 from glowderma.accounts import services as account_services
-from glowderma.accounts import topics
-from glowderma.accounts.console import access, state, twofactor
+from glowderma.accounts.console import access, state
 from glowderma.accounts.models import StaffUser
 from glowderma.accounts.security.address_budget import client_bucket
 from glowderma.accounts.tests.factories import (
@@ -250,7 +250,7 @@ def test_grant_opens_a_window_that_expires_and_closes_on_enrolment(monkeypatch: 
     assert entry.after["window_action"] == "ops_access.granted"  # type: ignore[index]
     assert entry.after["window_opened_by"] == "system"  # type: ignore[index]
     # a device lost without a reset (deleted by hand): no new enrolment until a manager resets 2FA
-    twofactor.reset_devices(user, scope=twofactor.CONSOLE)
+    second_factor.reset_devices(user, scope=second_factor.CONSOLE)
     assert enrol_through_forms(Client(), user)["Location"] == LOGIN
 
 

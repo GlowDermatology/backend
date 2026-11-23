@@ -35,8 +35,9 @@ from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 from rest_framework.exceptions import Throttled
 
+from glowderma.accounts import second_factor
 from glowderma.accounts.api.guard import lockout_message, record_ip_locked
-from glowderma.accounts.console import access, events, state, twofactor
+from glowderma.accounts.console import access, events, state
 from glowderma.accounts.console.forms import RecoveryCodeForm, TotpCodeForm
 from glowderma.accounts.models import StaffUser
 from glowderma.accounts.security.address_budget import IpFailureBudget, IpThrottled, client_bucket
@@ -168,7 +169,7 @@ def _succeeded(request: HttpRequest, user: StaffUser) -> None:
 def verify(request: HttpRequest, current: state.Pending) -> HttpResponse:
     """The TOTP code of the user's confirmed device."""
     user = current.user
-    if not twofactor.has_second_factor(user, scope=twofactor.CONSOLE):
+    if not second_factor.has_second_factor(user, scope=second_factor.CONSOLE):
         return HttpResponseRedirect(reverse("ops_2fa_enrol"))
     form = TotpCodeForm(request.POST if request.method == "POST" else None)
     template = "accounts/console/verify.html"
@@ -177,7 +178,7 @@ def verify(request: HttpRequest, current: state.Pending) -> HttpResponse:
         if (locked := _attempt(request, user)) is not None:
             return _locked(request, user, locked, template, context)
         device = (
-            twofactor.verify_totp(user, form.cleaned_data["code"], scope=twofactor.CONSOLE)
+            second_factor.verify_totp(user, form.cleaned_data["code"], scope=second_factor.CONSOLE)
             if form.is_valid()
             else None
         )
@@ -196,7 +197,7 @@ def verify(request: HttpRequest, current: state.Pending) -> HttpResponse:
 def recovery(request: HttpRequest, current: state.Pending) -> HttpResponse:
     """One of the user's recovery codes instead of the TOTP code (the code is used up)."""
     user = current.user
-    if not twofactor.has_second_factor(user, scope=twofactor.CONSOLE):
+    if not second_factor.has_second_factor(user, scope=second_factor.CONSOLE):
         return HttpResponseRedirect(reverse("ops_2fa_enrol"))
     form = RecoveryCodeForm(request.POST if request.method == "POST" else None)
     template = "accounts/console/recovery.html"
@@ -205,7 +206,7 @@ def recovery(request: HttpRequest, current: state.Pending) -> HttpResponse:
         if (locked := _attempt(request, user)) is not None:
             return _locked(request, user, locked, template, context)
         used = (
-            twofactor.use_recovery_code(user, form.cleaned_data["code"], scope=twofactor.CONSOLE)
+            second_factor.use_recovery_code(user, form.cleaned_data["code"], scope=second_factor.CONSOLE)
             if form.is_valid()
             else None
         )
@@ -225,7 +226,7 @@ def recovery(request: HttpRequest, current: state.Pending) -> HttpResponse:
 
 def _refuse_enrolment(request: HttpRequest, user: StaffUser, reason: str) -> HttpResponse:
     """No enrolment without an open window (module doc): the pending sign-in ends, the login page says why."""
-    twofactor.CONSOLE.totp_devices(user).filter(confirmed=False).delete()
+    second_factor.CONSOLE.totp_devices(user).filter(confirmed=False).delete()
     state.clear_pending(request)
     events.record("console.enrol_refused", request, user, reason=reason)
     messages.error(request, ENROL_SAME_MANAGER if reason == access.SAME_MANAGER else ENROL_CLOSED)
@@ -238,14 +239,14 @@ def enrol(request: HttpRequest, current: state.Pending) -> HttpResponse:
     key), confirm with a code; the recovery codes follow on ``recovery_codes`` (shown once, never stored in
     plain text beyond that one redirect)."""
     user = current.user
-    if twofactor.has_second_factor(user, scope=twofactor.CONSOLE):
+    if second_factor.has_second_factor(user, scope=second_factor.CONSOLE):
         return HttpResponseRedirect(reverse("ops_2fa_verify"))
     window = access.enrolment_window(user)
     refusal = access.enrolment_refusal(user, window)
     if refusal or window is None:
         return _refuse_enrolment(request, user, refusal or access.NO_WINDOW)
-    device = twofactor.enrolment_device(
-        user, request.session.get(state.ENROLMENT_DEVICE), scope=twofactor.CONSOLE
+    device = second_factor.enrolment_device(
+        user, request.session.get(state.ENROLMENT_DEVICE), scope=second_factor.CONSOLE
     )
     request.session[state.ENROLMENT_DEVICE] = device.pk
     form = TotpCodeForm(request.POST if request.method == "POST" else None)
@@ -255,14 +256,16 @@ def enrol(request: HttpRequest, current: state.Pending) -> HttpResponse:
         gettext("Ikki bosqichli himoyani yoqish"),
         form=form,
         email=user.email,
-        qr_svg=twofactor.qr_svg(device),
-        manual_key=twofactor.manual_key(device),
+        qr_svg=second_factor.qr_svg(device),
+        manual_key=second_factor.manual_key(device),
     )
     if request.method == "POST":
         if (locked := _attempt(request, user)) is not None:
             return _locked(request, user, locked, template, context)
         enrolment = (
-            twofactor.confirm_enrolment(user, device.pk, form.cleaned_data["code"], scope=twofactor.CONSOLE)
+            second_factor.confirm_enrolment(
+                user, device.pk, form.cleaned_data["code"], scope=second_factor.CONSOLE
+            )
             if form.is_valid()
             else None
         )

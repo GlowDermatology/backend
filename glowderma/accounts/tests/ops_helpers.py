@@ -25,7 +25,8 @@ from django_otp import DEVICE_ID_SESSION_KEY
 from django_otp.oath import TOTP
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
-from glowderma.accounts.console import state, twofactor
+from glowderma.accounts import second_factor
+from glowderma.accounts.console import state
 from glowderma.accounts.models import StaffUser
 from glowderma.accounts.tests.factories import TEST_PASSWORD, StaffUserFactory
 from glowderma.core import timeutils
@@ -36,10 +37,10 @@ KNOWN_TOTP_BASE32 = base64.b32encode(unhexlify(KNOWN_TOTP_KEY)).decode()
 
 def ops_device(user: StaffUser, key: str = KNOWN_TOTP_KEY) -> TOTPDevice:
     """The user's confirmed TOTP device on ``key`` (created if missing)."""
-    device = twofactor.CONSOLE.totp_devices(user).filter(confirmed=True).first()
+    device = second_factor.CONSOLE.totp_devices(user).filter(confirmed=True).first()
     if device is None:
         device = TOTPDevice.objects.create(
-            user=user, name=twofactor.DEVICE_NAME, key=key, confirmed=True, step=30, tolerance=1, digits=6
+            user=user, name=second_factor.DEVICE_NAME, key=key, confirmed=True, step=30, tolerance=1, digits=6
         )
     return device
 
@@ -107,5 +108,5 @@ def login_through_forms(client: Client, email: str, password: str = TEST_PASSWOR
     first = client.post("/django-admin/login/", {"username": email, "password": password})
     if first.status_code != 302 or first["Location"] != "/django-admin/2fa/":
         raise AssertionError(f"password step did not lead to the code step: {first.status_code}")
-    device = twofactor.CONSOLE.totp_devices(StaffUser.objects.get(email=email)).get(confirmed=True)
+    device = second_factor.CONSOLE.totp_devices(StaffUser.objects.get(email=email)).get(confirmed=True)
     return client.post("/django-admin/2fa/", {"code": totp_code(device)})
