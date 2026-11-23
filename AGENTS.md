@@ -25,7 +25,7 @@ verification) · argon2-cffi 25.1.0 · django-filter 26.2 ·
 Pillow 13.0.0 · openpyxl 3.1.5 · httpx 0.28.1 · tenacity 9.2.1.
 Dev: ruff 0.17.2 · mypy 2.3.1 + django-stubs[compatible-mypy] 6.1.2 + djangorestframework-stubs[compatible-mypy]
 3.18.1 · drf-spectacular-sidecar (pin the version resolved in uv.lock) · pytest 9.1.1 · pytest-django 4.14.0 ·
-factory-boy 3.3.3 · coverage · import-linter.
+factory-boy 3.3.3 · coverage · import-linter · pytest-xdist 3.8.0 · pytest-split 0.11.0.
 Not used: simplejwt, knox, django-celery-beat, django-cors-headers, django-environ (settings read `os.environ`
 through a small typed helper in `config/env.py`).
 
@@ -38,7 +38,10 @@ through a small typed helper in `config/env.py`).
   must work on both versions; never rely on PG-18-only syntax.
 - Parallel work: each subagent works in its own git worktree and branch and runs the suite against its own test
   database: `TEST_DB_NAME=test_gd_<branch> uv run pytest` (default `test_glowderma`). Never run two pytest
-  processes against the same `TEST_DB_NAME`.
+  processes against the same `TEST_DB_NAME`. `-n auto` (pytest-xdist) runs the suite on every CPU: the workers
+  use `<TEST_DB_NAME>_gw<n>` databases cloned from one `<TEST_DB_NAME>_template` migrated once per run (root
+  `conftest.py`); `-n 0` (the default) for a single test or a debugger. CI runs it in 4 shards (pytest-split,
+  `.test_durations`; refresh that file from the `test-durations` artifact of a CI run when shards drift apart).
 - Redis DB 0 is the Django cache, DB 1 the Celery broker. Tests use LocMem; never call `cache.clear()` in
   application code. `config/__init__.py` loads the Celery app (`celery_app`) so `shared_task.delay()` from a
   request reaches the configured app (eager in tests, Redis otherwise); beat entries are declared centrally in
@@ -49,7 +52,7 @@ Run from the repository root and stop at the first non-zero exit:
 ```
 export UV_SYSTEM_CERTS=1
 uv sync
-TEST_DB_NAME=test_gd_<branch> uv run pytest -q
+TEST_DB_NAME=test_gd_<branch> uv run pytest -q -n auto
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy .
@@ -64,7 +67,8 @@ runs the `spectacular --validate --fail-on-warn` step above but does **not** com
 to a scratch path, e.g. `--file /tmp/m2-schema.yaml`, or restore the tracked file before committing); the lead
 regenerates, diffs and commits the schema once on `feat/m2-integration`. Every other branch keeps the rule above.
 Coverage must stay ≥ 85 %
-(`uv run coverage run -m pytest` then `uv run coverage report --fail-under=85`). A task is done only when all of
+(`uv run coverage run -m pytest -n auto`, `uv run coverage combine`, then `uv run coverage report
+--fail-under=85`: coverage writes one data file per process). A task is done only when all of
 the above pass; report the commit SHA and the command outputs' summary.
 
 ## Docker (lead / CI only)
