@@ -104,6 +104,31 @@ layers =
     audit_trail | state
     policy
 
+# accounts.console: the ops console's sign-in. Routes above views and the middleware, above the forms, the
+# lockout audit and the access service, above the audit trail, the notices and the fixed paths.
+[importlinter:contract:accounts-console]
+name = accounts.console: urls above views above forms and access above events and notices
+type = layers
+containers =
+    glowderma.accounts.console
+exhaustive = true
+layers =
+    urls
+    views | middleware
+    forms | lockouts | access
+    events | notices | paths
+
+[importlinter:contract:accounts-console-views]
+name = accounts.console.views: one module per step above what the steps share
+type = layers
+containers =
+    glowderma.accounts.console.views
+exhaustive = true
+layers =
+    password | verify | recovery | enrolment | session | csrf
+    code_steps
+    rendering
+
 # accounts.services is a package (services/__init__.py is the facade callers import). Its submodules form
 # layers of their own, so the split stays acyclic and each name keeps a single home.
 [importlinter:contract:accounts-services-packages]

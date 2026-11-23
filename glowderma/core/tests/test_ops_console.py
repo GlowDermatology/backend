@@ -87,7 +87,7 @@ def test_index_renders_the_branded_console_with_sidebar_and_badge() -> None:
 
 
 def test_login_page_is_unfold_styled_with_the_guarded_form() -> None:
-    from glowderma.accounts.api.guard import GuardedAdminAuthenticationForm
+    from glowderma.accounts.console.forms import GuardedAdminAuthenticationForm
 
     assert admin.site.login_form is GuardedAdminAuthenticationForm
     page = Client().get("/django-admin/login/")

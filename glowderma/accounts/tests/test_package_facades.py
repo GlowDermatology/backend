@@ -14,6 +14,7 @@ import pytest
 
 FACADES = [
     "glowderma.accounts.authentication",
+    "glowderma.accounts.console.views",
     "glowderma.accounts.mfa",
     "glowderma.accounts.second_factor",
     "glowderma.accounts.selectors",

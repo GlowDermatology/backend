@@ -699,7 +699,7 @@ msgstr "Автоматически принимаемое повышение (с
 msgid "Avtorizatsiya talab qilinadi."
 msgstr "Требуется авторизация."
 
-#: glowderma/accounts/api/guard.py
+#: glowderma/accounts/console/notices.py
 msgid "Avval admin panelda o‘z parolingizni o‘rnating, so‘ng konsolga qayta kiring."
 msgstr "Сначала задайте свой пароль в админ-панели, затем войдите в консоль снова."
 
@@ -2104,7 +2104,7 @@ msgstr "Условия использования"
 msgid "Foydalanish shartlari va maxfiylik siyosatining o‘zbekcha matnini kiriting, so‘ng e’lon qiling."
 msgstr "Введите узбекский текст условий использования и политики конфиденциальности, затем опубликуйте."
 
-#: glowderma/accounts/console/views.py
+#: glowderma/accounts/console/views/enrolment.py
 msgid "Glow Derma Ops — zaxira kodlar"
 msgstr "Glow Derma Ops — коды восстановления"
 
@@ -2407,11 +2407,11 @@ msgstr "Двухфакторная аутентификация включена
 msgid "Ikki bosqichli himoya yoqilmagan."
 msgstr "Двухфакторная защита не включена."
 
-#: glowderma/accounts/console/views.py
+#: glowderma/accounts/console/notices.py
 msgid "Ikki bosqichli himoyani sozlash muddati tugagan yoki ochilmagan. Menejerdan 2FA ni qayta o‘rnatishni so‘rang, so‘ng qaytadan kiring."
 msgstr "Срок настройки двухфакторной аутентификации истёк или не был открыт. Попросите менеджера сбросить 2FA, затем войдите снова."
 
-#: glowderma/accounts/console/views.py
+#: glowderma/accounts/console/views/enrolment.py
 msgid "Ikki bosqichli himoyani yoqish"
 msgstr "Включение двухфакторной аутентификации"
 
@@ -2419,7 +2419,7 @@ msgstr "Включение двухфакторной аутентификаци
 msgid "Ikki bosqichli kirish (TOTP)"
 msgstr "Двухфакторный вход (TOTP)"
 
-#: glowderma/accounts/console/views.py
+#: glowderma/accounts/console/views/verify.py
 msgid "Ikki bosqichli tekshiruv"
 msgstr "Двухфакторная проверка"
 
@@ -2658,7 +2658,7 @@ msgstr "Слишком много попыток."
 msgid "Juda ko‘p urinish. %(n)s soniyadan so‘ng qayta urinib ko‘ring."
 msgstr "Слишком много попыток. Повторите через %(n)s с."
 
-#: glowderma/accounts/api/guard.py
+#: glowderma/accounts/console/notices.py
 msgid "Juda ko‘p urinish. %(wait)s soniyadan so‘ng qayta urinib ko‘ring."
 msgid_plural "Juda ko‘p urinish. %(wait)s soniyadan so‘ng qayta urinib ko‘ring."
 msgstr[0] "Слишком много попыток. Повторите через %(wait)s секунду."
@@ -2918,7 +2918,7 @@ msgstr "В ближайшие 14 дней конфликтов расписан�
 msgid "Keyingi qadam: autentifikator ilovasidagi kod (ikki bosqichli himoya)."
 msgstr "Следующий шаг: код из приложения-аутентификатора (двухфакторная аутентификация)."
 
-#: glowderma/accounts/api/guard.py
+#: glowderma/accounts/console/views/password.py
 #: glowderma/accounts/templates/accounts/console/recovery.html
 #: glowderma/customers/admin.py
 msgid "Kirish"
@@ -2928,7 +2928,7 @@ msgstr "Вход"
 msgid "Kirish muddati tugadi yoki bekor qilindi. Email va parolni qaytadan kiriting."
 msgstr "Время входа истекло или вход отменён. Введите email и пароль ещё раз."
 
-#: glowderma/accounts/console/views.py
+#: glowderma/accounts/console/notices.py
 msgid "Kirish muddati tugadi. Email va parolni qaytadan kiriting."
 msgstr "Срок входа истёк. Введите электронную почту и пароль ещё раз."
 
@@ -2965,7 +2965,7 @@ msgstr "Клиника: сегодня и конфликты расписани�
 msgid "Kod 6 ta raqamdan iborat."
 msgstr "Код состоит из 6 цифр."
 
-#: glowderma/accounts/console/views.py
+#: glowderma/accounts/console/notices.py
 #: glowderma/accounts/errors.py
 msgid "Kod noto‘g‘ri yoki allaqachon ishlatilgan. Ilovadagi yangi kodni kiriting."
 msgstr "Код неверный или уже использован. Введите новый код из приложения."
@@ -4126,7 +4126,7 @@ msgstr "Пароль изменён"
 msgid "Parolingiz o‘rnatilgan: uni «Parolni o‘zgartirish» orqali almashtiring."
 msgstr "Пароль уже установлен: смените его в разделе «Сменить пароль»."
 
-#: glowderma/accounts/console/views.py
+#: glowderma/accounts/console/notices.py
 msgid "Parolingiz va 2FA bir menejer tomonidan tiklangan: xavfsizlik uchun 2FA ni boshqa menejer (yoki server buyrug‘i) qayta o‘rnatishi kerak."
 msgstr "Ваш пароль и 2FA сброшены одним и тем же менеджером: в целях безопасности сброс 2FA должен выполнить другой менеджер (или серверная команда)."
 
@@ -4705,7 +4705,7 @@ msgstr "SMS-коды"
 msgid "Sababni kiriting."
 msgstr "Укажите причину."
 
-#: glowderma/accounts/console/views.py
+#: glowderma/accounts/console/notices.py
 msgid "Sahifa eskirgan yoki sessiya yangilangan, shuning uchun so‘rov qabul qilinmadi. Sahifani qaytadan oching va yana urinib ko‘ring."
 msgstr "Страница устарела или сеанс был обновлён, поэтому запрос не принят. Откройте страницу заново и повторите попытку."
 
@@ -4950,7 +4950,7 @@ msgstr "Проверена"
 msgid "Siyosat v%(version)s"
 msgstr "Политика v%(version)s"
 
-#: glowderma/accounts/console/views.py
+#: glowderma/accounts/console/notices.py
 msgid "Siz konsoldan chiqdingiz."
 msgstr "Вы вышли из консоли."
 
@@ -5044,7 +5044,7 @@ msgstr "ID запроса"
 msgid "So‘rov bajarilmoqda. Birozdan so‘ng qayta urinib ko‘ring."
 msgstr "Запрос ещё выполняется. Повторите чуть позже."
 
-#: glowderma/accounts/console/views.py
+#: glowderma/accounts/console/views/csrf.py
 msgid "So‘rov qabul qilinmadi"
 msgstr "Запрос не принят"
 
@@ -6240,19 +6240,19 @@ msgstr "Резервы товара"
 msgid "Zaxira kod"
 msgstr "Код восстановления"
 
-#: glowderma/accounts/console/views.py
+#: glowderma/accounts/console/views/recovery.py
 msgid "Zaxira kod bilan kirish"
 msgstr "Вход по коду восстановления"
 
-#: glowderma/accounts/console/views.py
+#: glowderma/accounts/console/notices.py
 msgid "Zaxira kod noto‘g‘ri yoki allaqachon ishlatilgan."
 msgstr "Код восстановления неверный или уже использован."
 
-#: glowderma/accounts/console/views.py
+#: glowderma/accounts/console/views/enrolment.py
 msgid "Zaxira kodlar"
 msgstr "Коды восстановления"
 
-#: glowderma/accounts/console/views.py
+#: glowderma/accounts/console/notices.py
 msgid "Zaxira kodlar faqat bir marta ko‘rsatiladi va ular endi ko‘rsatilmaydi. Kodlarni saqlamagan bo‘lsangiz, menejerdan 2FA ni qayta o‘rnatishni so‘rang."
 msgstr "Коды восстановления показываются только один раз и больше показаны не будут. Если вы не сохранили коды, попросите менеджера сбросить 2FA."
 
@@ -6260,7 +6260,7 @@ msgstr "Коды восстановления показываются толь�
 msgid "Zaxira kodlar ham yo‘qolgan bo‘lsa, menejerdan 2FA ni qayta o‘rnatishni so‘rang."
 msgstr "Если коды восстановления тоже утеряны, попросите менеджера сбросить 2FA."
 
-#: glowderma/accounts/console/views.py
+#: glowderma/accounts/console/notices.py
 msgid "Zaxira kodlardan %(left)s tasi qoldi. Menejerdan 2FA ni qayta o‘rnatishni so‘rang (yangi kodlar beriladi)."
 msgid_plural "Zaxira kodlardan %(left)s tasi qoldi. Menejerdan 2FA ni qayta o‘rnatishni so‘rang (yangi kodlar beriladi)."
 msgstr[0] "Остался %(left)s код восстановления. Попросите менеджера сбросить 2FA (будут выданы новые коды)."

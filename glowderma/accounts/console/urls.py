@@ -3,11 +3,10 @@ the site's own ``login/`` and ``logout/`` (``reverse("admin:login")`` still reso
 
 from django.urls import URLPattern, path
 
-from glowderma.accounts.api.guard import guarded_admin_login
 from glowderma.accounts.console import views
 
 urlpatterns: list[URLPattern] = [
-    path("django-admin/login/", guarded_admin_login, name="ops_login"),
+    path("django-admin/login/", views.guarded_admin_login, name="ops_login"),
     path("django-admin/logout/", views.logout, name="ops_logout"),
     path("django-admin/2fa/", views.verify, name="ops_2fa_verify"),
     path("django-admin/2fa/recovery/", views.recovery, name="ops_2fa_recovery"),

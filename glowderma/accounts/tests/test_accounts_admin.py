@@ -8,7 +8,8 @@ from django.test import Client, RequestFactory
 from django.urls import reverse
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
-from glowderma.accounts.api import guard
+from glowderma.accounts.console import forms as console_forms
+from glowderma.accounts.console import views as console_views
 from glowderma.accounts.models import AuthSession, SocialIdentity, StaffUser
 from glowderma.accounts.tests.factories import AuthSessionFactory, StaffUserFactory
 from glowderma.accounts.tests.ops_helpers import ops_login, ops_staff
@@ -68,9 +69,9 @@ def test_secrets_are_never_shown(super_client: Client, staff: StaffUser) -> None
 
 
 def test_guarded_login_form_is_wired_once_at_import() -> None:
-    assert admin.site.login_form is guard.GuardedAdminAuthenticationForm
+    assert admin.site.login_form is console_forms.GuardedAdminAuthenticationForm
     # the view reads the site's form; it never assigns one per request
-    assert "site.login_form =" not in inspect.getsource(guard.guarded_admin_login)
+    assert "site.login_form =" not in inspect.getsource(console_views.guarded_admin_login)
 
 
 def test_guarded_login_accepts_a_staff_user_and_asks_for_the_second_factor() -> None:

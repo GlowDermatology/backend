@@ -9,7 +9,7 @@ class AccountsConfig(AppConfig):
         from django.contrib import admin
 
         from glowderma.accounts import schema, tasks  # noqa: F401  (tasks: registers the outbox handlers)
-        from glowderma.accounts.api import guard
+        from glowderma.accounts.console import forms
 
         # The ops console's password step: wired once here, the login view never mutates the site.
-        admin.site.login_form = guard.GuardedAdminAuthenticationForm
+        admin.site.login_form = forms.GuardedAdminAuthenticationForm
