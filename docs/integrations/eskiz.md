@@ -27,7 +27,7 @@ Forms are `multipart/form-data`, as in the collection. A 401 on send renews the 
 (a 401 means Eskiz did not accept the message); a second 401 is "not processed" (ERROR `eskiz.auth_failed`),
 never a loop.
 
-The text is sent exactly as `accounts.tasks.sms_text` renders it (catalog `sms.otp` in the request language, plus
+The text is sent exactly as `accounts.tasks.message_rendering.sms_text` renders it (catalog `sms.otp` in the request language, plus
 the Android SMS Retriever hash line when configured). Eskiz delivers only texts that match an approved template
 character for character — each language, and the variant with the hash line, needs its own approval.
 

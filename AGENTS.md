@@ -76,16 +76,34 @@ the above pass; report the commit SHA and the command outputs' summary.
 is no daemon in the cloud session; CI builds the image and the user runs the compose smoke test.
 
 ## Architecture rules
-- Modular monolith: apps under `glowderma/<module>/` with `models.py`, `services.py` (transactional writes),
-  `selectors.py` (reads), `api/admin/`, `api/customer/`, `tasks.py`, `tests/`. Cross-module writes only through
-  the other module's `services`, reads through `selectors`; FKs by string reference (`"app.Model"`).
-  A service layer too large for one file becomes a `services/` package (precedent: `glowderma/accounts/services/`,
-  subpackages `common`, `otp`, `customer`, `staff` with one subject per module): `services/__init__.py` is a pure
-  facade (re-exports and an explicit `__all__`, checked by `accounts/tests/test_services_package.py`), so callers
-  keep `from glowderma.<module> import services`. Submodules import their siblings as modules
-  (`locks.lock_customer(...)`), never the facade, and their layering is an `.importlinter` contract. A test patches a
-  name where it is looked up: on the defining submodule for a call made inside the package, on the facade for a call
-  another module makes through `services.<name>`. Submodules log under the package's logger name.
+- Modular monolith: apps under `glowderma/<module>/` with `models`, `services` (transactional writes),
+  `selectors` (reads), `api/admin/`, `api/customer/`, `tasks`, `tests/`. Cross-module writes only through the
+  other module's `services`, reads through `selectors`; FKs by string reference (`"app.Model"`).
+- Split by subject, behind a facade. A module too large for one subject becomes a package with one subject per
+  file and a pure facade `__init__.py` (re-exports and an explicit `__all__`, nothing else), so callers keep
+  importing the old path (`from glowderma.<module> import services`, `selectors`, `models`, `tasks`,
+  `api.admin.views`, …). Precedent: `glowderma/accounts/` — `models/` (staff, customers, devices, otp_codes,
+  auth_sessions, defaults), `services/` (common, otp, customer, staff), `selectors/`, `tasks/` (one module per
+  outbox handler), `admin/`, `authentication/`, `mfa/`, `second_factor/`, `security/` (lockout primitives),
+  `api/throttles/`, `api/admin/{views,serializers}/` with `api/admin/payloads.py` (response bodies), and
+  `console/views/` (one module per sign-in step). Shapes are checked by `accounts/tests/test_services_package.py`,
+  `models/test_models_package.py` and `test_package_facades.py`.
+  - Submodules import siblings as modules (`locks.lock_customer(...)`) with absolute imports, never a name through
+    their own facade, and their layering is an exhaustive `.importlinter` contract (the whole accounts app has
+    one too: a new accounts module must be placed in it).
+  - A test patches a name where it is looked up: on the defining submodule for a call made inside the package,
+    on the facade for a call another module makes through `services.<name>`. Never re-export a name only so a
+    test can patch it (the patch would silently do nothing).
+  - Submodules log under the package's logger name (`glowderma.accounts.services`, `glowderma.accounts.tasks`).
+  - `models/__init__.py` imports every model (Django loads them from there); names migrations reference
+    (`accounts.models.date_joined_default`, `accounts.media.customer_image_path`) must keep resolving.
+  - `tasks/__init__.py` imports every handler module (outbox handlers register on import); Celery task names
+    are explicit `name=` strings.
+  - Moving a file with marked texts or templates: run `manage.py console_messages` (the `.po` files record source
+    paths; the `.mo` files must not change). Moving or adding a class must keep `openapi/schema.yaml`
+    byte-identical: never rename a serializer, never add a docstring to a base class or mixin, keep field order.
+  - Tests mirror the source layout (`accounts/tests/{api/admin, console, services/staff, …}`); helper modules
+    other apps import by path stay at the root of their `tests/` package.
 - Layering, enforced by import-linter (a module imports only strictly lower layers; siblings never import each
   other):
   ```

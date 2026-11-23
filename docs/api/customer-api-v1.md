@@ -693,7 +693,7 @@ The fakes' `*` nonce wildcard exists only under the local/test settings. `author
   `subject` is blanked once the message reaches a final outcome). Tokens exchanged for a refused `POST me/social/`, or
   for a completion refused with `social_provider_linked` / `social_identity_linked`, are revoked the same way unless
   their `sub` is linked to a customer (one revocation ends Apple's whole authorization of the app); a ticket that is
-  never completed keeps its token until the ticket expires. Its handler (`accounts/tasks.py`)
+  never completed keeps its token until the ticket expires. Its handler (`accounts/tasks/apple_revocation.py`)
   posts the token to `https://appleid.apple.com/auth/revoke` (`token_type_hint = refresh_token`); transport errors
   retry through the outbox, an Apple 400 `invalid_grant` or `invalid_request` (token already invalid) is final with a
   WARNING (every other 4xx — e.g. `invalid_client`, a misconfiguration — is retried and ends dead), a dead message logs ERROR
@@ -2441,7 +2441,7 @@ Payme id is `Payment.provider_txn_id`.
   app hash is appended (Android SMS Retriever autofill; the template with the hash line needs its own Eskiz approval);
   iOS reads the code from the text (`textContentType = .oneTimeCode`). The Eskiz test account only delivers its own
   test text (use fake mode until production).
-- **Handler** `sms.send` (`accounts/tasks.py`): claim `sent_at` in its own transaction **before** the call; read and
+- **Handler** `sms.send` (`accounts/tasks/otp_delivery.py`): claim `sent_at` in its own transaction **before** the call; read and
   decrypt `gd:otp:payload:{sms_code_id}` (missing — expired or flushed — → nothing is sent, INFO log, done: the user
   resends after 60 s); a connection error raised before the request left (connect failure) un-claims and re-raises
   (outbox retry; the ciphertext is kept); a timeout or 5xx after sending keeps the claim and is never resent; 4xx
