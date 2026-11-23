@@ -79,6 +79,13 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
 - Modular monolith: apps under `glowderma/<module>/` with `models.py`, `services.py` (transactional writes),
   `selectors.py` (reads), `api/admin/`, `api/customer/`, `tasks.py`, `tests/`. Cross-module writes only through
   the other module's `services`, reads through `selectors`; FKs by string reference (`"app.Model"`).
+  A service layer too large for one file becomes a `services/` package (precedent: `glowderma/accounts/services/`,
+  subpackages `common`, `otp`, `customer`, `staff` with one subject per module): `services/__init__.py` is a pure
+  facade (re-exports and an explicit `__all__`, checked by `accounts/tests/test_services_package.py`), so callers
+  keep `from glowderma.<module> import services`. Submodules import their siblings as modules
+  (`locks.lock_customer(...)`), never the facade, and their layering is an `.importlinter` contract. A test patches a
+  name where it is looked up: on the defining submodule for a call made inside the package, on the facade for a call
+  another module makes through `services.<name>`. Submodules log under the package's logger name.
 - Layering, enforced by import-linter (a module imports only strictly lower layers; siblings never import each
   other):
   ```

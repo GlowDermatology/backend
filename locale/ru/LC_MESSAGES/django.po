@@ -703,7 +703,7 @@ msgstr "Требуется авторизация."
 msgid "Avval admin panelda o‘z parolingizni o‘rnating, so‘ng konsolga qayta kiring."
 msgstr "Сначала задайте свой пароль в админ-панели, затем войдите в консоль снова."
 
-#: glowderma/accounts/services.py
+#: glowderma/accounts/services/staff/members.py
 msgid "Avval bu hisobning operatsiyalar konsoliga kirish huquqini olib tashlang."
 msgstr "Сначала отзовите доступ этого аккаунта к операционной консоли."
 
@@ -1241,7 +1241,7 @@ msgstr "За этот период продаж не было"
 msgid "Bu davrda to‘langan buyurtma yo‘q"
 msgstr "За этот период оплаченных заказов нет"
 
-#: glowderma/accounts/services.py
+#: glowderma/accounts/services/staff/messages.py
 msgid "Bu email bilan xodim allaqachon bor (nofaol bo‘lsa, uni qayta faollashtiring)."
 msgstr "Сотрудник с таким email уже есть (если учётная запись неактивна, активируйте её снова)."
 
@@ -1262,7 +1262,7 @@ msgstr "Этот аккаунт не зарегистрирован как со�
 msgid "Bu holatga o‘tib bo‘lmaydi."
 msgstr "Перейти в этот статус нельзя."
 
-#: glowderma/accounts/services.py
+#: glowderma/accounts/services/staff/messages.py
 msgid "Bu ijtimoiy hisob allaqachon bog‘langan."
 msgstr "Этот аккаунт соцсети уже привязан."
 
@@ -1309,7 +1309,7 @@ msgstr "Эта проблема уже решена."
 msgid "Bu mutaxassisda shu nomdagi xizmat allaqachon bor."
 msgstr "У этого специалиста уже есть услуга с таким названием."
 
-#: glowderma/accounts/services.py
+#: glowderma/accounts/services/staff/messages.py
 msgid "Bu provayder allaqachon bog‘langan."
 msgstr "Этот провайдер уже привязан."
 
@@ -1402,7 +1402,7 @@ msgstr "На эту услугу есть записи, её нельзя уда
 msgid "Bu xodim boshqa mutaxassisga bog‘langan."
 msgstr "Этот сотрудник уже привязан к другому специалисту."
 
-#: glowderma/accounts/services.py
+#: glowderma/accounts/services/staff/messages.py
 msgid "Bu xodimda ikki bosqichli himoya yoqilmagan."
 msgstr "У этого сотрудника двухфакторная защита не включена."
 
@@ -1771,11 +1771,11 @@ msgstr "Пн"
 msgid "Dushanba"
 msgstr "Понедельник"
 
-#: glowderma/accounts/services.py
+#: glowderma/accounts/services/staff/messages.py
 msgid "E-pochta orqali yuborish sozlanmagan."
 msgstr "Отправка по e-mail не настроена."
 
-#: glowderma/accounts/services.py
+#: glowderma/accounts/services/staff/messages.py
 msgid "E-pochta orqali yuborish sozlanmagan: vaqtinchalik parolni tanlang."
 msgstr "Отправка по e-mail не настроена: выберите временный пароль."
 
@@ -2743,7 +2743,7 @@ msgstr "Введите не менее 3 символов."
 msgid "Kamida bitta daraja kerak."
 msgstr "Нужен хотя бы один уровень."
 
-#: glowderma/accounts/services.py
+#: glowderma/accounts/services/staff/messages.py
 msgid "Kamida bitta faol menejer qolishi kerak. Avval boshqa xodimni menejer qiling."
 msgstr "Должен остаться хотя бы один активный менеджер. Сначала назначьте менеджером другого сотрудника."
 
@@ -3517,7 +3517,7 @@ msgstr "Специалист в это время работает в друго
 msgid "Mutaxassis bu xizmatni ko‘rsatmaydi."
 msgstr "Специалист не оказывает эту услугу."
 
-#: glowderma/accounts/services.py
+#: glowderma/accounts/services/staff/members.py
 msgid "Mutaxassis hisobi menejer bo‘la olmaydi."
 msgstr "Аккаунт специалиста не может стать аккаунтом менеджера."
 
@@ -3683,7 +3683,7 @@ msgctxt "export specialists"
 msgid "Nofaol"
 msgstr "Неактивен"
 
-#: glowderma/accounts/services.py
+#: glowderma/accounts/services/staff/messages.py
 msgid "Nofaol hisobga havola yuborilmaydi. Avval uni qayta faollashtiring."
 msgstr "Ссылку нельзя отправить на неактивную учётную запись. Сначала активируйте её снова."
 
@@ -4060,19 +4060,19 @@ msgstr "Пропущено"
 msgid "O‘z 2FA ingizni bu yerdan qayta o‘rnatib bo‘lmaydi."
 msgstr "Собственную 2FA здесь сбросить нельзя."
 
-#: glowderma/accounts/services.py
+#: glowderma/accounts/services/staff/members.py
 msgid "O‘z hisobingiz rolini o‘zgartira olmaysiz."
 msgstr "Вы не можете изменить роль своего аккаунта."
 
-#: glowderma/accounts/services.py
+#: glowderma/accounts/services/staff/messages.py
 msgid "O‘z hisobingizni faolsizlantira olmaysiz."
 msgstr "Нельзя деактивировать собственную учётную запись."
 
-#: glowderma/accounts/services.py
+#: glowderma/accounts/services/staff/messages.py
 msgid "O‘z ikki bosqichli himoyangizni «Sozlamalar»da o‘chiring."
 msgstr "Свою двухфакторную защиту отключите в разделе «Настройки»."
 
-#: glowderma/accounts/services.py
+#: glowderma/accounts/services/staff/messages.py
 msgid "O‘z parolingizni «Parolni o‘zgartirish» orqali almashtiring."
 msgstr "Свой пароль меняйте в разделе «Сменить пароль»."
 
@@ -4093,11 +4093,11 @@ msgstr "Введите название на узбекском (не менее
 msgid "O‘zgarish yo‘q: saqlanadigan narsa topilmadi."
 msgstr "Изменений нет: сохранять нечего."
 
-#: glowderma/accounts/services.py
+#: glowderma/accounts/services/staff/messages.py
 msgid "O‘zingizga havola «Parolni o‘zgartirish» sahifasidan so‘raladi."
 msgstr "Ссылку для себя запросите на странице «Сменить пароль»."
 
-#: glowderma/accounts/services.py
+#: glowderma/accounts/services/staff/messages.py
 msgid "O‘zingizni menejerlikdan chiqara olmaysiz."
 msgstr "Нельзя снять роль менеджера с самого себя."
 
@@ -4122,7 +4122,7 @@ msgstr "Пароль"
 msgid "Parol o‘zgartirildi"
 msgstr "Пароль изменён"
 
-#: glowderma/accounts/services.py
+#: glowderma/accounts/services/staff/messages.py
 msgid "Parolingiz o‘rnatilgan: uni «Parolni o‘zgartirish» orqali almashtiring."
 msgstr "Пароль уже установлен: смените его в разделе «Сменить пароль»."
 
@@ -4573,7 +4573,7 @@ msgstr "Режим"
 msgid "Rol"
 msgstr "Роль"
 
-#: glowderma/accounts/services.py
+#: glowderma/accounts/services/staff/members.py
 msgid "Rolni o‘zgartirishdan oldin hisobni faollashtiring."
 msgstr "Активируйте аккаунт перед изменением роли."
 
@@ -5116,19 +5116,19 @@ msgstr "Суммы"
 msgid "Summani kiriting."
 msgstr "Укажите сумму."
 
-#: glowderma/accounts/services.py
+#: glowderma/accounts/services/staff/messages.py
 msgid "Superadmin doim menejer bo‘ladi: uni menejerlikdan chiqarib bo‘lmaydi."
 msgstr "Суперадмин всегда является менеджером: эту роль снять нельзя."
 
-#: glowderma/accounts/services.py
+#: glowderma/accounts/services/staff/members.py
 msgid "Superadmin hisobining rolini o‘zgartirib bo‘lmaydi."
 msgstr "Роль суперадминистратора защищена."
 
-#: glowderma/accounts/services.py
+#: glowderma/accounts/services/staff/messages.py
 msgid "Superadminga vaqtinchalik parolni faqat superadmin bera oladi. Havolani uning e-pochtasiga yuboring yoki superadmindan so‘rang."
 msgstr "Временный пароль суперадмина может получить только суперадмин. Отправьте ему ссылку на почту или обратитесь к суперадмину."
 
-#: glowderma/accounts/services.py
+#: glowderma/accounts/services/staff/messages.py
 msgid "Superadminning ikki bosqichli himoyasini faqat superadmin o‘chira oladi."
 msgstr "Двухэтапную защиту суперадмина может отключить только суперадмин."
 
@@ -6021,7 +6021,7 @@ msgstr[2] "Новые клиенты · %(days)s дней"
 msgstr[3] "Новые клиенты · %(days)s дней"
 
 #: glowderma/accounts/api/admin/views.py
-#: glowderma/accounts/services.py
+#: glowderma/accounts/services/staff/messages.py
 msgid "Yangi parol eskisidan farq qilsin."
 msgstr "Новый пароль должен отличаться от старого."
 
