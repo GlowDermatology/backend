@@ -2033,7 +2033,7 @@ msgstr "Редактировать и проверять можно только
 msgid "Faqat qoralamani o‘zgartirish mumkin."
 msgstr "Изменять можно только черновик."
 
-#: glowderma/accounts/api/admin/serializers.py
+#: glowderma/accounts/api/admin/serializers/passwords.py
 msgid "Faqat raqamlardan iborat bo‘lmasin."
 msgstr "Пароль не должен состоять только из цифр."
 
@@ -2585,7 +2585,7 @@ msgstr "В обработке"
 msgid "Jiddiy"
 msgstr "Критично"
 
-#: glowderma/accounts/api/admin/views.py
+#: glowderma/accounts/api/admin/views/passwords.py
 #: glowderma/accounts/mfa/policy.py
 msgid "Joriy parol noto‘g‘ri."
 msgstr "Текущий пароль неверен."
@@ -2666,7 +2666,7 @@ msgstr[1] "Слишком много попыток. Повторите чере
 msgstr[2] "Слишком много попыток. Повторите через %(wait)s секунд."
 msgstr[3] "Слишком много попыток. Повторите через %(wait)s секунд."
 
-#: glowderma/accounts/api/admin/serializers.py
+#: glowderma/accounts/api/admin/serializers/passwords.py
 msgid "Juda oddiy parol."
 msgstr "Слишком простой пароль."
 
@@ -2731,7 +2731,7 @@ msgstr "Заменить ключ"
 msgid "Kamchilik"
 msgstr "Недочёт"
 
-#: glowderma/accounts/api/admin/serializers.py
+#: glowderma/accounts/api/admin/serializers/passwords.py
 msgid "Kamida 12 ta belgi."
 msgstr "Не менее 12 символов."
 
@@ -3143,7 +3143,7 @@ msgstr "Live — настоящий адаптер; Тест — фиктивн�
 msgid "Live, lekin sozlanmagan — jiddiy."
 msgstr "Live, но не настроен — критично."
 
-#: glowderma/accounts/api/admin/serializers.py
+#: glowderma/accounts/api/admin/serializers/passwords.py
 msgid "Login bilan juda o‘xshash."
 msgstr "Слишком похож на логин."
 
@@ -6020,7 +6020,7 @@ msgstr[1] "Новые клиенты · %(days)s дня"
 msgstr[2] "Новые клиенты · %(days)s дней"
 msgstr[3] "Новые клиенты · %(days)s дней"
 
-#: glowderma/accounts/api/admin/views.py
+#: glowderma/accounts/api/admin/views/passwords.py
 #: glowderma/accounts/services/staff/messages.py
 msgid "Yangi parol eskisidan farq qilsin."
 msgstr "Новый пароль должен отличаться от старого."

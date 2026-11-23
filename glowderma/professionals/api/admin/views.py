@@ -23,12 +23,12 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from glowderma.accounts import selectors as account_selectors
+from glowderma.accounts.api.admin.payloads import TEMPORARY_PASSWORD, staff_credentials
 from glowderma.accounts.api.admin.serializers import (
     StaffCredentialsSerializer,
     StaffMemberSerializer,
     WorkforceInviteSerializer,
 )
-from glowderma.accounts.api.admin.views import staff_credentials
 from glowderma.accounts.api.base import AdminAPIView, AdminGenericViewSet
 from glowderma.accounts.models import StaffUser
 from glowderma.accounts.permissions import IsManager
@@ -281,7 +281,7 @@ class SpecialistInviteView(AdminAPIView):
         request=WorkforceInviteSerializer,
         responses={201: SpecialistInviteCredentialsSerializer, **ADMIN_ERRORS},
     )
-    @idempotent(sealed=("temporary_password",))
+    @idempotent(sealed=(TEMPORARY_PASSWORD,))
     def post(self, request: Request) -> Response:
         body = WorkforceInviteSerializer(data=request.data)
         body.is_valid(raise_exception=True)

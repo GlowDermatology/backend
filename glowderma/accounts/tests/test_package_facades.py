@@ -13,6 +13,8 @@ from types import ModuleType
 import pytest
 
 FACADES = [
+    "glowderma.accounts.api.admin.serializers",
+    "glowderma.accounts.api.admin.views",
     "glowderma.accounts.api.throttles",
     "glowderma.accounts.authentication",
     "glowderma.accounts.console.views",

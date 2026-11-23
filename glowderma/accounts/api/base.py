@@ -1,5 +1,6 @@
 from typing import Any
 
+from rest_framework.permissions import AllowAny
 from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet
 
@@ -29,3 +30,13 @@ class AdminGenericViewSet(GenericViewSet[Any]):
     authentication_classes = [StaffJWTAuthentication]
     permission_classes = [IsActiveStaff]
     throttle_classes = [StaffRateThrottle]
+
+
+# The public routes of the staff sign-in (login, refresh, logout, the password tokens, the MFA's second step):
+# JSON only, no authentication, no default throttles (each view names its own). No docstring: it would become
+# the OpenAPI description of every such operation.
+class PublicAuthAPIView(APIView):
+    parser_classes = [JSONParser]
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = []

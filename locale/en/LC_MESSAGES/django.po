@@ -1963,7 +1963,7 @@ msgstr "Only a draft version can be edited and tested."
 msgid "Faqat qoralamani o‘zgartirish mumkin."
 msgstr "Only a draft can be edited."
 
-#: glowderma/accounts/api/admin/serializers.py
+#: glowderma/accounts/api/admin/serializers/passwords.py
 msgid "Faqat raqamlardan iborat bo‘lmasin."
 msgstr "It must not consist of digits only."
 
@@ -2515,7 +2515,7 @@ msgstr "Processing"
 msgid "Jiddiy"
 msgstr "Critical"
 
-#: glowderma/accounts/api/admin/views.py
+#: glowderma/accounts/api/admin/views/passwords.py
 #: glowderma/accounts/mfa/policy.py
 msgid "Joriy parol noto‘g‘ri."
 msgstr "The current password is incorrect."
@@ -2594,7 +2594,7 @@ msgid_plural "Juda ko‘p urinish. %(wait)s soniyadan so‘ng qayta urinib ko‘
 msgstr[0] "Too many attempts. Try again in %(wait)s second."
 msgstr[1] "Too many attempts. Try again in %(wait)s seconds."
 
-#: glowderma/accounts/api/admin/serializers.py
+#: glowderma/accounts/api/admin/serializers/passwords.py
 msgid "Juda oddiy parol."
 msgstr "This password is too common."
 
@@ -2659,7 +2659,7 @@ msgstr "Rotate key"
 msgid "Kamchilik"
 msgstr "Issue"
 
-#: glowderma/accounts/api/admin/serializers.py
+#: glowderma/accounts/api/admin/serializers/passwords.py
 msgid "Kamida 12 ta belgi."
 msgstr "At least 12 characters."
 
@@ -3069,7 +3069,7 @@ msgstr "Live — the real adapter; Test — a stub (fake) adapter."
 msgid "Live, lekin sozlanmagan — jiddiy."
 msgstr "Live but not configured — critical."
 
-#: glowderma/accounts/api/admin/serializers.py
+#: glowderma/accounts/api/admin/serializers/passwords.py
 msgid "Login bilan juda o‘xshash."
 msgstr "Too similar to the login."
 
@@ -5938,7 +5938,7 @@ msgid_plural "Yangi mijozlar · %(days)s kun"
 msgstr[0] "New customers · %(days)s day"
 msgstr[1] "New customers · %(days)s days"
 
-#: glowderma/accounts/api/admin/views.py
+#: glowderma/accounts/api/admin/views/passwords.py
 #: glowderma/accounts/services/staff/messages.py
 msgid "Yangi parol eskisidan farq qilsin."
 msgstr "The new password must differ from the old one."
