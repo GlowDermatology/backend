@@ -1,0 +1,59 @@
+"""Read side of ``accounts`` (AGENTS.md: selectors), one subject per module: ``staff_directory`` (admin
+contract §2.16), ``customer_sessions`` and ``customer_dashboard`` (the ops console's customers dashboard).
+Callers import ``from glowderma.accounts import selectors`` and call ``selectors.<name>``."""
+
+from glowderma.accounts.selectors.customer_dashboard import (
+    NO_DEVICE,
+    OTP_EMAIL,
+    OTP_SMS,
+    PHONE_ATTACHED_ACTION,
+    SIGNUP_EMAIL,
+    SIGNUP_PHONE,
+    SOCIAL_SIGNUP_WINDOW,
+    OtpVolume,
+    PhoneCoverage,
+    open_customer_sessions_by_platform,
+    otp_volume,
+    phone_coverage,
+    signups_by_day_and_method,
+)
+from glowderma.accounts.selectors.customer_sessions import (
+    customer_session_open,
+)
+from glowderma.accounts.selectors.staff_directory import (
+    DIRECTORY_COLUMNS,
+    INVITE_COLUMNS,
+    MEMBER_COLUMNS,
+    Invite,
+    StaffFilters,
+    invite_of,
+    staff_list,
+    staff_member,
+    with_member_columns,
+)
+
+__all__ = [
+    "DIRECTORY_COLUMNS",
+    "INVITE_COLUMNS",
+    "MEMBER_COLUMNS",
+    "NO_DEVICE",
+    "OTP_EMAIL",
+    "OTP_SMS",
+    "PHONE_ATTACHED_ACTION",
+    "SIGNUP_EMAIL",
+    "SIGNUP_PHONE",
+    "SOCIAL_SIGNUP_WINDOW",
+    "Invite",
+    "OtpVolume",
+    "PhoneCoverage",
+    "StaffFilters",
+    "customer_session_open",
+    "invite_of",
+    "open_customer_sessions_by_platform",
+    "otp_volume",
+    "phone_coverage",
+    "signups_by_day_and_method",
+    "staff_list",
+    "staff_member",
+    "with_member_columns",
+]

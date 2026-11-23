@@ -68,6 +68,15 @@ layers =
     recovery_codes
     scopes
 
+# accounts.selectors: three independent read subjects behind the facade.
+[importlinter:contract:accounts-selectors]
+name = accounts.selectors subjects are independent
+type = independence
+modules =
+    glowderma.accounts.selectors.staff_directory
+    glowderma.accounts.selectors.customer_sessions
+    glowderma.accounts.selectors.customer_dashboard
+
 # accounts.services is a package (services/__init__.py is the facade callers import). Its submodules form
 # layers of their own, so the split stays acyclic and each name keeps a single home.
 [importlinter:contract:accounts-services-packages]
