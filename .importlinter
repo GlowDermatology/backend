@@ -129,6 +129,17 @@ layers =
     code_steps
     rendering
 
+# accounts.tasks: the outbox handlers and the cleanup job, above the shared payload reading and rendering.
+[importlinter:contract:accounts-tasks]
+name = accounts.tasks: handlers above the shared payload reading and message rendering
+type = layers
+containers =
+    glowderma.accounts.tasks
+exhaustive = true
+layers =
+    otp_delivery | email_notices | apple_revocation | staff_password_links | session_replaced_push | auth_cleanup
+    outbox_payloads | message_rendering
+
 # accounts.services is a package (services/__init__.py is the facade callers import). Its submodules form
 # layers of their own, so the split stays acyclic and each name keeps a single home.
 [importlinter:contract:accounts-services-packages]

@@ -18,6 +18,7 @@ from glowderma.accounts import services, tasks
 from glowderma.accounts.models import Customer, SmsCode
 from glowderma.accounts.services.common import revocation
 from glowderma.accounts.services.customer import refresh
+from glowderma.accounts.tasks import otp_delivery
 from glowderma.accounts.tests.factories import start_test_session
 from glowderma.core import outbox
 from glowderma.core.api.exceptions import AuthFailed
@@ -56,11 +57,11 @@ class GetFails:
 @pytest.mark.django_db
 def test_sms_send_reads_the_payload_before_claiming(monkeypatch: pytest.MonkeyPatch) -> None:
     message = issue()
-    monkeypatch.setattr(tasks, "cache", GetFails())
+    monkeypatch.setattr(otp_delivery, "cache", GetFails())
     with pytest.raises(ConnectionError):
         tasks.send_sms(message)
     assert SmsCode.objects.get(phone=PHONE).sent_at is None  # nothing claimed
-    monkeypatch.setattr(tasks, "cache", cache)
+    monkeypatch.setattr(otp_delivery, "cache", cache)
     tasks.send_sms(message)  # the outbox retry sends
     assert len(eskiz_registry.fake_eskiz().sent) == 1
     assert SmsCode.objects.get(phone=PHONE).sent_at is not None
@@ -77,7 +78,7 @@ def test_sms_send_survives_a_payload_delete_failure_after_sending(monkeypatch: p
         def delete(self, *args: Any, **kwargs: Any) -> Any:
             raise ConnectionError("redis down")
 
-    monkeypatch.setattr(tasks, "cache", DeleteFails())
+    monkeypatch.setattr(otp_delivery, "cache", DeleteFails())
     tasks.send_sms(message)  # no exception: the SMS went out, the outbox must not retry
     assert len(eskiz_registry.fake_eskiz().sent) == 1
 

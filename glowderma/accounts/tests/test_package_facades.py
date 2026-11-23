@@ -18,6 +18,7 @@ FACADES = [
     "glowderma.accounts.mfa",
     "glowderma.accounts.second_factor",
     "glowderma.accounts.selectors",
+    "glowderma.accounts.tasks",
 ]
 
 
