@@ -78,6 +78,9 @@ def _clones_from_template(config: pytest.Config) -> bool:
     return not reuses and not config.getvalue("nomigrations")
 
 
+_SEQUENCE_FLOOR = 1_000_000
+
+
 def _template_name(test_name: str) -> str:
     return f"{test_name}_template"
 
@@ -89,6 +92,16 @@ def _build_template(connection: BaseDatabaseWrapper, template: str) -> None:
     test_settings["NAME"] = template
     try:
         connection.creation.create_test_db(verbosity=0, autoclobber=True)
+        # Seeders insert design rows with explicit ids (customers 1…432, orders from 10001, …) and only
+        # `seed_demo` re-syncs the sequences afterwards; a test that calls a seeder directly and then
+        # creates a row relied on earlier tests having advanced the sequence (sequences ignore rollbacks),
+        # which a fresh worker database does not give. Every sequence starts past any seeded id instead.
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT setval(format('%%I.%%I', schemaname, sequencename)::regclass, %s, false) "
+                "FROM pg_sequences WHERE COALESCE(last_value, start_value) < %s",
+                [_SEQUENCE_FLOOR, _SEQUENCE_FLOOR],
+            )
     finally:
         # CREATE DATABASE … TEMPLATE refuses a template that has open sessions.
         connection.close()
