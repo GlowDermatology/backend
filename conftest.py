@@ -78,7 +78,9 @@ def _clones_from_template(config: pytest.Config) -> bool:
     return not reuses and not config.getvalue("nomigrations")
 
 
-_SEQUENCE_FLOOR = 1_000_000
+# Past every explicit id a seeder inserts (all below 100 000) and far below seven digits, which
+# `core.alerts` masks as a possible phone number (alert tests compare ids verbatim).
+_SEQUENCE_FLOOR = 200_000
 
 
 def _template_name(test_name: str) -> str:
