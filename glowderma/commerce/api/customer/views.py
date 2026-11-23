@@ -19,12 +19,7 @@ from rest_framework.response import Response
 
 from glowderma.accounts import services as account_services
 from glowderma.accounts.api.customer_base import CustomerAPIView, CustomerGenericViewSet
-from glowderma.accounts.api.throttles import (
-    CheckoutThrottle,
-    CustomerRateThrottle,
-    DeliveryQuoteThrottle,
-    PayThrottle,
-)
+from glowderma.accounts.api.throttles import CustomerRateThrottle
 from glowderma.accounts.models import Address, AuthSession, Customer
 from glowderma.commerce import payment_ref, quoting, selectors, services, state
 from glowderma.commerce.api.customer.serializers import (
@@ -43,6 +38,7 @@ from glowderma.commerce.api.customer.serializers import (
     CustomerPaySerializer,
     CustomerReorderSerializer,
 )
+from glowderma.commerce.api.customer.throttles import CheckoutThrottle, DeliveryQuoteThrottle, PayThrottle
 from glowderma.commerce.models import Order
 from glowderma.core import enums, integration_modes, timeutils
 from glowderma.core.api.exceptions import (

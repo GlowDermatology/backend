@@ -17,7 +17,7 @@ from rest_framework.response import Response
 
 from glowderma.accounts import services as account_services
 from glowderma.accounts.api.customer_base import CustomerAPIView, CustomerGenericViewSet
-from glowderma.accounts.api.throttles import CustomerRateThrottle, QrThrottle
+from glowderma.accounts.api.throttles import CustomerRateThrottle
 from glowderma.accounts.models import Customer
 from glowderma.core import timeutils
 from glowderma.core.api.schema import ACCEPT_LANGUAGE_HEADER, CUSTOMER_ERRORS, DEVICE_HEADERS
@@ -27,6 +27,7 @@ from glowderma.loyalty.api.customer.serializers import (
     LedgerItemSerializer,
     QrTokenSerializer,
 )
+from glowderma.loyalty.api.throttles import QrThrottle
 
 HEADERS = [*DEVICE_HEADERS, ACCEPT_LANGUAGE_HEADER]
 

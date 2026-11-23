@@ -14,9 +14,11 @@ from glowderma.accounts.api import throttles
 from glowderma.accounts.models import Customer
 from glowderma.accounts.security import identifiers
 from glowderma.accounts.tests.factories import device_headers
+from glowderma.commerce.api.customer import throttles as commerce_throttles
 from glowderma.core.api.parsers import JSONParser
 from glowderma.core.pii import pii_ref
 from glowderma.core.throttling import DEFAULT_THROTTLE_RATES
+from glowderma.loyalty.api import throttles as loyalty_throttles
 
 VIEW = APIView()
 
@@ -37,10 +39,10 @@ def customer(pk: int = 5) -> Customer:
 def test_every_customer_throttle_has_a_default_scope() -> None:
     classes = [
         throttles.CustomerRateThrottle,
-        throttles.CheckoutThrottle,
-        throttles.PayThrottle,
-        throttles.DeliveryQuoteThrottle,
-        throttles.QrThrottle,
+        commerce_throttles.CheckoutThrottle,
+        commerce_throttles.PayThrottle,
+        commerce_throttles.DeliveryQuoteThrottle,
+        loyalty_throttles.QrThrottle,
         throttles.PublicDeviceThrottle,
         throttles.PublicIPThrottle,
         throttles.PublicBffThrottle,
@@ -50,7 +52,7 @@ def test_every_customer_throttle_has_a_default_scope() -> None:
         throttles.CustomerAuthDeviceThrottle,
         throttles.CustomerAuthIPThrottle,
         throttles.RefreshUnknownThrottle,
-        throttles.PosRateThrottle,
+        loyalty_throttles.PosRateThrottle,
     ]
     for cls in classes:
         assert cls.scope in DEFAULT_THROTTLE_RATES, cls.__name__
@@ -61,16 +63,16 @@ def test_every_customer_throttle_has_a_default_scope() -> None:
 def test_customer_scoped_throttles_key_on_the_customer_and_skip_anonymous() -> None:
     for cls in (
         throttles.CustomerRateThrottle,
-        throttles.CheckoutThrottle,
-        throttles.PayThrottle,
-        throttles.QrThrottle,
+        commerce_throttles.CheckoutThrottle,
+        commerce_throttles.PayThrottle,
+        loyalty_throttles.QrThrottle,
     ):
         assert cls().get_cache_key(request(customer(7)), VIEW) == f"throttle_{cls.scope}_7"
         assert cls().get_cache_key(request(), VIEW) is None
 
 
 def test_the_delivery_quote_throttle_counts_only_requests_that_ask_the_carriers() -> None:
-    cls = throttles.DeliveryQuoteThrottle
+    cls = commerce_throttles.DeliveryQuoteThrottle
     for body in ({"with_options": True}, {"delivery_provider": "yandex"}, {"delivery_method": "express"}):
         assert cls().get_cache_key(request(customer(7), body), VIEW) == "throttle_delivery_quote_7"
     # the released request (and an explicit "no options") stays under the customer scope only
@@ -118,8 +120,11 @@ def test_auth_throttles_key_on_the_hashed_fid_phone_and_ip() -> None:
 
 
 def test_pos_throttle_keys_on_the_authenticated_device() -> None:
-    assert throttles.PosRateThrottle().get_cache_key(request(SimpleNamespace(pk=3)), VIEW) == "throttle_pos_3"
-    assert throttles.PosRateThrottle().get_cache_key(request(), VIEW) is None
+    assert (
+        loyalty_throttles.PosRateThrottle().get_cache_key(request(SimpleNamespace(pk=3)), VIEW)
+        == "throttle_pos_3"
+    )
+    assert loyalty_throttles.PosRateThrottle().get_cache_key(request(), VIEW) is None
 
 
 @override_settings(THROTTLE_RATES={"refresh_unknown": "2/min"})

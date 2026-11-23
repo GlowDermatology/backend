@@ -15,9 +15,9 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from glowderma.accounts.api.throttles import PosRateThrottle
 from glowderma.core.api.exceptions import request_language
 from glowderma.core.api.parsers import JSONParser
+from glowderma.loyalty.api.throttles import PosRateThrottle
 from glowderma.loyalty.authentication import IsActivePosDevice, PosKeyAuthentication
 
 
