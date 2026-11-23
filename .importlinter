@@ -17,3 +17,65 @@ layers =
 # production code; tests of a lower module may import any module's test factories.
 ignore_imports =
     glowderma.*.tests.** -> glowderma.**
+
+# accounts.services is a package (services/__init__.py is the facade callers import). Its submodules form
+# layers of their own, so the split stays acyclic and each name keeps a single home.
+[importlinter:contract:accounts-services-packages]
+name = accounts.services: staff | customer above otp above common
+type = layers
+containers =
+    glowderma.accounts.services
+layers =
+    staff | customer
+    otp
+    common
+
+[importlinter:contract:accounts-services-customer]
+name = accounts.services.customer modules
+type = layers
+containers =
+    glowderma.accounts.services.customer
+layers =
+    lifecycle
+    device_registration | refresh | addresses | profile | identities
+    auth_sessions
+    devices | locks
+
+[importlinter:contract:accounts-services-otp]
+name = accounts.services.otp modules
+type = layers
+containers =
+    glowderma.accounts.services.otp
+layers =
+    verification
+    issuance
+    limits
+    targets
+    channels
+
+[importlinter:contract:accounts-services-staff]
+name = accounts.services.staff modules
+type = layers
+containers =
+    glowderma.accounts.services.staff
+layers =
+    members | social | two_factor
+    password_links
+    auth_sessions | credentials
+    messages | locks
+
+# The modules that import the services facade must never be imported back by its submodules.
+[importlinter:contract:accounts-services-no-back-imports]
+name = accounts.services submodules never import the modules built on them
+type = forbidden
+source_modules =
+    glowderma.accounts.services.common
+    glowderma.accounts.services.customer
+    glowderma.accounts.services.otp
+    glowderma.accounts.services.staff
+forbidden_modules =
+    glowderma.accounts.sessions
+    glowderma.accounts.tasks
+    glowderma.accounts.authentication
+    glowderma.accounts.api.admin
+    glowderma.accounts.seeds

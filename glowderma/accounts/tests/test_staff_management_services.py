@@ -16,6 +16,7 @@ from rest_framework.test import APIClient
 from glowderma.accounts import services
 from glowderma.accounts.api.guard import LoginGuard, email_hash
 from glowderma.accounts.models import AuthSession, SocialIdentity, StaffUser
+from glowderma.accounts.services.staff import locks as staff_locks
 from glowderma.accounts.tests.factories import TEST_PASSWORD, AuthSessionFactory, StaffUserFactory
 from glowderma.core.api.exceptions import AuthFailed, Conflict
 from glowderma.core.models import AuditEntry
@@ -202,7 +203,7 @@ def test_two_managers_removing_each_other_leave_one_active_manager(monkeypatch: 
     second = StaffUserFactory.create(email="b@x.uz", is_manager=True)
     locked = threading.Event()
     release = threading.Event()
-    original = services._lock_active_managers
+    original = staff_locks.lock_active_managers
 
     def slow_lock() -> list[int]:
         ids = original()
@@ -211,7 +212,7 @@ def test_two_managers_removing_each_other_leave_one_active_manager(monkeypatch: 
             assert release.wait(10)
         return ids
 
-    monkeypatch.setattr(services, "_lock_active_managers", slow_lock)
+    monkeypatch.setattr(staff_locks, "lock_active_managers", slow_lock)
     outcomes: dict[str, str] = {}
 
     def run(name: str, call: Callable[[], Any]) -> None:
