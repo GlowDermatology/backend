@@ -13,7 +13,7 @@ from typing import Any
 
 from rest_framework import serializers
 
-from glowderma.accounts.api.throttles import EMAIL_MAX_LENGTH, canonical_email, canonical_phone
+from glowderma.accounts.security.identifiers import EMAIL_MAX_LENGTH, canonical_email, canonical_phone
 from glowderma.core import enums
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import AwareDateTimeField, QueryBooleanField

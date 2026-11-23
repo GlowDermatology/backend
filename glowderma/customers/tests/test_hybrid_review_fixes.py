@@ -16,8 +16,8 @@ from django.test import override_settings
 from rest_framework.exceptions import ValidationError
 
 from glowderma.accounts import services as account_services
-from glowderma.accounts.api.throttles import canonical_email
 from glowderma.accounts.models import Customer, CustomerSocialIdentity, SmsCode
+from glowderma.accounts.security.identifiers import canonical_email
 from glowderma.accounts.tests.factories import CustomerFactory, start_test_session
 from glowderma.core import timeutils
 from glowderma.core.api.exceptions import (

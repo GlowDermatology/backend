@@ -12,6 +12,7 @@ from rest_framework.views import APIView
 
 from glowderma.accounts.api import throttles
 from glowderma.accounts.models import Customer
+from glowderma.accounts.security import identifiers
 from glowderma.accounts.tests.factories import device_headers
 from glowderma.core.api.parsers import JSONParser
 from glowderma.core.pii import pii_ref
@@ -155,7 +156,7 @@ def test_customer_base_view_throttles_per_customer(customer_client: Any) -> None
 def test_every_unicode_digit_spelling_of_a_phone_shares_one_sms_phone_key(spelling: str) -> None:
     """Review finding (security): the per-phone key is the canonical ASCII number, so Unicode-digit
     look-alikes of one number cannot multiply its ``sms_phone`` budget (customer contract §1.8)."""
-    assert throttles.canonical_phone(spelling) == "+998901234567"
+    assert identifiers.canonical_phone(spelling) == "+998901234567"
     key = throttles.SmsPhoneThrottle().get_cache_key(request(data={"phone": spelling}), VIEW)
     assert key == f"throttle_sms_phone_{pii_ref('+998901234567')}"
 
@@ -164,9 +165,9 @@ def test_every_unicode_digit_spelling_of_a_phone_shares_one_sms_phone_key(spelli
     "value", ["+99890123456", "+9989012345678", "998901234567", "+998 90 123 45 67", "x", 5]
 )
 def test_values_that_are_not_a_phone_share_one_invalid_bucket(value: object) -> None:
-    assert throttles.canonical_phone(value) is None
-    assert throttles.phone_throttle_ident(value) == throttles.INVALID_PHONE_BUCKET
-    assert throttles.phone_throttle_ident(None) is None and throttles.phone_throttle_ident(" ") is None
+    assert identifiers.canonical_phone(value) is None
+    assert identifiers.phone_throttle_ident(value) == identifiers.INVALID_IDENTIFIER_BUCKET
+    assert identifiers.phone_throttle_ident(None) is None and identifiers.phone_throttle_ident(" ") is None
 
 
 @override_settings(THROTTLE_RATES={"sms_phone": "2/min"})

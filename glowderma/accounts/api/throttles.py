@@ -1,17 +1,14 @@
 import hashlib
-import re
-import unicodedata
 from typing import Any
 
-from django.core.exceptions import ValidationError as DjangoValidationError
-from django.core.validators import EmailValidator
 from rest_framework.request import Request
 from rest_framework.throttling import SimpleRateThrottle
 
 from glowderma.accounts.authentication import FID_PATTERN
 from glowderma.accounts.models import Customer
+from glowderma.accounts.security import identifiers
 from glowderma.core.clientip import forwarded_client_ip, has_internal_secret
-from glowderma.core.pii import normalize_email, pii_ref
+from glowderma.core.pii import pii_ref
 from glowderma.core.throttling import rate_for
 
 
@@ -195,77 +192,11 @@ class _DeviceThrottle(ClientIPThrottle):
         return self.cache_format % {"scope": self.scope, "ident": ref}
 
 
-ASCII_PHONE = re.compile(r"\+998[0-9]{9}")
-INVALID_PHONE_BUCKET = "invalid"
-
-
-def canonical_phone(value: object) -> str | None:
-    """The ASCII E.164 form (``+998`` and nine ASCII digits) of a submitted phone, or ``None``.
-
-    Every Unicode decimal digit (``str.isdecimal``: Arabic-Indic, fullwidth, …, exactly what a Unicode
-    ``\\d`` matches) is folded to ASCII first, so look-alike spellings of one number share one canonical
-    value and therefore one per-phone throttle key (customer contract §1.8: the per-phone rules are the main
-    protection of the auth flows).
-    """
-    if not isinstance(value, str):
-        return None
-    folded = "".join(str(unicodedata.decimal(char)) if char.isdecimal() else char for char in value.strip())
-    return folded if ASCII_PHONE.fullmatch(folded) else None
-
-
-def phone_throttle_ident(value: object) -> str | None:
-    """The per-phone throttle or guard ident of a submitted ``phone``: ``pii_ref`` of the canonical number;
-    ``invalid`` for any other present value (fail closed: no spelling escapes the per-phone limits;
-    :class:`SmsPhoneThrottle` scopes that bucket per device); ``None`` when the field is absent or blank (the
-    view answers 400 ``required``). P1 keys the ``customer_login`` guard with it too."""
-    if value is None or (isinstance(value, str) and not value.strip()):
-        return None
-    canonical = canonical_phone(value)
-    return pii_ref(canonical) if canonical is not None else INVALID_PHONE_BUCKET
-
-
-EMAIL_MAX_LENGTH = 254
-_EMAIL_VALIDATOR = EmailValidator()
-
-
-def canonical_email(value: object) -> str | None:
-    """The stored form of a submitted e-mail address (``core.pii.normalize_email``: NFC, lower case, punycode
-    domain; ≤254 characters, a valid address by Django's ``EmailValidator``), or ``None`` (hybrid identity:
-    one account and one throttle key per mailbox however it is written)."""
-    if not isinstance(value, str):
-        return None
-    folded = normalize_email(value)
-    if not folded or len(folded) > EMAIL_MAX_LENGTH:
-        return None
-    try:
-        _EMAIL_VALIDATOR(folded)
-    except DjangoValidationError:
-        return None
-    return folded
-
-
-def email_throttle_ident(value: object) -> str | None:
-    """:func:`phone_throttle_ident` for an e-mail: ``pii_ref`` of the canonical address, ``invalid`` for any
-    other present value, ``None`` when absent or blank."""
-    if value is None or (isinstance(value, str) and not value.strip()):
-        return None
-    canonical = canonical_email(value)
-    return pii_ref(canonical) if canonical is not None else INVALID_PHONE_BUCKET
-
-
-def identifier_throttle_ident(data: object) -> str | None:
-    """The per-identifier ident of an auth body: its ``phone`` when present, else its ``email``."""
-    if not isinstance(data, dict):
-        return None
-    phone = phone_throttle_ident(data.get("phone"))
-    return phone if phone is not None else email_throttle_ident(data.get("email"))
-
-
 class SmsPhoneThrottle(ClientIPThrottle):
     """``auth/send-code/`` (and the signed-in ``me/phone/code/`` / ``me/email/code/``) per target: the phone
-    (:func:`phone_throttle_ident`: the canonical number, never the raw string, so Unicode-digit variants of
-    one number share its key) or, without one, the e-mail address (:func:`email_throttle_ident`, hybrid
-    identity).
+    (:func:`identifiers.phone_throttle_ident`: the canonical number, never the raw string, so Unicode-digit
+    variants of one number share its key) or, without one, the e-mail address
+    (:func:`identifiers.email_throttle_ident`, hybrid identity).
 
     The ``invalid`` bucket is split per device (else per client IP): a malformed phone never reaches the SMS
     provider (400 ``invalid``), so one client sending malformed values cannot turn every other user's typo
@@ -274,11 +205,12 @@ class SmsPhoneThrottle(ClientIPThrottle):
     scope = "sms_phone"
 
     def get_cache_key(self, request: Request, view: Any) -> str | None:
-        ident = identifier_throttle_ident(request.data)
+        ident = identifiers.identifier_throttle_ident(request.data)
         if ident is None:
             return None
-        if ident == INVALID_PHONE_BUCKET:
-            ident = f"{INVALID_PHONE_BUCKET}:{device_ref(request) or self.get_ident(request)}"
+        if ident == identifiers.INVALID_IDENTIFIER_BUCKET:
+            scoped_to = device_ref(request) or self.get_ident(request)
+            ident = f"{identifiers.INVALID_IDENTIFIER_BUCKET}:{scoped_to}"
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 

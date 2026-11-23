@@ -39,7 +39,7 @@ containers =
     glowderma.accounts.security
 exhaustive = true
 layers =
-    login_lockout | address_budget
+    login_lockout | address_budget | identifiers
     counters
 
 [importlinter:contract:accounts-security-is-a-primitive]
