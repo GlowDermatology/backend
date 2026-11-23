@@ -22,4 +22,4 @@ class StaffUserManager(BaseUserManager["StaffUser"]):
 
 
 if TYPE_CHECKING:
-    from .models import StaffUser
+    from glowderma.accounts.models import StaffUser

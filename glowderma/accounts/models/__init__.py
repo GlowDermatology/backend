@@ -16,7 +16,7 @@ from glowderma.core.labels import masked_contact, stamp
 from glowderma.core.models import TimeStampedModel, timestamp_default
 from glowderma.core.search import SearchFold
 
-from .managers import StaffUserManager
+from glowderma.accounts.managers import StaffUserManager
 
 PHONE_E164_REGEX = r"^\+998\d{9}$"
 
