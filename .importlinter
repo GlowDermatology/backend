@@ -18,6 +18,29 @@ layers =
 ignore_imports =
     glowderma.*.tests.** -> glowderma.**
 
+# The whole accounts app, bottom to top. Each module imports only the layers below it; siblings on one line
+# never import each other. Anything new in accounts must be placed here (exhaustive).
+[importlinter:contract:accounts-modules]
+name = accounts: the app's own layering
+type = layers
+containers =
+    glowderma.accounts
+exhaustive = true
+exhaustive_ignores =
+    tests
+    migrations
+layers =
+    apps
+    admin | management | seeds | tasks
+    api | console
+    authentication
+    services
+    mfa | selectors
+    second_factor | security | request_facts | console_sessions
+    permissions | tokens
+    models
+    errors | media | topics | schema
+
 # accounts.models is a package (models/__init__.py is the facade Django loads); one subject per module,
 # all of them above the shared defaults that migrations reference.
 [importlinter:contract:accounts-models]
@@ -163,6 +186,41 @@ layers =
     customer
     base | idents
 
+# accounts.api.admin: routes above the views, above the response bodies, above the serializers; inside each
+# package, one module per subject above the shared pieces.
+[importlinter:contract:accounts-api-admin]
+name = accounts.api.admin: urls above views above payloads above serializers
+type = layers
+containers =
+    glowderma.accounts.api.admin
+exhaustive = true
+layers =
+    urls | staff_urls
+    views
+    payloads
+    serializers
+
+[importlinter:contract:accounts-api-admin-views]
+name = accounts.api.admin.views: one module per subject above the shared schema
+type = layers
+containers =
+    glowderma.accounts.api.admin.views
+exhaustive = true
+layers =
+    auth_sessions | profile | passwords | two_factor | social | staff_members
+    schema
+
+[importlinter:contract:accounts-api-admin-serializers]
+name = accounts.api.admin.serializers: subjects above the field factories
+type = layers
+containers =
+    glowderma.accounts.api.admin.serializers
+exhaustive = true
+layers =
+    auth_sessions | staff_management
+    profile | passwords | social | two_factor | staff_directory
+    fields
+
 # accounts.services is a package (services/__init__.py is the facade callers import). Its submodules form
 # layers of their own, so the split stays acyclic and each name keeps a single home.
 [importlinter:contract:accounts-services-packages]
@@ -220,9 +278,11 @@ source_modules =
     glowderma.accounts.services.otp
     glowderma.accounts.services.staff
 forbidden_modules =
+    glowderma.accounts.api
     glowderma.accounts.console
+    glowderma.accounts.authentication
     glowderma.accounts.selectors
     glowderma.accounts.tasks
-    glowderma.accounts.authentication
-    glowderma.accounts.api.admin
     glowderma.accounts.seeds
+    glowderma.accounts.admin
+    glowderma.accounts.management
