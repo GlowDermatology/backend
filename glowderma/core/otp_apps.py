@@ -16,7 +16,7 @@ every console text (``glowderma.core.console_i18n``), so they follow the viewer'
 
 So django_otp's migration state stays exactly its own and no migration of the third-party apps is ever needed.
 Their English help texts are hidden on the console pages instead (``ReadOnlyAdmin.field_help_texts``,
-glowderma.accounts.admin).
+glowderma.accounts.admin.otp_devices).
 """
 
 from __future__ import annotations

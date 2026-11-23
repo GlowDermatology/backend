@@ -140,6 +140,16 @@ layers =
     otp_delivery | email_notices | apple_revocation | staff_password_links | session_replaced_push | auth_cleanup
     outbox_payloads | message_rendering
 
+# accounts.admin: the ops console pages, one independent module per subject (the package imports them all).
+[importlinter:contract:accounts-admin]
+name = accounts.admin subjects are independent
+type = independence
+modules =
+    glowderma.accounts.admin.staff
+    glowderma.accounts.admin.auth_sessions
+    glowderma.accounts.admin.customer_records
+    glowderma.accounts.admin.otp_devices
+
 # accounts.services is a package (services/__init__.py is the facade callers import). Its submodules form
 # layers of their own, so the split stays acyclic and each name keeps a single home.
 [importlinter:contract:accounts-services-packages]

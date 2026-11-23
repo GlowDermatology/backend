@@ -36,7 +36,7 @@ msgstr[1] "%(count)s заблокировано"
 msgstr[2] "%(count)s заблокировано"
 msgstr[3] "%(count)s заблокировано"
 
-#: glowderma/accounts/admin.py
+#: glowderma/accounts/admin/staff.py
 msgid "%(count)s daqiqa"
 msgid_plural "%(count)s daqiqa"
 msgstr[0] "%(count)s минута"
@@ -141,7 +141,7 @@ msgstr[1] "%(count)s с предупреждениями"
 msgstr[2] "%(count)s с предупреждениями"
 msgstr[3] "%(count)s с предупреждениями"
 
-#: glowderma/accounts/admin.py
+#: glowderma/accounts/admin/staff.py
 msgid "%(count)s soat"
 msgid_plural "%(count)s soat"
 msgstr[0] "%(count)s час"
@@ -205,7 +205,7 @@ msgstr[1] "Завершено %(count)s сеанса."
 msgstr[2] "Завершено %(count)s сеансов."
 msgstr[3] "Завершено %(count)s сеансов."
 
-#: glowderma/accounts/admin.py
+#: glowderma/accounts/admin/staff.py
 msgid "%(count)s ta xodimning 2FA qurilmasi o‘chirildi va konsol sessiyalari tugatildi: ular %(window)s ichida keyingi kirishda 2FA ni qayta sozlashadi."
 msgid_plural "%(count)s ta xodimning 2FA qurilmasi o‘chirildi va konsol sessiyalari tugatildi: ular %(window)s ichida keyingi kirishda 2FA ni qayta sozlashadi."
 msgstr[0] "У %(count)s сотрудника удалено устройство 2FA и завершены сеансы консоли: 2FA настраивается заново при следующем входе, срок — %(window)s."
@@ -434,7 +434,7 @@ msgstr "Не более 180 символов."
 msgid "24 soat"
 msgstr "24 часа"
 
-#: glowderma/accounts/admin.py
+#: glowderma/accounts/admin/staff.py
 msgid "2FA ni qayta o‘rnatish"
 msgstr "Сбросить 2FA"
 
@@ -617,7 +617,7 @@ msgid "Alt matni nomdan olinadi"
 msgstr "Alt-текст берётся из названия"
 
 #: glowderma.core.labels.AUDIT_LOG_EXPORT_HEADERS
-#: glowderma/accounts/admin.py
+#: glowderma/accounts/admin/auth_sessions.py
 #: glowderma/core/admin.py
 msgid "Amal"
 msgstr "Действие"
@@ -894,7 +894,7 @@ msgstr "Отменено"
 msgid "Bekor qilingan (reversal)"
 msgstr "Отменено (reversal)"
 
-#: glowderma/accounts/templates/accounts/console/reset_2fa_confirmation.html
+#: glowderma/accounts/templates/admin/accounts/staffuser/reset_2fa_confirmation.html
 #: glowderma/assistant/templates/assistant/console/rollback_key.html
 #: glowderma/assistant/templates/assistant/console/rotate_key.html
 #: glowderma/core/templates/admin/ops/confirm_action.html
@@ -2131,7 +2131,7 @@ msgstr "HTTP-заголовки"
 msgid "Ha"
 msgstr "Да"
 
-#: glowderma/accounts/templates/accounts/console/reset_2fa_confirmation.html
+#: glowderma/accounts/templates/admin/accounts/staffuser/reset_2fa_confirmation.html
 msgid "Ha, 2FA ni qayta o‘rnatish"
 msgstr "Да, сбросить 2FA"
 
@@ -3383,11 +3383,11 @@ msgstr "Отменено клиентом"
 msgid "Mijoz guruhga qoida orqali kiradi."
 msgstr "Клиент входит в группу по правилу."
 
-#: glowderma/accounts/admin.py
+#: glowderma/accounts/admin/auth_sessions.py
 msgid "Mijoz sessiyasini tugatish"
 msgstr "Завершить сеанс клиента"
 
-#: glowderma/accounts/admin.py
+#: glowderma/accounts/admin/auth_sessions.py
 msgid "Mijoz shu qurilmada tizimdan chiqariladi (sabab: «Admin tugatdi»). Qurilmada boshqa ochiq sessiya qolmasa, unga push xabarlar yuborilmaydi. Mijoz qaytadan kirishi mumkin."
 msgstr "Клиент будет выведен из системы на этом устройстве (причина: «Завершён администратором»). Если на устройстве не останется других открытых сеансов, push-сообщения на него отправляться не будут. Клиент может войти снова."
 
@@ -4056,7 +4056,7 @@ msgstr "Нельзя выбрать прошедшую дату."
 msgid "O‘tkazib yuborildi"
 msgstr "Пропущено"
 
-#: glowderma/accounts/admin.py
+#: glowderma/accounts/admin/staff.py
 msgid "O‘z 2FA ingizni bu yerdan qayta o‘rnatib bo‘lmaydi."
 msgstr "Собственную 2FA здесь сбросить нельзя."
 
@@ -4437,7 +4437,7 @@ msgstr "Остаток"
 msgid "Qoldiqlar"
 msgstr "Остатки"
 
-#: glowderma/accounts/admin.py
+#: glowderma/accounts/admin/otp_devices.py
 msgid "Qolgan kodlar"
 msgstr "Осталось кодов"
 
@@ -4504,7 +4504,7 @@ msgstr "Устройства"
 msgid "Qurilmasiz"
 msgstr "Без устройства"
 
-#: glowderma/accounts/templates/accounts/console/reset_2fa_confirmation.html
+#: glowderma/accounts/templates/admin/accounts/staffuser/reset_2fa_confirmation.html
 msgid "Quyidagi xodimlarning TOTP qurilmasi va zaxira kodlari o‘chiriladi, ochiq konsol sessiyalari tugatiladi. Ular %(window)s ichida konsolga keyingi kirishda ikki bosqichli himoyani qaytadan sozlaydi. Xodimning parolini ham siz tiklagan bo‘lsangiz, 2FA ni boshqa menejer qayta o‘rnatishi kerak."
 msgstr "У перечисленных ниже сотрудников будут удалены устройство TOTP и коды восстановления, а открытые сеансы консоли завершены. При следующем входе в консоль они заново настроят двухфакторную аутентификацию; срок — %(window)s. Если пароль сотрудника тоже сбросили вы, 2FA должен сбросить другой менеджер."
 
@@ -4844,11 +4844,11 @@ msgstr "Сегменты"
 msgid "Seshanba"
 msgstr "Вторник"
 
-#: glowderma/accounts/admin.py
+#: glowderma/accounts/admin/auth_sessions.py
 msgid "Sessiya allaqachon tugagan."
 msgstr "Сеанс уже завершён."
 
-#: glowderma/accounts/admin.py
+#: glowderma/accounts/admin/auth_sessions.py
 msgid "Sessiya allaqachon tugagan: hech narsa o‘zgarmadi."
 msgstr "Сеанс уже завершён: ничего не изменено."
 
@@ -4861,7 +4861,7 @@ msgstr "Срок сеанса истёк. Войдите снова."
 msgid "Sessiya tugadi. Qayta kiring."
 msgstr "Сессия истекла. Войдите снова."
 
-#: glowderma/accounts/admin.py
+#: glowderma/accounts/admin/auth_sessions.py
 msgid "Sessiya tugatildi."
 msgstr "Сеанс завершён."
 
@@ -4874,7 +4874,7 @@ msgstr "Нет сеансов"
 msgid "Sessiyalar"
 msgstr "Сеансы"
 
-#: glowderma/accounts/admin.py
+#: glowderma/accounts/admin/auth_sessions.py
 msgid "Sessiyani tugatish"
 msgstr "Завершить сеанс"
 
@@ -5550,7 +5550,7 @@ msgstr "Время окончания должно быть позже врем�
 msgid "Tugashi"
 msgstr "Окончание"
 
-#: glowderma/accounts/admin.py
+#: glowderma/accounts/admin/auth_sessions.py
 msgid "Tugatish"
 msgstr "Завершить"
 
@@ -5883,7 +5883,7 @@ msgstr "Входы сотрудников через соцсети"
 msgid "Xodim kirish xatolari"
 msgstr "Ошибки входа сотрудников"
 
-#: glowderma/accounts/admin.py
+#: glowderma/accounts/admin/auth_sessions.py
 msgid "Xodim sessiyalari bu yerda tugatilmaydi."
 msgstr "Сеансы сотрудников здесь не завершаются."
 
@@ -5891,7 +5891,7 @@ msgstr "Сеансы сотрудников здесь не завершаютс
 msgid "Xodim topilmadi."
 msgstr "Сотрудник не найден."
 
-#: glowderma/accounts/admin.py
+#: glowderma/accounts/admin/staff.py
 msgid "Xodim: {obj.email}"
 msgstr "Сотрудник: {obj.email}"
 
