@@ -89,6 +89,21 @@ layers =
     staff_jwt | customer_jwt
     bearer | device_headers
 
+# accounts.mfa: the admin panel's optional TOTP (the facade is its __init__); enrolment and the sign-in
+# challenge stand on the factor check, the lockout and the audit trail.
+[importlinter:contract:accounts-mfa]
+name = accounts.mfa: enrolment and challenges above factors above the lockout
+type = layers
+containers =
+    glowderma.accounts.mfa
+exhaustive = true
+layers =
+    enrolment | challenges
+    factors
+    lockout
+    audit_trail | state
+    policy
+
 # accounts.services is a package (services/__init__.py is the facade callers import). Its submodules form
 # layers of their own, so the split stays acyclic and each name keeps a single home.
 [importlinter:contract:accounts-services-packages]

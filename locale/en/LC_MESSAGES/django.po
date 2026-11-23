@@ -2325,7 +2325,7 @@ msgstr "Social account linking"
 msgid "Ikkala vaqtni kiriting (maxsus ish vaqti) yoki ikkalasini ham bo‘sh qoldiring (yopiq kun)."
 msgstr "Enter both times (special hours) or leave both empty (closed day)."
 
-#: glowderma/accounts/mfa.py
+#: glowderma/accounts/mfa/policy.py
 msgid "Ikki bosqichli himoya allaqachon yoqilgan."
 msgstr "Two-factor authentication is already enabled."
 
@@ -2333,7 +2333,7 @@ msgstr "Two-factor authentication is already enabled."
 msgid "Ikki bosqichli himoya yoqildi."
 msgstr "Two-factor authentication is enabled."
 
-#: glowderma/accounts/mfa.py
+#: glowderma/accounts/mfa/policy.py
 msgid "Ikki bosqichli himoya yoqilmagan."
 msgstr "Two-factor authentication is not enabled."
 
@@ -2516,7 +2516,7 @@ msgid "Jiddiy"
 msgstr "Critical"
 
 #: glowderma/accounts/api/admin/views.py
-#: glowderma/accounts/mfa.py
+#: glowderma/accounts/mfa/policy.py
 msgid "Joriy parol noto‘g‘ri."
 msgstr "The current password is incorrect."
 

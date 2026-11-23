@@ -2395,7 +2395,7 @@ msgstr "Привязка соцсети"
 msgid "Ikkala vaqtni kiriting (maxsus ish vaqti) yoki ikkalasini ham bo‘sh qoldiring (yopiq kun)."
 msgstr "Укажите оба времени (особый режим) или оставьте оба пустыми (выходной)."
 
-#: glowderma/accounts/mfa.py
+#: glowderma/accounts/mfa/policy.py
 msgid "Ikki bosqichli himoya allaqachon yoqilgan."
 msgstr "Двухфакторная защита уже включена."
 
@@ -2403,7 +2403,7 @@ msgstr "Двухфакторная защита уже включена."
 msgid "Ikki bosqichli himoya yoqildi."
 msgstr "Двухфакторная аутентификация включена."
 
-#: glowderma/accounts/mfa.py
+#: glowderma/accounts/mfa/policy.py
 msgid "Ikki bosqichli himoya yoqilmagan."
 msgstr "Двухфакторная защита не включена."
 
@@ -2586,7 +2586,7 @@ msgid "Jiddiy"
 msgstr "Критично"
 
 #: glowderma/accounts/api/admin/views.py
-#: glowderma/accounts/mfa.py
+#: glowderma/accounts/mfa/policy.py
 msgid "Joriy parol noto‘g‘ri."
 msgstr "Текущий пароль неверен."
 
