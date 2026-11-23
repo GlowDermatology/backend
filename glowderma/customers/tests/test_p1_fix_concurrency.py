@@ -24,6 +24,8 @@ from rest_framework.exceptions import NotFound, ValidationError
 from glowderma.accounts import services as account_services
 from glowderma.accounts.models import Address, AuthSession, Customer, CustomerSocialIdentity
 from glowderma.accounts.services.common import revocation
+from glowderma.accounts.services.customer import auth_sessions as customer_sessions
+from glowderma.accounts.services.customer import locks as customer_locks
 from glowderma.accounts.tests.factories import start_test_session
 from glowderma.core.api.exceptions import AuthFailed, PasswordChanged
 from glowderma.core.models import AuditEntry, OutboxMessage
@@ -178,7 +180,7 @@ def test_signed_in_writes_after_a_concurrent_delete_write_nothing(
     monkeypatch: pytest.MonkeyPatch, route: str
 ) -> None:
     signed = Signed(password_customer("+998907770033"))
-    original = account_services.lock_customer
+    original = customer_locks.lock_customer
     state = {"done": False}
 
     def delete_then_lock(customer_id: int) -> Customer:
@@ -187,7 +189,7 @@ def test_signed_in_writes_after_a_concurrent_delete_write_nothing(
             account_services.delete_customer(customer_id)
         return original(customer_id)
 
-    monkeypatch.setattr(account_services, "lock_customer", delete_then_lock)
+    monkeypatch.setattr(customer_locks, "lock_customer", delete_then_lock)
     if route == "address":
         response = signed.client.post(
             ME + "addresses/", {"text": "Chilonzor 9-12, Toshkent"}, **signed.idem()
@@ -299,7 +301,7 @@ def test_address_routes_still_answer_404_for_a_foreign_id() -> None:
 def test_logout_vs_sign_in_on_another_device_does_not_deadlock(monkeypatch: pytest.MonkeyPatch) -> None:
     customer = password_customer("+998901000001")
     started = start_test_session(customer, fid=FID_A)
-    original = account_services._revoke_open_customer_sessions
+    original = customer_sessions.revoke_open_sessions
     locked, go = threading.Event(), threading.Event()
 
     def patched(*args: Any, **kwargs: Any) -> Any:
@@ -309,7 +311,7 @@ def test_logout_vs_sign_in_on_another_device_does_not_deadlock(monkeypatch: pyte
             go.wait(WAIT)
         return result
 
-    monkeypatch.setattr(account_services, "_revoke_open_customer_sessions", patched)
+    monkeypatch.setattr(customer_sessions, "revoke_open_sessions", patched)
     out: dict[str, Any] = {}
     first = run("logout", lambda: account_services.logout_customer(started.raw_refresh), out)
     assert locked.wait(WAIT)

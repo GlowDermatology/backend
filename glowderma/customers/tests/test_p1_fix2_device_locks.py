@@ -15,6 +15,9 @@ from django.db import connection
 
 from glowderma.accounts import services as account_services
 from glowderma.accounts.models import AuthSession, Customer, Device
+from glowderma.accounts.services.customer import auth_sessions as customer_sessions
+from glowderma.accounts.services.customer import device_registration
+from glowderma.accounts.services.customer import locks as customer_locks
 from glowderma.accounts.tests.factories import start_test_session
 from glowderma.core.api.exceptions import RequestInProgress
 from glowderma.customers import services
@@ -70,10 +73,12 @@ def two_customers_sharing_an_install() -> tuple[Customer, Customer, account_serv
 
 
 def pause_after(
-    monkeypatch: pytest.MonkeyPatch, name: str, thread_name: str
+    monkeypatch: pytest.MonkeyPatch, name: str, thread_name: str, module: Any = account_services
 ) -> tuple[threading.Event, threading.Event]:
-    """Patch ``accounts.services.<name>`` so the thread ``thread_name`` waits after it (its locks held)."""
-    original = getattr(account_services, name)
+    """Patch ``module.<name>`` so the thread ``thread_name`` waits after it (its locks held). The facade is
+    the default (the call comes from ``customers.services``); a call made inside ``accounts.services`` is
+    patched on the submodule that defines the name."""
+    original = getattr(module, name)
     locked, go = threading.Event(), threading.Event()
 
     def patched(*args: Any, **kwargs: Any) -> Any:
@@ -83,7 +88,7 @@ def pause_after(
             go.wait(WAIT)
         return result
 
-    monkeypatch.setattr(account_services, name, patched)
+    monkeypatch.setattr(module, name, patched)
     return locked, go
 
 
@@ -116,7 +121,7 @@ def assert_token_moved(out: dict[str, Any], taker: Customer) -> None:
 @pytest.mark.django_db(transaction=True)
 def test_logout_vs_a_foreign_put_device_does_not_deadlock(monkeypatch: pytest.MonkeyPatch) -> None:
     taker, _holder, holder_started = two_customers_sharing_an_install()
-    locked, go = pause_after(monkeypatch, "_revoke_open_customer_sessions", "holder")
+    locked, go = pause_after(monkeypatch, "revoke_open_sessions", "holder", module=customer_sessions)
     out = race(lambda: account_services.logout_customer(holder_started.raw_refresh), locked, go, taker)
     assert_token_moved(out, taker)
     session = AuthSession.objects.get(pk=holder_started.session.pk)
@@ -182,8 +187,8 @@ def test_a_token_holder_appearing_after_the_unlocked_read_is_locked_too(
     start_test_session(late, fid=FID_C)
     taker = password_customer("+998905551004")
     start_test_session(taker, fid=FID_A)
-    monkeypatch.setattr(account_services, "REGISTER_DEVICE_ATTEMPTS", attempts)
-    original = account_services.lock_customer
+    monkeypatch.setattr(device_registration, "REGISTER_DEVICE_ATTEMPTS", attempts)
+    original = customer_locks.lock_customer
     calls: list[int] = []
     moved = threading.Event()
 
@@ -203,7 +208,7 @@ def test_a_token_holder_appearing_after_the_unlocked_read_is_locked_too(
             mover.join(WAIT)
         return original(customer_id)
 
-    monkeypatch.setattr(account_services, "lock_customer", patched)
+    monkeypatch.setattr(customer_locks, "lock_customer", patched)
     if attempts == 1:
         with pytest.raises(RequestInProgress):
             account_services.register_device(taker.pk, FID_A, fcm_token=TOKEN, push_enabled=True)

@@ -17,6 +17,7 @@ from django.test import override_settings
 from glowderma.accounts import services, tasks
 from glowderma.accounts.models import Customer, SmsCode
 from glowderma.accounts.services.common import revocation
+from glowderma.accounts.services.customer import refresh
 from glowderma.accounts.tests.factories import start_test_session
 from glowderma.core import outbox
 from glowderma.core.api.exceptions import AuthFailed
@@ -147,7 +148,7 @@ def test_a_rolled_back_re_rotation_forgets_the_dead_hash(monkeypatch: pytest.Mon
     def boom(*args: Any, **kwargs: Any) -> Any:
         raise RuntimeError("token signing failed")
 
-    monkeypatch.setattr(services, "refresh_body", boom)
+    monkeypatch.setattr(refresh, "refresh_body", boom)
     with pytest.raises(RuntimeError):
         services.rotate_customer_refresh(started.raw_refresh, fid=FID)  # the re-rotation rolls back
     assert cache.get(services.REFRESH_DEAD_KEY.format(digest=current_hash)) is None
