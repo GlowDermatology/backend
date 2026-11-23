@@ -311,9 +311,7 @@ def test_concurrent_login_attempts_are_reserved_before_authenticate() -> None:
             connection.close()
 
     workers = [Thread(target=attempt, daemon=True) for _ in range(6)]
-    with patch(
-        "glowderma.accounts.api.admin.views.auth_sessions.authenticate", side_effect=authenticate_wait
-    ):
+    with patch("glowderma.accounts.services.staff.sign_in.authenticate", side_effect=authenticate_wait):
         try:
             for worker in workers:
                 worker.start()

@@ -2515,8 +2515,8 @@ msgstr "Processing"
 msgid "Jiddiy"
 msgstr "Critical"
 
-#: glowderma/accounts/api/admin/views/passwords.py
 #: glowderma/accounts/mfa/policy.py
+#: glowderma/accounts/services/staff/messages.py
 msgid "Joriy parol noto‘g‘ri."
 msgstr "The current password is incorrect."
 
@@ -5938,7 +5938,6 @@ msgid_plural "Yangi mijozlar · %(days)s kun"
 msgstr[0] "New customers · %(days)s day"
 msgstr[1] "New customers · %(days)s days"
 
-#: glowderma/accounts/api/admin/views/passwords.py
 #: glowderma/accounts/services/staff/messages.py
 msgid "Yangi parol eskisidan farq qilsin."
 msgstr "The new password must differ from the old one."

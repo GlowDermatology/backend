@@ -9,7 +9,7 @@ This package is the stable entry point: callers import ``from glowderma.accounts
   ``session_revocation``.
 - ``otp``: ``channels``, ``targets``, ``limits``, ``issuance`` and ``verification`` of one-time codes.
 - ``staff``: ``messages``, ``locks``, ``auth_sessions``, ``credentials``, ``password_links``, ``members``,
-  ``social`` and ``two_factor``.
+  ``social``, ``two_factor``, ``sign_in``, ``sign_out`` and ``password_change``.
 
 Submodules import their siblings as modules (``locks.lock_customer(...)``), never this facade, so a call made
 inside the package is patched on the submodule that defines the name; a call made from another app through
@@ -192,6 +192,11 @@ from glowderma.accounts.services.staff.messages import (
     STAFF_SUPERUSER_MANAGER,
     STAFF_SUPERUSER_RESET,
 )
+from glowderma.accounts.services.staff.password_change import (
+    CHANGE_PASSWORD_SCOPE,
+    change_own_password,
+    check_password_change_lockout,
+)
 from glowderma.accounts.services.staff.password_links import (
     PASSWORD_LINK_AAD,
     PASSWORD_TOKEN_MAX_LENGTH,
@@ -206,6 +211,8 @@ from glowderma.accounts.services.staff.password_links import (
     send_password_link,
     set_password_with_token,
 )
+from glowderma.accounts.services.staff.sign_in import LOGIN_SCOPE, PasswordSignIn, password_sign_in
+from glowderma.accounts.services.staff.sign_out import sign_out_staff
 from glowderma.accounts.services.staff.social import (
     link_identity,
     require_password_session,
@@ -215,11 +222,13 @@ from glowderma.accounts.services.staff.social import (
 from glowderma.accounts.services.staff.two_factor import complete_mfa_login, reset_staff_mfa
 
 __all__ = [
+    "CHANGE_PASSWORD_SCOPE",
     "CHANNEL_ONLY_PURPOSES",
     "DEVICE_KEY_HEADER_LENGTH",
     "EMAIL_CHANNEL",
     "EMAIL_NOTICE_AAD",
     "EMAIL_NOTICE_KINDS",
+    "LOGIN_SCOPE",
     "MFA_NOT_ENABLED_FOR",
     "MFA_SELF_RESET",
     "MFA_SUPERUSER_RESET",
@@ -260,6 +269,7 @@ __all__ = [
     "CodeIssue",
     "NoSession",
     "OtpTarget",
+    "PasswordSignIn",
     "RefreshResult",
     "RefreshUnknown",
     "SessionNotFound",
@@ -273,9 +283,11 @@ __all__ = [
     "apple_grant_reference",
     "apple_subject_linked",
     "apple_token_aad",
+    "change_own_password",
     "change_specialist_role",
     "check_channel",
     "check_customer_password",
+    "check_password_change_lockout",
     "check_session",
     "clear_customer_image",
     "clear_device_keys",
@@ -314,6 +326,7 @@ __all__ = [
     "otp_target",
     "password_link_aad",
     "password_link_url",
+    "password_sign_in",
     "password_token",
     "raise_revoked_session",
     "reactivate_customer",
@@ -357,6 +370,7 @@ __all__ = [
     "set_staff_language",
     "sign_out_customer",
     "sign_out_sessions",
+    "sign_out_staff",
     "social_login",
     "social_otp_key",
     "staff_email_invite_available",

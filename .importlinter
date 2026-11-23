@@ -262,8 +262,9 @@ name = accounts.services.staff modules
 type = layers
 containers =
     glowderma.accounts.services.staff
+exhaustive = true
 layers =
-    members | social | two_factor
+    members | social | two_factor | sign_in | sign_out | password_change
     password_links
     auth_sessions | credentials
     messages | locks

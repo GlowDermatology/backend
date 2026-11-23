@@ -16,6 +16,7 @@ from rest_framework.test import APIClient
 from glowderma.accounts import services
 from glowderma.accounts.models import AuthSession, SocialIdentity, StaffUser
 from glowderma.accounts.security.login_lockout import LoginGuard, email_hash
+from glowderma.accounts.services.staff import auth_sessions as staff_auth_sessions
 from glowderma.accounts.services.staff import locks as staff_locks
 from glowderma.accounts.tests.factories import TEST_PASSWORD, AuthSessionFactory, StaffUserFactory
 from glowderma.core.api.exceptions import AuthFailed, Conflict
@@ -292,14 +293,14 @@ def test_a_sign_in_racing_a_revocation_leaves_no_live_session(
     manager = StaffUserFactory.create(email="m@x.uz", is_manager=True)
     staff = StaffUserFactory.create(email="victim@x.uz")
     authed, go = threading.Event(), threading.Event()
-    real = services.start_staff_session
+    real = staff_auth_sessions.start_staff_session
 
     def slow(*args: Any, **kwargs: Any) -> Any:
         authed.set()
         assert go.wait(10)
         return real(*args, **kwargs)
 
-    monkeypatch.setattr(services, "start_staff_session", slow)
+    monkeypatch.setattr(staff_auth_sessions, "start_staff_session", slow)
     out: dict[str, int] = {}
 
     def login() -> None:

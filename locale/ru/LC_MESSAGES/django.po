@@ -2585,8 +2585,8 @@ msgstr "В обработке"
 msgid "Jiddiy"
 msgstr "Критично"
 
-#: glowderma/accounts/api/admin/views/passwords.py
 #: glowderma/accounts/mfa/policy.py
+#: glowderma/accounts/services/staff/messages.py
 msgid "Joriy parol noto‘g‘ri."
 msgstr "Текущий пароль неверен."
 
@@ -6020,7 +6020,6 @@ msgstr[1] "Новые клиенты · %(days)s дня"
 msgstr[2] "Новые клиенты · %(days)s дней"
 msgstr[3] "Новые клиенты · %(days)s дней"
 
-#: glowderma/accounts/api/admin/views/passwords.py
 #: glowderma/accounts/services/staff/messages.py
 msgid "Yangi parol eskisidan farq qilsin."
 msgstr "Новый пароль должен отличаться от старого."

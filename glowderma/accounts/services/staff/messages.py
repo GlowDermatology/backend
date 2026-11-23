@@ -28,6 +28,7 @@ STAFF_LINK_INACTIVE = N_("Nofaol hisobga havola yuborilmaydi. Avval uni qayta fa
 STAFF_LINK_SELF = N_("O‘zingizga havola «Parolni o‘zgartirish» sahifasidan so‘raladi.")
 STAFF_LINK_NOT_PENDING = N_("Parolingiz o‘rnatilgan: uni «Parolni o‘zgartirish» orqali almashtiring.")
 PASSWORD_UNCHANGED = N_("Yangi parol eskisidan farq qilsin.")
+PASSWORD_INCORRECT = N_("Joriy parol noto‘g‘ri.")
 
 
 MFA_SELF_RESET = N_("O‘z ikki bosqichli himoyangizni «Sozlamalar»da o‘chiring.")
@@ -50,6 +51,7 @@ __all__ = [
     "STAFF_LINK_INACTIVE",
     "STAFF_LINK_SELF",
     "STAFF_LINK_NOT_PENDING",
+    "PASSWORD_INCORRECT",
     "PASSWORD_UNCHANGED",
     "MFA_SELF_RESET",
     "MFA_NOT_ENABLED_FOR",
