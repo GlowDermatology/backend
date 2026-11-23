@@ -5,8 +5,8 @@ from uuid import uuid4
 import pytest
 from rest_framework.test import APIClient
 
-from glowderma.accounts.api.guard import LoginGuard, email_hash
 from glowderma.accounts.models import AuthSession, StaffUser
+from glowderma.accounts.security.login_lockout import LoginGuard, email_hash
 from glowderma.accounts.tests.factories import TEST_PASSWORD
 from glowderma.core.models import AuditEntry, IdempotencyRecord
 

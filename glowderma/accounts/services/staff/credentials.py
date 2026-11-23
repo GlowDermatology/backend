@@ -13,8 +13,8 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework.exceptions import ValidationError
 
-from glowderma.accounts.api.guard import LoginGuard, email_hash
 from glowderma.accounts.models import StaffUser
+from glowderma.accounts.security.login_lockout import LoginGuard, email_hash
 from glowderma.accounts.services.staff import messages
 from glowderma.core import enums, integration_modes
 from glowderma.core.api.exceptions import field_error

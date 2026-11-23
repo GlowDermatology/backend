@@ -3,8 +3,8 @@
 ``verify`` (TOTP code), ``recovery`` (one-time recovery code) and ``enrol`` (first TOTP device: QR + manual
 key, confirmed by a code, then the ten recovery codes shown once) all need a pending sign-in from the password
 step and share the ``django_admin_otp`` lockout (LoginGuard: five failures a minute lock the user out for
-1, 2, 4, 8, then 15 minutes) plus a per-address budget (``guard.IpFailureBudget``). ``cancel`` drops a
-pending sign-in, ``logout`` ends a console session.
+1, 2, 4, 8, then 15 minutes) plus a per-address budget (``security.address_budget.IpFailureBudget``).
+``cancel`` drops a pending sign-in, ``logout`` ends a console session.
 
 Enrolment needs an open enrolment window (``access.enrolment_window``: a grant or a 2FA reset opened it, the
 same manager did not also reset the password); otherwise the pending sign-in ends with a message to ask a
@@ -35,18 +35,12 @@ from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 from rest_framework.exceptions import Throttled
 
-from glowderma.accounts.api.guard import (
-    IpFailureBudget,
-    IpThrottled,
-    LoginGuard,
-    client_bucket,
-    email_hash,
-    lockout_message,
-    record_ip_locked,
-)
+from glowderma.accounts.api.guard import lockout_message, record_ip_locked
 from glowderma.accounts.console import access, events, state, twofactor
 from glowderma.accounts.console.forms import RecoveryCodeForm, TotpCodeForm
 from glowderma.accounts.models import StaffUser
+from glowderma.accounts.security.address_budget import IpFailureBudget, IpThrottled, client_bucket
+from glowderma.accounts.security.login_lockout import LoginGuard, email_hash
 from glowderma.core import alerts
 from glowderma.core.network import CONSOLE_PREFIX
 

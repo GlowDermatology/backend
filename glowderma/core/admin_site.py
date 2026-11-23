@@ -5,7 +5,7 @@ Seams for the later console work:
 * ``UNFOLD`` (``config/settings/ops_admin.py``) holds the theme, the sidebar and the callbacks below;
   dashboards plug in through ``UNFOLD["DASHBOARD_CALLBACK"]`` and ``UNFOLD["SITE_VIEWS"]`` (custom
   pages), never by subclassing this site again.
-* The login form is wired by ``glowderma.accounts.api.guard`` (the lockout lives above ``core``); the login,
+* The login form is wired by ``AccountsConfig.ready`` (the lockout lives above ``core``); the login,
   2FA and logout views live in ``glowderma.accounts.console`` and are mounted ahead of the site's URLs.
 * The second factor is enforced here, without importing ``accounts``: every console view (``admin_view``,
   hence every model page, custom page and the index) requires ``request.user.is_verified()``, which

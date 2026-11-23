@@ -42,9 +42,9 @@ from rest_framework.exceptions import ValidationError
 
 from glowderma.accounts import services as account_services
 from glowderma.accounts import topics
-from glowderma.accounts.api.guard import LoginGuard
 from glowderma.accounts.api.throttles import email_throttle_ident, phone_throttle_ident
 from glowderma.accounts.models import Address, AuthSession, Customer, CustomerSocialIdentity, Device, SmsCode
+from glowderma.accounts.security.login_lockout import LoginGuard
 from glowderma.appointments import services as appointment_services
 from glowderma.appointments.models import Appointment
 from glowderma.commerce import selectors as commerce_selectors

@@ -22,9 +22,9 @@ from django_otp.plugins.otp_totp.models import TOTPDevice
 from rest_framework.test import APIClient
 
 from glowderma.accounts import mfa, services, tokens
-from glowderma.accounts.api.guard import LoginGuard, email_hash
 from glowderma.accounts.console import twofactor
 from glowderma.accounts.models import AuthSession, SocialIdentity, StaffUser
+from glowderma.accounts.security.login_lockout import LoginGuard, email_hash
 from glowderma.accounts.tests.factories import TEST_PASSWORD, AuthSessionFactory, StaffUserFactory
 from glowderma.accounts.tests.ops_helpers import KNOWN_TOTP_KEY, ops_staff, totp_code, totp_code_for_key
 from glowderma.core import timeutils

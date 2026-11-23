@@ -55,7 +55,6 @@ from glowderma.accounts.api.admin.serializers import (
     validated_new_password,
 )
 from glowderma.accounts.api.base import AdminGenericViewSet, WorkforceAPIView
-from glowderma.accounts.api.guard import LoginGuard, email_hash
 from glowderma.accounts.api.throttles import (
     AuthClientIPThrottle,
     LoginRateThrottle,
@@ -68,6 +67,7 @@ from glowderma.accounts.api.throttles import (
 )
 from glowderma.accounts.models import AuthSession, StaffPasswordToken, StaffUser
 from glowderma.accounts.permissions import IsManager
+from glowderma.accounts.security.login_lockout import LoginGuard, email_hash
 from glowderma.core import audit, enums, timeutils
 from glowderma.core.api.exceptions import AuthFailed, OAuthExchangeFailed, ProviderUnavailable
 from glowderma.core.api.parsers import JSONParser

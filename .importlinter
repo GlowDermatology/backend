@@ -30,6 +30,29 @@ layers =
     staff | customers | devices | otp_codes | auth_sessions
     defaults
 
+# accounts.security holds the brute-force primitives: the lockout ladder and the address budget both count
+# with the atomic counter, and nothing in the package reaches the API, console or services layers.
+[importlinter:contract:accounts-security]
+name = accounts.security: lockouts above the atomic counter
+type = layers
+containers =
+    glowderma.accounts.security
+exhaustive = true
+layers =
+    login_lockout | address_budget
+    counters
+
+[importlinter:contract:accounts-security-is-a-primitive]
+name = accounts.security never imports the layers built on it
+type = forbidden
+source_modules =
+    glowderma.accounts.security
+forbidden_modules =
+    glowderma.accounts.api
+    glowderma.accounts.console
+    glowderma.accounts.services
+    glowderma.accounts.mfa
+
 # accounts.services is a package (services/__init__.py is the facade callers import). Its submodules form
 # layers of their own, so the split stays acyclic and each name keeps a single home.
 [importlinter:contract:accounts-services-packages]

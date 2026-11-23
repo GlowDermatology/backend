@@ -21,9 +21,9 @@ from django.test import Client, override_settings
 from rest_framework.test import APIClient
 
 from glowderma.accounts import selectors, services, tasks, topics
-from glowderma.accounts.api.guard import LoginGuard, email_hash
 from glowderma.accounts.errors import PASSWORD_TOKEN_INVALID
 from glowderma.accounts.models import AuthSession, StaffPasswordToken, StaffUser
+from glowderma.accounts.security.login_lockout import LoginGuard, email_hash
 from glowderma.accounts.tests.conftest import bearer_client
 from glowderma.accounts.tests.factories import TEST_PASSWORD, AuthSessionFactory, StaffUserFactory
 from glowderma.core import enums, integration_modes, secretbox, timeutils

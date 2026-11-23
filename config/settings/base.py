@@ -115,7 +115,8 @@ if not 600 <= OPS_ENROL_WINDOW_SECONDS <= 7 * 24 * 60 * 60:
     raise ImproperlyConfigured("OPS_ENROL_WINDOW_SECONDS must be between 600 and 604800")
 # Per client address, on top of the per-account lockout ladder: at most this many failed console sign-in
 # attempts per window, counted separately for the password step and for the code steps (TOTP, recovery code,
-# enrolment); beyond it the address is refused until the window ends (glowderma.accounts.api.guard).
+# enrolment); beyond it the address is refused until the window ends
+# (glowderma.accounts.security.address_budget).
 OPS_IP_FAILURE_LIMIT = env_int("OPS_IP_FAILURE_LIMIT", 20)
 OPS_IP_FAILURE_WINDOW_SECONDS = env_int("OPS_IP_FAILURE_WINDOW_SECONDS", 15 * 60)
 if not 5 <= OPS_IP_FAILURE_LIMIT <= 1000:

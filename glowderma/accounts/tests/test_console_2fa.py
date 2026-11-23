@@ -16,9 +16,9 @@ from django_otp import DEVICE_ID_SESSION_KEY
 from django_otp.plugins.otp_static.models import StaticDevice, StaticToken
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
-from glowderma.accounts.api.guard import email_hash
 from glowderma.accounts.console import access, state, twofactor
 from glowderma.accounts.models import StaffUser
+from glowderma.accounts.security.login_lockout import email_hash
 from glowderma.accounts.tests.factories import TEST_PASSWORD, StaffUserFactory
 from glowderma.accounts.tests.ops_helpers import (
     KNOWN_TOTP_KEY,

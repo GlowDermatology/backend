@@ -22,7 +22,8 @@ accepts a panel code, so the console's enrolment window and four-eyes rule stay 
 * **Lockout**: every code check (sign-in, confirm, disable, new codes) goes through ``LoginGuard`` scope
   :data:`GUARD_SCOPE` (five failures a minute lock the account for 1, 2, 4, 8, then 15 minutes) with a
   long-window bound: :data:`STREAK_LIMIT` wrong codes in a row (no correct code between, none more than
-  ``guard.STREAK_TTL_SECONDS`` apart) lock it for 15 minutes, then 1, 4, 16 and 24 hours at each further
+  ``login_lockout.STREAK_TTL_SECONDS`` apart) lock it for 15 minutes, then 1, 4, 16 and 24 hours at each
+  further
   :data:`STREAK_LIMIT` — so a guesser who keeps under five a minute (the challenge's own cap is renewed by
   signing in again) is stopped as well; that lock is audited ``auth.mfa_locked`` (``wait``, ``failures``) and
   alerted when it starts. A locked attempt is audited ``auth.mfa_locked``, logged and alerted
@@ -52,10 +53,10 @@ from django.core.cache import cache
 from django.db import transaction
 from rest_framework.exceptions import ErrorDetail, Throttled, ValidationError
 
-from glowderma.accounts.api.guard import LoginGuard, email_hash
 from glowderma.accounts.console import twofactor
 from glowderma.accounts.errors import MfaCodeInvalid
 from glowderma.accounts.models import AuthSession, StaffUser
+from glowderma.accounts.security.login_lockout import LoginGuard, email_hash
 from glowderma.core import alerts, audit, timeutils
 from glowderma.core.api.exceptions import Conflict
 from glowderma.core.uzsource import N_

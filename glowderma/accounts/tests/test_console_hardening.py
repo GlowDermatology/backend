@@ -18,9 +18,9 @@ from django_otp.plugins.otp_totp.models import TOTPDevice
 
 from glowderma.accounts import services as account_services
 from glowderma.accounts import topics
-from glowderma.accounts.api.guard import client_bucket
 from glowderma.accounts.console import access, state, twofactor
 from glowderma.accounts.models import StaffUser
+from glowderma.accounts.security.address_budget import client_bucket
 from glowderma.accounts.tests.factories import (
     TEST_PASSWORD,
     CustomerFactory,

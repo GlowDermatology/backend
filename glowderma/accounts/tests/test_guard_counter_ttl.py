@@ -5,7 +5,7 @@ import pytest
 from django.core.cache.backends.redis import RedisCache
 from redis.exceptions import RedisError
 
-from glowderma.accounts.api import guard
+from glowderma.accounts.security import counters
 
 
 class ExpiringClient:
@@ -69,9 +69,8 @@ def test_redis_increment_survives_expire_between_race(monkeypatch: pytest.Monkey
     backend = RedisCache("redis://localhost:6380/0", {})
     fake = ExpiringClient()
     backend.__dict__["_cache"] = fake
-    monkeypatch.setattr(guard, "cache", backend)
-    monkeypatch.setattr(guard, "caches", {"default": backend}, raising=False)
-    assert guard._increment("counter", 60) == 1
+    monkeypatch.setattr(counters, "caches", {"default": backend})
+    assert counters.increment_counter("counter", 60) == 1
     raw_key = backend.make_and_validate_key("counter")
     assert fake.ttls.get(raw_key) == 60
     assert [command[0] for command in fake.commands] == ["incr", "expire"]
@@ -93,15 +92,14 @@ def test_real_redis_counter_always_has_ttl(monkeypatch: pytest.MonkeyPatch) -> N
         client.close()
         pytest.skip("Development Redis is unavailable on localhost:6380")
     key = backend.make_and_validate_key("counter")
-    monkeypatch.setattr(guard, "cache", backend)
-    monkeypatch.setattr(guard, "caches", {"default": backend}, raising=False)
+    monkeypatch.setattr(counters, "caches", {"default": backend})
     try:
         client.set(key, 5)  # A persistent counter left by the old race is repaired too.
         for expected in range(6, 106):
-            assert guard._increment("counter", 60) == expected
+            assert counters.increment_counter("counter", 60) == expected
             assert 0 < cast(int, client.ttl(key)) <= 60
         client.expire(key, 0)
-        assert guard._increment("counter", 60) == 1
+        assert counters.increment_counter("counter", 60) == 1
         assert 0 < cast(int, client.ttl(key)) <= 60
     finally:
         client.delete(key)

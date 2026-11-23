@@ -35,9 +35,9 @@ from django.utils.text import capfirst
 from django_otp import DEVICE_ID_SESSION_KEY
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
-from glowderma.accounts.api.guard import email_hash
 from glowderma.accounts.console import access, state, twofactor
 from glowderma.accounts.models import AuthSession, Customer, StaffUser
+from glowderma.accounts.security.login_lockout import email_hash
 from glowderma.core import integration_modes, timeutils
 from glowderma.core.admin import ReadOnlyAdmin, column_field
 from glowderma.core.models import AuditEntry, OutboxMessage

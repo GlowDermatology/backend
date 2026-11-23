@@ -5,8 +5,8 @@ import pytest
 from django.core.cache import cache
 from rest_framework.exceptions import Throttled
 
-from glowderma.accounts.api import guard as guard_module
-from glowderma.accounts.api.guard import Lockout, LoginGuard, email_hash
+from glowderma.accounts.security import login_lockout as guard_module
+from glowderma.accounts.security.login_lockout import Lockout, LoginGuard, email_hash
 from glowderma.core import timeutils
 
 
