@@ -7,7 +7,8 @@
 #   security-codeql   ├─► test-shard 2/4 ─┼─► tests ─┐
 #   security-deps     │   test-shard 3/4 ─┤          │
 #   security-iac      ┘   test-shard 4/4 ─┘          │
-#                         e2e-console ───────────────┴─► build-publish ─► image-scan ─► deploy ─► cleanup-ghcr
+#                         e2e-console console 1-4/4 ─┤
+#                         e2e-console mutating 1-2/2 ┴─► build-publish ─► image-scan ─► deploy ─► cleanup-ghcr
 #
 # This job never touches a server and never sees a runtime secret.
 name: Backend CI
@@ -375,12 +376,24 @@ jobs:
   e2e-console:
     # The ops console in a real Chromium (e2e_admin/README.md): Playwright starts two Django servers
     # (config.settings.e2e) on fresh glowderma_e2e databases and runs every feature's test.
-    name: e2e-console
+    # Sharded: every job has its own servers and freshly seeded databases, so the `console` project runs in 4
+    # parts and `mutating` (one test at a time per server) in 2, each without its project dependency (--no-deps).
+    name: e2e-console (${{ matrix.project }} ${{ matrix.part }}/${{ matrix.parts }})
     needs: [security-gitleaks, security-semgrep, security-codeql, security-deps, security-iac]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-    timeout-minutes: 60
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { project: console, part: 1, parts: 4 }
+          - { project: console, part: 2, parts: 4 }
+          - { project: console, part: 3, parts: 4 }
+          - { project: console, part: 4, parts: 4 }
+          - { project: mutating, part: 1, parts: 2 }
+          - { project: mutating, part: 2, parts: 2 }
     services:
       postgres:
         image: postgres:18.6-trixie@sha256:3a4264520e121176619f54ff867d12774bc81e95e7b84db58d63bccdb6144b81
@@ -419,14 +432,17 @@ jobs:
         if: ${{ !inputs.skip_tests }}
         working-directory: e2e_admin
         run: npx playwright install --with-deps chromium
-      - name: Playwright suite
+      - name: Playwright suite (${{ matrix.project }}, part ${{ matrix.part }} of ${{ matrix.parts }})
         if: ${{ !inputs.skip_tests }}
-        run: npm --prefix e2e_admin test
+        env:
+          PROJECT: ${{ matrix.project }}
+          SHARD: ${{ matrix.part }}/${{ matrix.parts }}
+        run: npm --prefix e2e_admin test -- --project="$PROJECT" --no-deps --shard="$SHARD"
       - name: Report and failure screenshots
         if: ${{ !cancelled() && !inputs.skip_tests }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: e2e-console-report
+          name: e2e-console-report-${{ matrix.project }}-${{ matrix.part }}
           path: |
             e2e_admin/playwright-report/
             e2e_admin/test-results/
