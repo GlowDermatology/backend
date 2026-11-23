@@ -1,7 +1,7 @@
-"""The shape of every accounts package that sits behind a facade (``second_factor``, ``selectors``; the
-``models`` and ``services`` packages have their own tests): the facade only re-exports, every exported name
-has one home and is the same object there, and the submodules use absolute imports and import their siblings
-as modules, never a name through the facade."""
+"""The shape of every accounts package that sits behind a facade (``authentication``, ``second_factor``,
+``selectors``; ``models`` and ``services`` have their own tests): the facade only re-exports, every exported
+name has one home and is the same object there, and the submodules use absolute imports and import their
+siblings as modules, never a name through the facade."""
 
 from __future__ import annotations
 
@@ -12,7 +12,11 @@ from types import ModuleType
 
 import pytest
 
-FACADES = ["glowderma.accounts.second_factor", "glowderma.accounts.selectors"]
+FACADES = [
+    "glowderma.accounts.authentication",
+    "glowderma.accounts.second_factor",
+    "glowderma.accounts.selectors",
+]
 
 
 def submodules(facade: ModuleType) -> list[ModuleType]:

@@ -77,6 +77,18 @@ modules =
     glowderma.accounts.selectors.customer_sessions
     glowderma.accounts.selectors.customer_dashboard
 
+# accounts.authentication: the two JWT audiences above the shared header parsing (the facade is its
+# __init__, the dotted path settings and the OpenAPI extensions name).
+[importlinter:contract:accounts-authentication]
+name = accounts.authentication: JWT audiences above the header parsing
+type = layers
+containers =
+    glowderma.accounts.authentication
+exhaustive = true
+layers =
+    staff_jwt | customer_jwt
+    bearer | device_headers
+
 # accounts.services is a package (services/__init__.py is the facade callers import). Its submodules form
 # layers of their own, so the split stays acyclic and each name keeps a single home.
 [importlinter:contract:accounts-services-packages]
