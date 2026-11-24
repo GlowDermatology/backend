@@ -246,6 +246,11 @@ def booking_catalogue() -> QuerySet[Professional]:
     )
 
 
+def active_locations() -> QuerySet[Location]:
+    """The clinics customers see (``is_active``), in display order (position, id)."""
+    return Location.objects.filter(is_active=True).order_by("position", "id")
+
+
 # --- admin API (FND-1): specialists, services, schedules and the location ----------------------------------
 
 SEARCH_MAX_LENGTH = 64

@@ -13,10 +13,15 @@ from rest_framework.response import Response
 
 from glowderma.accounts.api.customer_base import PublicAPIView
 from glowderma.appointments import selectors
-from glowderma.appointments.api.customer.schemas.slots import SPECIALIST_SLOTS_GET
+from glowderma.appointments.api.customer.schemas.slots import (
+    SPECIALIST_AVAILABILITY_GET,
+    SPECIALIST_SLOTS_GET,
+)
 from glowderma.appointments.api.customer.serializers import (
+    AvailabilityQuerySerializer,
     FreeSlotsSerializer,
     SlotsQuerySerializer,
+    SpecialistAvailabilityListSerializer,
 )
 from glowderma.core import timeutils
 from glowderma.core.api.exceptions import field_error
@@ -90,6 +95,40 @@ class SpecialistSlotsView(PublicAPIView):
         return Response(FreeSlotsSerializer(payload).data)
 
 
+class SpecialistAvailabilityView(PublicAPIView):
+    """The storefront's "next free slot" badges: every listed specialist at once."""
+
+    public_cache_seconds = 60
+
+    @SPECIALIST_AVAILABILITY_GET
+    def get(self, request: Request) -> Response:
+        query = AvailabilityQuerySerializer(data=request.query_params.dict())
+        query.is_valid(raise_exception=True)
+        now = timeutils.now()
+        rows = selectors.specialists_availability(query.validated_data["days"], now)
+        payload = {
+            "generated_at": now,
+            "results": [
+                {
+                    "specialist_id": row.specialist_id,
+                    "next_slot": (
+                        None
+                        if row.next_slot is None
+                        else {
+                            "start": row.next_slot.start,
+                            "location_id": row.next_slot.location_id,
+                            "service_id": row.next_slot.service_id,
+                        }
+                    ),
+                    "slots_today": row.slots_today,
+                }
+                for row in rows
+            ],
+        }
+        return Response(SpecialistAvailabilityListSerializer(payload).data)
+
+
 __all__ = [
+    "SpecialistAvailabilityView",
     "SpecialistSlotsView",
 ]

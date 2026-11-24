@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections import defaultdict
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Any
@@ -13,10 +14,12 @@ from django.db.models.functions import TruncDate
 
 from glowderma.appointments.models import OPEN_STATUSES, Appointment
 from glowderma.core import enums, timeutils
-from glowderma.professionals.models import Professional, Service
+from glowderma.professionals.models import Location, Professional, Service
 from glowderma.professionals.selectors import (
     DAY_END_LABEL,
     DaySchedule,
+    active_locations,
+    assigned_locations,
     booking_catalogue,
     day_schedules,
     schedules_for_days,
@@ -343,30 +346,55 @@ class DayFrame:
     blocks: list[tuple[datetime, datetime]]
 
 
-def day_frame(professional_id: int, day: date, *, exclude_pk: int | None = None) -> DayFrame:
-    [schedule] = day_schedules(day, Professional.objects.filter(pk=professional_id))
+def frame_of(schedule: DaySchedule, day: date, appointments: Iterable[tuple[datetime, datetime]]) -> DayFrame:
+    """The :class:`DayFrame` of one schedule on ``day``: its hours and clinic, busy with its blocks (the
+    recurring break included) and ``appointments`` (the specialist's open ones touching the day)."""
     if schedule.working_hours is None or schedule.location is None:
         return DayFrame(hours=None, hours_labels=None, location_id=None, busy=[], blocks=[])
     hours = (clock(day, schedule.working_hours[0]), clock(day, schedule.working_hours[1]))
     blocks = [(clock(day, block.start), clock(day, block.end)) for block in schedule.blocks]
+    return DayFrame(
+        hours=hours,
+        hours_labels=schedule.working_hours,
+        location_id=schedule.location.pk,
+        busy=[*blocks, *appointments],
+        blocks=blocks,
+    )
+
+
+def day_frame(professional_id: int, day: date, *, exclude_pk: int | None = None) -> DayFrame:
+    [schedule] = day_schedules(day, Professional.objects.filter(pk=professional_id))
+    if schedule.working_hours is None or schedule.location is None:
+        return frame_of(schedule, day, [])
     day_start, day_end = timeutils.day_bounds(day)
     appointments = Appointment.objects.filter(
         professional_id=professional_id, status__in=OPEN_STATUSES, start__lt=day_end, end__gt=day_start
     )
     if exclude_pk is not None:
         appointments = appointments.exclude(pk=exclude_pk)
-    busy = [*blocks, *appointments.values_list("start", "end")]
-    return DayFrame(
-        hours=hours,
-        hours_labels=schedule.working_hours,
-        location_id=schedule.location.pk,
-        busy=busy,
-        blocks=blocks,
-    )
+    return frame_of(schedule, day, appointments.values_list("start", "end"))
 
 
 def _overlaps(start: datetime, end: datetime, ranges: list[tuple[datetime, datetime]]) -> bool:
     return any(other_start < end and other_end > start for other_start, other_end in ranges)
+
+
+def frame_slots(frame: DayFrame, *, step_min: int, duration_min: int, earliest: datetime) -> list[datetime]:
+    """The C§2.11 grid of one frame: candidates ``t = hours.start + k·step`` with ``t + duration ≤
+    hours.end``, dropping ``t < earliest`` (now + the lead time) and any overlap of ``[t, t + duration)``
+    with the frame's busy ranges. The single rule behind :func:`free_slots` and
+    :func:`specialists_availability`."""
+    if frame.hours is None:
+        return []
+    step = timedelta(minutes=step_min)
+    duration = timedelta(minutes=duration_min)
+    slots: list[datetime] = []
+    candidate, hours_end = frame.hours
+    while candidate + duration <= hours_end:
+        if candidate >= earliest and not _overlaps(candidate, candidate + duration, frame.busy):
+            slots.append(candidate)
+        candidate += step
+    return slots
 
 
 @dataclass(frozen=True, slots=True)
@@ -393,24 +421,23 @@ def free_slots(
     *,
     location_id: int | None = None,
 ) -> FreeSlots:
-    """The C§2.11 algorithm: candidates ``t = hours.start + k·step`` with ``t + duration ≤ hours.end``; drop
-    ``t < now + BOOKING_MIN_LEAD_MINUTES`` and any overlap of ``[t, t + duration)`` with blocked periods, the
+    """The C§2.11 algorithm (:func:`frame_slots`) for one service at one clinic: blocked periods, the
     recurring break and the ``requested``/``confirmed`` appointments of the specialist (pending requests hold
-    the slot)."""
+    the slot) are busy; a day spent at another clinic has no slot."""
     instant = timeutils.now() if now is None else now
     frame = day_frame(professional.pk, day)
     selected_location = professional.location_id if location_id is None else location_id
     matching_location = frame.location_id == selected_location
-    step = timedelta(minutes=professional.slot_step_min)
-    duration = timedelta(minutes=service.duration_min)
-    slots: list[datetime] = []
-    if matching_location and frame.hours is not None:
-        earliest = instant + lead_time()
-        candidate, hours_end = frame.hours
-        while candidate + duration <= hours_end:
-            if candidate >= earliest and not _overlaps(candidate, candidate + duration, frame.busy):
-                slots.append(candidate)
-            candidate += step
+    slots = (
+        frame_slots(
+            frame,
+            step_min=professional.slot_step_min,
+            duration_min=service.duration_min,
+            earliest=instant + lead_time(),
+        )
+        if matching_location
+        else []
+    )
     return FreeSlots(
         day=day,
         professional_id=professional.pk,
@@ -545,3 +572,136 @@ def service_offers() -> list[ServiceOffer]:
     return [
         ServiceOffer(service, service.price, service.price, [service.professional_id]) for service in rows
     ]
+
+
+# --- the storefront landing page: next free slots and the clinics (public, O) ---
+
+AVAILABILITY_MAX_DAYS = 14
+AVAILABILITY_DEFAULT_DAYS = 7
+
+
+def shortest_service(professional: Professional) -> Service | None:
+    """The specialist's quickest bookable service (ties by position, then id), else ``None``."""
+    services = bookable_services(professional)
+    if not services:
+        return None
+    return min(services, key=lambda service: (service.duration_min, service.position, service.pk))
+
+
+@dataclass(frozen=True, slots=True)
+class NextSlot:
+    start: datetime
+    location_id: int
+    service_id: int
+
+
+@dataclass(frozen=True, slots=True)
+class SpecialistAvailability:
+    specialist_id: int
+    next_slot: NextSlot | None
+    slots_today: int
+
+
+def specialists_availability(days: int, now: datetime | None = None) -> list[SpecialistAvailability]:
+    """Every listed specialist's first free slot over ``days`` Tashkent days from today (never past the
+    booking horizon) and the number of free slots today, both for the specialist's shortest active service at
+    the clinic the day's schedule names (one of the specialist's active clinics), by :func:`frame_slots`.
+
+    Seven queries whatever the number of specialists and days: the catalogue (3), the schedules
+    (:func:`schedules_for_many`, 3) and one read of the open appointments touching the span."""
+    instant = timeutils.now() if now is None else now
+    today = customer_today(instant)
+    last = min(today + timedelta(days=max(1, days) - 1), booking_horizon_end(instant))
+    wanted = [today + timedelta(days=offset) for offset in range((last - today).days + 1)]
+    rows = specialists()
+    schedules = schedules_for_many(rows, wanted)
+    span_start, _ = timeutils.day_bounds(wanted[0])
+    _, span_end = timeutils.day_bounds(wanted[-1])
+    busy: dict[int, list[tuple[datetime, datetime]]] = defaultdict(list)
+    if rows:
+        for professional_id, start, end in Appointment.objects.filter(
+            professional_id__in=[row.pk for row in rows],
+            status__in=OPEN_STATUSES,
+            start__lt=span_end,
+            end__gt=span_start,
+        ).values_list("professional_id", "start", "end"):
+            busy[professional_id].append((start, end))
+    earliest = instant + lead_time()
+    result: list[SpecialistAvailability] = []
+    for professional in rows:
+        service = shortest_service(professional)
+        clinics = {location.pk for location in assigned_locations(professional, active_only=True)}
+        next_slot: NextSlot | None = None
+        slots_today = 0
+        for day in wanted:
+            if service is None:
+                break
+            day_start, day_end = timeutils.day_bounds(day)
+            appointments = [(s, e) for s, e in busy[professional.pk] if s < day_end and e > day_start]
+            frame = frame_of(schedules[(professional.pk, day)], day, appointments)
+            if frame.location_id is None or frame.location_id not in clinics:
+                continue
+            slots = frame_slots(
+                frame,
+                step_min=professional.slot_step_min,
+                duration_min=service.duration_min,
+                earliest=earliest,
+            )
+            if day == today:
+                slots_today = len(slots)
+            if slots:
+                next_slot = NextSlot(start=slots[0], location_id=frame.location_id, service_id=service.pk)
+                break
+        result.append(
+            SpecialistAvailability(
+                specialist_id=professional.pk, next_slot=next_slot, slots_today=slots_today
+            )
+        )
+    return result
+
+
+@dataclass(frozen=True, slots=True)
+class ClinicToday:
+    location: Location
+    specialist_count: int
+    today_hours: tuple[str, str] | None  # earliest start, latest end of the clinic's specialists today
+    open_now: bool
+
+
+def clinics_today(now: datetime | None = None) -> list[ClinicToday]:
+    """The active clinics in display order with their listed specialists (primary or additional clinic) and
+    today's opening: the union of today's working hours of the listed specialists whose schedule names the
+    clinic (earliest start, latest end; ``None`` = nobody works there today). Seven queries."""
+    instant = timeutils.now() if now is None else now
+    today = customer_today(instant)
+    locations = list(active_locations())
+    rows = specialists()
+    schedules = schedules_for_many(rows, [today])
+    counts: dict[int, int] = defaultdict(int)
+    hours: dict[int, tuple[str, str]] = {}
+    for professional in rows:
+        for location in assigned_locations(professional, active_only=True):
+            counts[location.pk] += 1
+        schedule = schedules[(professional.pk, today)]
+        if schedule.working_hours is None or schedule.location is None:
+            continue
+        start, end = schedule.working_hours
+        known = hours.get(schedule.location.pk)
+        hours[schedule.location.pk] = (
+            (start, end) if known is None else (min(known[0], start), max(known[1], end))
+        )
+    result: list[ClinicToday] = []
+    for location in locations:
+        today_hours = hours.get(location.pk)
+        open_now = today_hours is not None and (
+            clock(today, today_hours[0]) <= instant < clock(today, today_hours[1])
+        )
+        result.append(
+            ClinicToday(
+                location=location,
+                specialist_count=counts[location.pk],
+                today_hours=today_hours,
+                open_now=open_now,
+            )
+        )
+    return result

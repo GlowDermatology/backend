@@ -6,6 +6,9 @@ from typing import Any
 
 from rest_framework import serializers
 
+from glowderma.appointments import selectors
+from glowderma.core.api.fields import AwareDateTimeField
+
 
 class SlotsQuerySerializer(serializers.Serializer[dict[str, Any]]):
     location_id = serializers.IntegerField(min_value=1, max_value=2_147_483_647)
@@ -36,8 +39,39 @@ class FreeSlotsSerializer(serializers.Serializer[Any]):
     slots = SlotSerializer(many=True)
 
 
+class AvailabilityQuerySerializer(serializers.Serializer[dict[str, Any]]):
+    days = serializers.IntegerField(
+        min_value=1,
+        max_value=selectors.AVAILABILITY_MAX_DAYS,
+        required=False,
+        default=selectors.AVAILABILITY_DEFAULT_DAYS,
+        help_text="Tashkent days from today to search for the next slot (never past the booking horizon).",
+    )
+
+
+class NextSlotSerializer(serializers.Serializer[Any]):
+    start = AwareDateTimeField()
+    location_id = serializers.IntegerField()
+    service_id = serializers.IntegerField(help_text="The specialist's shortest active service.")
+
+
+class SpecialistAvailabilitySerializer(serializers.Serializer[Any]):
+    specialist_id = serializers.IntegerField()
+    next_slot = NextSlotSerializer(allow_null=True)
+    slots_today = serializers.IntegerField(help_text="Free slots today for the shortest active service.")
+
+
+class SpecialistAvailabilityListSerializer(serializers.Serializer[Any]):
+    generated_at = AwareDateTimeField()
+    results = SpecialistAvailabilitySerializer(many=True)
+
+
 __all__ = [
+    "AvailabilityQuerySerializer",
     "FreeSlotsSerializer",
+    "NextSlotSerializer",
+    "SpecialistAvailabilityListSerializer",
+    "SpecialistAvailabilitySerializer",
     "SlotSerializer",
     "SlotWorkingHoursSerializer",
     "SlotsQuerySerializer",

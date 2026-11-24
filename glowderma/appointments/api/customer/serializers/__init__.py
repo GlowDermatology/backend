@@ -15,6 +15,9 @@ from glowderma.appointments.api.customer.serializers.bookings import (
     CustomerAppointmentSerializer,
 )
 from glowderma.appointments.api.customer.serializers.catalogue import (
+    ClinicHoursSerializer,
+    ClinicListSerializer,
+    ClinicSerializer,
     LocationSerializer,
     ServiceListSerializer,
     ServiceOfferSerializer,
@@ -30,26 +33,37 @@ from glowderma.appointments.api.customer.serializers.fields import (
     serializer_language,
 )
 from glowderma.appointments.api.customer.serializers.slots import (
+    AvailabilityQuerySerializer,
     FreeSlotsSerializer,
+    NextSlotSerializer,
     SlotSerializer,
     SlotsQuerySerializer,
     SlotWorkingHoursSerializer,
+    SpecialistAvailabilityListSerializer,
+    SpecialistAvailabilitySerializer,
 )
 
 __all__ = [
     "AnyOffsetDateTimeField",
     "AppointmentServiceSerializer",
+    "AvailabilityQuerySerializer",
     "AppointmentSpecialistSerializer",
     "BookingSerializer",
     "CancelSerializer",
+    "ClinicHoursSerializer",
+    "ClinicListSerializer",
+    "ClinicSerializer",
     "CustomerAppointmentSerializer",
     "FreeSlotsSerializer",
     "LocationSerializer",
+    "NextSlotSerializer",
     "ServiceListSerializer",
     "ServiceOfferSerializer",
     "SlotSerializer",
     "SlotWorkingHoursSerializer",
     "SlotsQuerySerializer",
+    "SpecialistAvailabilityListSerializer",
+    "SpecialistAvailabilitySerializer",
     "SpecialistListSerializer",
     "SpecialistSerializer",
     "SpecialistServiceSerializer",

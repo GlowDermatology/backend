@@ -15,20 +15,24 @@ from glowderma.appointments.api.customer.views.bookings import (
     MyAppointmentsViewSet,
 )
 from glowderma.appointments.api.customer.views.catalogue import (
+    ClinicListView,
     ServiceListView,
     SpecialistBySlugView,
     SpecialistDetailView,
     SpecialistListView,
 )
 from glowderma.appointments.api.customer.views.slots import (
+    SpecialistAvailabilityView,
     SpecialistSlotsView,
 )
 
 __all__ = [
     "AppointmentCancelView",
     "AppointmentCreateView",
+    "ClinicListView",
     "MyAppointmentsViewSet",
     "ServiceListView",
+    "SpecialistAvailabilityView",
     "SpecialistBySlugView",
     "SpecialistDetailView",
     "SpecialistListView",

@@ -61,7 +61,7 @@ STATUS_COUNT_KEYS: tuple[str, ...] = ("all", *enums.OrderStatus.values)
 # --- available stock (03 §1.6) ------------------------------------------------------------------------------
 
 
-def _stock_rows() -> QuerySet[ProductStock]:
+def _stock_rows() -> QuerySet[Any]:  # ProductStock rows with the annotations below
     """Every ``ProductStock`` row annotated with ``held`` (active reservations), ``sold`` (converted units
     Billz has not seen sold) and ``available`` (``quantity − held − sold``): the rules of
     :func:`available_stock`, shared by the customer stock counts below."""

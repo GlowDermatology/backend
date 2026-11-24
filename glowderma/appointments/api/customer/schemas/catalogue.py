@@ -6,6 +6,7 @@ from drf_spectacular.utils import extend_schema
 
 from glowderma.appointments.api.customer.schemas.common import PUBLIC_HEADERS
 from glowderma.appointments.api.customer.serializers import (
+    ClinicListSerializer,
     ServiceListSerializer,
     SpecialistListSerializer,
     SpecialistSerializer,
@@ -42,8 +43,19 @@ SERVICE_LIST_GET = extend_schema(
     responses={200: ServiceListSerializer, **PUBLIC_CUSTOMER_ERRORS},
 )
 
+CLINIC_LIST_GET = extend_schema(
+    operation_id="customer_clinics_list",
+    description=(
+        "Active clinics by position with their listed specialists, today's opening (the union of the "
+        "specialists' working hours there today) and whether they are open now (Tashkent)."
+    ),
+    parameters=PUBLIC_HEADERS,
+    responses={200: ClinicListSerializer, **PUBLIC_CUSTOMER_ERRORS},
+)
+
 
 __all__ = [
+    "CLINIC_LIST_GET",
     "SERVICE_LIST_GET",
     "SPECIALIST_BY_SLUG_GET",
     "SPECIALIST_DETAIL_GET",

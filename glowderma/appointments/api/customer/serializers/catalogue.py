@@ -50,6 +50,27 @@ class LocationSerializer(serializers.Serializer[Location]):
         return coordinate(obj.longitude)
 
 
+class ClinicHoursSerializer(serializers.Serializer[Any]):
+    start = serializers.CharField(help_text='"HH:MM" Tashkent.')
+    end = serializers.CharField(help_text='"HH:MM" Tashkent.')
+
+
+class ClinicSerializer(LocationSerializer):
+    specialist_count = serializers.IntegerField(help_text="Listed specialists working at this clinic.")
+    today_hours = ClinicHoursSerializer(
+        allow_null=True,
+        help_text=(
+            "Today's opening: the earliest start and latest end of the listed specialists working here "
+            "today; null = nobody works here today."
+        ),
+    )
+    open_now = serializers.BooleanField(help_text="Tashkent now is within `today_hours`.")
+
+
+class ClinicListSerializer(serializers.Serializer[Any]):
+    results = ClinicSerializer(many=True)
+
+
 class SpecialistServiceSerializer(serializers.Serializer[Service]):
     id = serializers.IntegerField()
     name = serializers.SerializerMethodField()
