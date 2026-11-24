@@ -342,8 +342,7 @@ def test_production_process_with_every_provider_fake_boots_and_warns(
     )
     assert (
         "MODES ['ai', 'billz', 'bts', 'click', 'devsms', 'email', 'fcm', 'oauth', 'payme', 'uzum', 'vault', "
-        "'yandex']"
-        in result.stdout
+        "'yandex']" in result.stdout
     )
 
 
