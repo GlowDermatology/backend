@@ -9,9 +9,33 @@ from django.db import connection, transaction
 # The only append-only tables a retention job may delete from, and only inside purge_window() (decision T6).
 PURGEABLE_TABLES: tuple[str, ...] = ("core_auditentry", "integrations_webhookinbox")
 
+# The append-only histories of one customer's money-free rows that the ops console's full purge of that
+# customer deletes (``customers.services.purge_customer``), only inside customer_purge_window(). The money
+# histories (loyalty, shipments) are never opened: a customer who has any is refused before anything is
+# deleted.
+CUSTOMER_PURGE_TABLES: tuple[str, ...] = ("commerce_orderevent", "appointments_appointmentevent")
+
 # Every trigger migration re-runs this CREATE OR REPLACE, so the body must stay the single source of truth:
 # a migration that emitted an older body would silently revert the purge window.
 FORBID_MUTATION_FUNCTION = """
+CREATE OR REPLACE FUNCTION glowderma_forbid_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE'
+       AND current_setting('glowderma.allow_purge', true) = 'on'
+       AND TG_TABLE_NAME IN ('core_auditentry', 'integrations_webhookinbox') THEN
+        RETURN OLD;
+    END IF;
+    IF TG_OP = 'DELETE'
+       AND current_setting('glowderma.allow_customer_purge', true) = 'on'
+       AND TG_TABLE_NAME IN ('commerce_orderevent', 'appointments_appointmentevent') THEN
+        RETURN OLD;
+    END IF;
+    RAISE EXCEPTION 'append-only table %', TG_TABLE_NAME;
+END $$;
+"""
+
+# The core.0008 body (retention purge window only), kept so core.0015 can be reversed.
+RETENTION_ONLY_FORBID_MUTATION_FUNCTION = """
 CREATE OR REPLACE FUNCTION glowderma_forbid_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     IF TG_OP = 'DELETE'
@@ -50,4 +74,16 @@ def purge_window() -> Iterator[None]:
     """
     with transaction.atomic(), connection.cursor() as cursor:
         cursor.execute("SET LOCAL glowderma.allow_purge = 'on'")
+        yield
+
+
+@contextmanager
+def customer_purge_window() -> Iterator[None]:
+    """A transaction in which the full purge of one customer may DELETE from CUSTOMER_PURGE_TABLES.
+
+    Like :func:`purge_window`: ``SET LOCAL`` (this transaction only), never an UPDATE, and the ORM's
+    AppendOnlyQuerySet still refuses, so the purge issues plain SQL ``DELETE … WHERE <parent>_id = ANY(%s)``.
+    """
+    with transaction.atomic(), connection.cursor() as cursor:
+        cursor.execute("SET LOCAL glowderma.allow_customer_purge = 'on'")
         yield

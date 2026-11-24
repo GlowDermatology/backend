@@ -18,8 +18,9 @@ ROLES = ("anon", "customer_like", "staff", "manager")
 
 def console_client(role: str, *, enforce_csrf_checks: bool = False) -> Client:
     """``anon`` (no session), ``customer_like`` (an active user without ``is_staff``), ``staff`` (a plain
-    active staff member) or ``manager`` (``is_manager``). Every signed-in role holds a 2FA-verified console
-    session (``ops_helpers``), so a refusal is about the role, never about a missing second factor."""
+    active staff member), ``manager`` (``is_manager``) or ``superuser`` (not in :data:`ROLES`: for the
+    superuser-only actions). Every signed-in role holds a 2FA-verified console session (``ops_helpers``), so a
+    refusal is about the role, never about a missing second factor."""
     client = Client(enforce_csrf_checks=enforce_csrf_checks)
     if role == "anon":
         return client
@@ -27,6 +28,7 @@ def console_client(role: str, *, enforce_csrf_checks: bool = False) -> Client:
         "customer_like": {"is_staff": False},
         "staff": {"is_staff": True},
         "manager": {"is_staff": True, "is_manager": True},
+        "superuser": {"is_staff": True, "is_superuser": True, "is_manager": True},
     }[role]
     user = get_user_model().objects.create_user(f"{role}-{uuid.uuid4().hex[:8]}@ops.uz", PASSWORD, **flags)
     if user.is_staff:
