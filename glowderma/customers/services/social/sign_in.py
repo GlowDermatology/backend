@@ -12,11 +12,11 @@ from django.core.cache import cache
 from django.db import IntegrityError, transaction
 
 from glowderma.accounts import services as account_services
-from glowderma.accounts.models import Customer, CustomerSocialIdentity
+from glowderma.accounts.models import CustomerSocialIdentity
 from glowderma.core import enums
 from glowderma.core.pii import pii_ref
 from glowderma.customers.services.common import results, trail
-from glowderma.customers.services.social import tickets, tokens
+from glowderma.customers.services.social import tickets, tokens, trusted_email
 from glowderma.integrations.oauth.ports import AppTokenClaims
 
 
@@ -151,7 +151,7 @@ def _sign_in_linked(
         # Repairs social-only accounts created before the address was kept on sign-up. Never an account with
         # a phone or password: the identity alone must not add a way to reset it (review B-W2 #1).
         if claims.trusted_email and not customer.phone and not customer.password:
-            adopt_trusted_email(customer, claims.email)
+            trusted_email.adopt_trusted_email(customer, claims.email)
         started = account_services.start_customer_session(
             customer.pk,
             device.fid,
@@ -164,24 +164,6 @@ def _sign_in_linked(
         return results.SignIn(started, customer.pk)
 
 
-def adopt_trusted_email(customer: Customer, email: str | None) -> None:
-    """One mailbox, one account, completed: an account with a trusted Google identity (``trusted_email``,
-    vouched by the provider) but no address of its own takes that address (``email_verified_at`` = now),
-    unless another account holds it. Called under the caller's customer lock after a Google sign-in or a
-    phone completion; a lost race for the address keeps the account without one rather than failing."""
-    if customer.email or not email:
-        return
-    address = account_services.normalize_email(email)
-    if Customer.objects.filter(email=address).exists():
-        return
-    try:
-        account_services.set_customer_email(customer.pk, address)
-    except IntegrityError:
-        return
-    customer.email = address
-
-
 __all__ = [
-    "adopt_trusted_email",
     "social_sign_in",
 ]
