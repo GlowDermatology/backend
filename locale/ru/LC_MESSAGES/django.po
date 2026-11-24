@@ -7432,7 +7432,7 @@ msgstr "примечание клиента"
 msgid "mijoz to‘lovi"
 msgstr "плата клиента"
 
-#: glowderma/customers/api/admin/views.py
+#: glowderma/customers/api/admin/views/customers.py
 #: model metadata
 msgid "mijozlar"
 msgstr "клиенты"

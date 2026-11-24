@@ -5,8 +5,12 @@ Every route name is prefixed ``admin-`` and unique across modules; the auth matr
 
 from django.urls import URLPattern, URLResolver, path
 
-from .session_views import CustomerSessionDetailView, CustomerSessionsViewSet
-from .views import CashbackAdjustmentView, CustomerViewSet
+from glowderma.customers.api.admin.views import (
+    CashbackAdjustmentView,
+    CustomerSessionDetailView,
+    CustomerSessionsViewSet,
+    CustomerViewSet,
+)
 
 customers = CustomerViewSet.as_view({"get": "list"})
 customer = CustomerViewSet.as_view({"get": "retrieve"})

@@ -278,9 +278,9 @@ def test_login_timing_parity_one_hash_each(monkeypatch: pytest.MonkeyPatch) -> N
     deleted = password_customer("+998901112234")
     account_services.delete_customer(deleted.pk)
     Customer.objects.create(phone="+998901112235", name="Social")  # no password
-    from glowderma.customers import services
+    from glowderma.customers.services.common import passwords as customer_passwords
 
-    services._dummy_hash()  # computed once, outside the measurement
+    customer_passwords._dummy_hash()  # computed once, outside the measurement
     for phone, password in (
         ("+998909999997", PASSWORD),
         ("+998901112234", PASSWORD),

@@ -7338,7 +7338,7 @@ msgstr "customer note"
 msgid "mijoz to‘lovi"
 msgstr "customer fee"
 
-#: glowderma/customers/api/admin/views.py
+#: glowderma/customers/api/admin/views/customers.py
 #: model metadata
 msgid "mijozlar"
 msgstr "customers"

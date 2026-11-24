@@ -300,3 +300,134 @@ forbidden_modules =
     glowderma.accounts.admin
     glowderma.accounts.management
 
+# customers.api: per audience, routes above the views, above their OpenAPI declarations and response bodies,
+# above the serializers; inside each package, one module per subject above the shared pieces.
+[importlinter:contract:customers-api-customer]
+name = customers.api.customer: urls above views above schemas and payloads above serializers
+type = layers
+containers =
+    glowderma.customers.api.customer
+exhaustive = true
+layers =
+    urls
+    views
+    schemas | payloads
+    serializers
+
+[importlinter:contract:customers-api-customer-views]
+name = customers.api.customer.views: one module per subject above the shared base
+type = layers
+containers =
+    glowderma.customers.api.customer.views
+exhaustive = true
+layers =
+    auth | social | me | me_social | contacts | addresses | sessions | catalog
+    common
+
+[importlinter:contract:customers-api-customer-schemas]
+name = customers.api.customer.schemas: one module per views module above the shared declarations
+type = layers
+containers =
+    glowderma.customers.api.customer.schemas
+exhaustive = true
+layers =
+    auth | social | me | me_social | contacts | addresses | sessions | catalog
+    common | delete_body
+
+[importlinter:contract:customers-api-customer-serializers]
+name = customers.api.customer.serializers: subjects above the profile, its addresses and the field factories
+type = layers
+containers =
+    glowderma.customers.api.customer.serializers
+exhaustive = true
+layers =
+    auth | social | contacts | sessions | catalog
+    me
+    addresses
+    fields
+
+[importlinter:contract:customers-api-admin]
+name = customers.api.admin: urls above views above schemas above serializers
+type = layers
+containers =
+    glowderma.customers.api.admin
+exhaustive = true
+layers =
+    urls
+    views
+    schemas
+    serializers
+
+[importlinter:contract:customers-api-admin-views]
+name = customers.api.admin.views: one independent module per subject
+type = independence
+modules =
+    glowderma.customers.api.admin.views.customers
+    glowderma.customers.api.admin.views.cashback
+    glowderma.customers.api.admin.views.sessions
+
+# customers.services is a package (services/__init__.py is the facade callers import): the signed-in writes
+# above social sign-in, above the sign-in flows, above what they all share.
+[importlinter:contract:customers-services]
+name = customers.services: me above social above auth above common
+type = layers
+containers =
+    glowderma.customers.services
+exhaustive = true
+layers =
+    me | cashback
+    social
+    auth
+    common
+
+[importlinter:contract:customers-services-common]
+name = customers.services.common: identities and terms above passwords and the trail above identifiers
+type = layers
+containers =
+    glowderma.customers.services.common
+exhaustive = true
+layers =
+    identities | published_terms
+    passwords | trail | results
+    identifiers
+
+[importlinter:contract:customers-services-auth]
+name = customers.services.auth: the flows above the dormant-account rule
+type = layers
+containers =
+    glowderma.customers.services.auth
+exhaustive = true
+layers =
+    recovery | login | registration
+    dormancy
+
+[importlinter:contract:customers-services-social]
+name = customers.services.social: sign-in and completion above the ticket, the token checks and revocation
+type = layers
+containers =
+    glowderma.customers.services.social
+exhaustive = true
+layers =
+    completion | sign_in
+    tickets | tokens | apple_revocation
+
+[importlinter:contract:customers-services-me]
+name = customers.services.me: social links above the other writes above re-authentication
+type = layers
+containers =
+    glowderma.customers.services.me
+exhaustive = true
+layers =
+    social_links
+    contacts | password | deletion | profile | addresses
+    reauth
+
+[importlinter:contract:customers-selectors]
+name = customers.selectors: admin, account and catalog reads above the shared helpers
+type = layers
+containers =
+    glowderma.customers.selectors
+exhaustive = true
+layers =
+    admin | account | catalog
+    common

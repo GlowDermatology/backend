@@ -19,6 +19,7 @@ from glowderma.accounts.models import Customer, CustomerSocialIdentity, SmsCode,
 from glowderma.accounts.tests.factories import CustomerSocialIdentityFactory, start_test_session
 from glowderma.core.models import AuditEntry, OutboxMessage
 from glowderma.customers import services
+from glowderma.customers.services.social import tokens as social_tokens
 from glowderma.customers.tests.p1_support import (
     FID,
     OTHER_FID,
@@ -318,9 +319,9 @@ def test_fake_oauth_in_production_is_404_on_the_customer_routes() -> None:
 def test_wildcard_nonce_only_under_local_settings() -> None:
     assert social(app_client(), "fake:g-1:a@gmail.com", nonce="*").status_code == 200
     with override_settings(OAUTH_MODE="fake"):
-        assert services._nonce_accepted("*", FID) is True
+        assert social_tokens._nonce_accepted("*", FID) is True
     with override_settings(DEV_FEATURES_ALLOWED=False):
-        assert services._nonce_accepted("*", FID) is False
+        assert social_tokens._nonce_accepted("*", FID) is False
 
 
 STAFF = "/api/v1/admin/auth/oauth/"

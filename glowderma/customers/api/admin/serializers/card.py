@@ -1,10 +1,4 @@
-"""Admin serializers of `customers` (contract §2.6; display rules §5.3).
-
-Every serializer reads the frozen rows of ``loyalty.selectors`` / ``customers.selectors`` (attributes named as
-the contract keys); none touches another module's ORM row except the annotated ``Customer`` of the list.
-``CustomerListItem`` is declared once, by ``notifications`` (the segment members list returns the same shape),
-and the list view renders with it over rows annotated by ``loyalty.selectors.list_annotations()``.
-"""
+"""The admin customer card (admin contract §2.6): ledger, purchases, totals, tier, groups and devices."""
 
 from __future__ import annotations
 
@@ -16,22 +10,7 @@ from rest_framework import serializers
 from glowderma.core import enums
 from glowderma.core.api.fields import PercentField
 from glowderma.core.api.serializers import ActorSerializer
-from glowderma.customers.selectors import DEFAULT_ORDERING, ORDERINGS, SEARCH_MAX_LENGTH
 from glowderma.loyalty.selectors import LedgerRow
-from glowderma.loyalty.services import ADJUSTMENT_MAX_AMOUNT, ADJUSTMENT_MIN_AMOUNT
-
-REASON_MIN_LENGTH = 3
-REASON_MAX_LENGTH = 300
-
-
-class CustomerListQuerySerializer(serializers.Serializer[dict[str, Any]]):
-    search = serializers.CharField(required=False, allow_blank=True, max_length=SEARCH_MAX_LENGTH)
-    status = serializers.ChoiceField(choices=enums.CustomerStatus.values, required=False)
-    segment = serializers.IntegerField(required=False, min_value=1)
-    ordering = serializers.ChoiceField(choices=list(ORDERINGS), required=False, default=DEFAULT_ORDERING)
-
-
-# --- card -------------------------------------------------------------------------------------------------
 
 
 class LedgerEntrySerializer(serializers.Serializer[LedgerRow]):
@@ -181,28 +160,15 @@ class CustomerCardSerializer(serializers.Serializer[Any]):
     purchases = PurchaseSerializer(many=True)
 
 
-# --- adjustments ------------------------------------------------------------------------------------------
-
-
-class CashbackAdjustmentSerializer(serializers.Serializer[dict[str, Any]]):
-    """``POST customers/{id}/cashback-adjustments/`` body (OpenAPI shape).
-
-    The view validates ``direction`` here and hands ``amount`` / ``reason`` as received to the service, which
-    runs the contract checks in order with the table's messages.
-    """
-
-    direction = serializers.ChoiceField(choices=enums.AdjustmentDirection.values)
-    amount = serializers.IntegerField(min_value=ADJUSTMENT_MIN_AMOUNT, max_value=ADJUSTMENT_MAX_AMOUNT)
-    reason = serializers.CharField(min_length=REASON_MIN_LENGTH, max_length=REASON_MAX_LENGTH)
-
-
-class CashbackAdjustmentDirectionSerializer(serializers.Serializer[dict[str, Any]]):
-    direction = serializers.ChoiceField(choices=enums.AdjustmentDirection.values)
-
-
-class CashbackAdjustmentResultSerializer(serializers.Serializer[Any]):
-    """201: the new ``adjustment`` entry, the balance after it and ``available`` (balance − active holds)."""
-
-    entry = LedgerEntrySerializer()
-    balance = serializers.IntegerField()
-    available = serializers.IntegerField()
+__all__ = [
+    "CustomerCardSerializer",
+    "CustomerDeviceRowSerializer",
+    "CustomerDeviceSerializer",
+    "CustomerGroupSerializer",
+    "CustomerTierSerializer",
+    "CustomerTotalsSerializer",
+    "LedgerEntrySerializer",
+    "NextTierSerializer",
+    "OnlineOrdersSerializer",
+    "PurchaseSerializer",
+]

@@ -6,24 +6,28 @@ from __future__ import annotations
 
 from typing import Any
 
-from drf_spectacular.types import OpenApiTypes
-from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from glowderma.accounts.api.customer_base import PublicAPIView
+from glowderma.accounts.api.customer_base import (
+    PublicAPIView,
+)
 from glowderma.accounts.models import Customer
 from glowderma.catalog import selectors as catalog_selectors
 from glowderma.catalog.models import Product
 from glowderma.core import timeutils
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.pagination import EnvelopePagination
-from glowderma.core.api.schema import ACCEPT_LANGUAGE_HEADER, OPTIONAL_DEVICE_HEADERS, PUBLIC_CUSTOMER_ERRORS
 from glowderma.customers import selectors
 from glowderma.customers.api.customer import serializers as s
-
-PARAMETERS = [*OPTIONAL_DEVICE_HEADERS, ACCEPT_LANGUAGE_HEADER]
+from glowderma.customers.api.customer.schemas.catalog import (
+    BANNERS_GET,
+    CATEGORIES_GET,
+    PRODUCT_BY_SLUG_GET,
+    PRODUCT_DETAIL_GET,
+    PRODUCT_LIST_GET,
+)
 
 
 def customer_id(request: Request) -> int | None:
@@ -34,11 +38,7 @@ def customer_id(request: Request) -> int | None:
 class BannersView(PublicAPIView):
     public_cache_seconds = 60
 
-    @extend_schema(
-        operation_id="customer_catalog_banners_list",
-        parameters=PARAMETERS,
-        responses={200: s.CustomerBannerListSerializer, **PUBLIC_CUSTOMER_ERRORS},
-    )
+    @BANNERS_GET
     def get(self, request: Request) -> Response:
         banners = selectors.customer_banners(timeutils.now())
         product_ids = [banner.link_product_id for banner in banners if banner.link_product_id]
@@ -50,11 +50,7 @@ class BannersView(PublicAPIView):
 class CategoriesView(PublicAPIView):
     public_cache_seconds = 60
 
-    @extend_schema(
-        operation_id="customer_catalog_categories_list",
-        parameters=PARAMETERS,
-        responses={200: s.CustomerCategoryListSerializer, **PUBLIC_CUSTOMER_ERRORS},
-    )
+    @CATEGORIES_GET
     def get(self, request: Request) -> Response:
         lang = self.language
         return Response(
@@ -70,11 +66,7 @@ class ProductListView(PublicAPIView):
     page_size_options = (20, 50)
     default_page_size = 20
 
-    @extend_schema(
-        operation_id="customer_catalog_products_list",
-        parameters=[*PARAMETERS, s.ProductListQuerySerializer],
-        responses={200: s.ProductCardSerializer(many=True), **PUBLIC_CUSTOMER_ERRORS},
-    )
+    @PRODUCT_LIST_GET
     def get(self, request: Request) -> Response:
         query = s.ProductListQuerySerializer(data=request.query_params.dict())
         query.is_valid(raise_exception=True)
@@ -101,11 +93,7 @@ class ProductListView(PublicAPIView):
 class ProductDetailView(PublicAPIView):
     public_cache_seconds = 30
 
-    @extend_schema(
-        operation_id="customer_catalog_products_retrieve",
-        parameters=[*PARAMETERS, OpenApiParameter("id", OpenApiTypes.INT, OpenApiParameter.PATH)],
-        responses={200: s.ProductDetailSerializer, **PUBLIC_CUSTOMER_ERRORS},
-    )
+    @PRODUCT_DETAIL_GET
     def get(self, request: Request, pk: int) -> Response:
         product = selectors.customer_products().filter(pk=pk).first()
         if product is None:
@@ -119,14 +107,19 @@ class ProductBySlugView(PublicAPIView):
 
     public_cache_seconds = 30
 
-    @extend_schema(
-        operation_id="customer_catalog_products_by_slug_retrieve",
-        description="One visible product by its website slug (B-W1); the same shape as the id route.",
-        parameters=[*PARAMETERS, OpenApiParameter("slug", OpenApiTypes.STR, OpenApiParameter.PATH)],
-        responses={200: s.ProductDetailSerializer, **PUBLIC_CUSTOMER_ERRORS},
-    )
+    @PRODUCT_BY_SLUG_GET
     def get(self, request: Request, slug: str) -> Response:
         product = selectors.customer_products().filter(slug=slug).first()
         if product is None:
             raise NotFound
         return Response(selectors.product_detail(product, self.language, customer_id(request)))
+
+
+__all__ = [
+    "BannersView",
+    "CategoriesView",
+    "ProductBySlugView",
+    "ProductDetailView",
+    "ProductListView",
+    "customer_id",
+]

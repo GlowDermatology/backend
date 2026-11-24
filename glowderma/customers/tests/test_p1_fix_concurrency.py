@@ -31,6 +31,9 @@ from glowderma.core.api.exceptions import AuthFailed, PasswordChanged
 from glowderma.core.models import AuditEntry, OutboxMessage
 from glowderma.core.pii import pii_ref
 from glowderma.customers import services
+from glowderma.customers.services.common import passwords as customer_passwords
+from glowderma.customers.services.social import completion as social_completion
+from glowderma.customers.services.social import tokens as social_tokens
 from glowderma.customers.tests.p1_support import (
     NEW_PASSWORD,
     PASSWORD,
@@ -92,14 +95,14 @@ def png() -> SimpleUploadedFile:
 def test_link_social_after_a_concurrent_delete_links_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     publish_terms()
     signed = Signed(password_customer("+998907770011"))
-    original = services.verify_social_token
+    original = social_tokens.verify_social_token
 
     def verify_then_delete(*args: Any, **kwargs: Any) -> Any:
         claims = original(*args, **kwargs)
         account_services.delete_customer(signed.customer.pk)  # DELETE me/ commits here
         return claims
 
-    monkeypatch.setattr(services, "verify_social_token", verify_then_delete)
+    monkeypatch.setattr(social_tokens, "verify_social_token", verify_then_delete)
     body = {"provider": "google", "token": "fake:prev-holder:p@gmail.com", "nonce": "*", "password": PASSWORD}
     response = signed.client.post(ME + "social/", body, **signed.idem())
     assert (response.status_code, response.data["code"]) == (401, "SESSION_EXPIRED")
@@ -109,7 +112,7 @@ def test_link_social_after_a_concurrent_delete_links_nothing(monkeypatch: pytest
 @pytest.mark.django_db
 def test_link_social_after_a_concurrent_reset_links_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     signed = Signed(password_customer("+998907770012"))
-    original = services.verify_social_token
+    original = social_tokens.verify_social_token
 
     def verify_then_reset(*args: Any, **kwargs: Any) -> Any:
         claims = original(*args, **kwargs)
@@ -117,7 +120,7 @@ def test_link_social_after_a_concurrent_reset_links_nothing(monkeypatch: pytest.
         services.reset_password(token, password=NEW_PASSWORD, device=ctx(FID_B))
         return claims
 
-    monkeypatch.setattr(services, "verify_social_token", verify_then_reset)
+    monkeypatch.setattr(social_tokens, "verify_social_token", verify_then_reset)
     body = {"provider": "google", "token": "fake:taker:t@gmail.com", "nonce": "*", "password": PASSWORD}
     response = signed.client.post(ME + "social/", body, **signed.idem())
     assert (response.status_code, response.data["code"]) == (401, "password_changed")
@@ -130,7 +133,7 @@ def test_link_social_vs_delete_thread_race(monkeypatch: pytest.MonkeyPatch) -> N
     customer = password_customer("+998907770022")
     started = start_test_session(customer, fid=FID_A)
     verified, deleted = threading.Event(), threading.Event()
-    original = services.verify_social_token
+    original = social_tokens.verify_social_token
 
     def slow_verify(*args: Any, **kwargs: Any) -> Any:
         claims = original(*args, **kwargs)
@@ -138,7 +141,7 @@ def test_link_social_vs_delete_thread_race(monkeypatch: pytest.MonkeyPatch) -> N
         assert deleted.wait(WAIT)
         return claims
 
-    monkeypatch.setattr(services, "verify_social_token", slow_verify)
+    monkeypatch.setattr(social_tokens, "verify_social_token", slow_verify)
     out: dict[str, Any] = {}
     link = run(
         "link",
@@ -414,7 +417,7 @@ def test_known_device_login_with_the_old_password_loses_to_a_committed_reset(
 ) -> None:
     customer = password_customer("+998901000003")
     started = start_test_session(customer, fid=FID_A)
-    original = services.check_login_password
+    original = customer_passwords.check_login_password
     checked, go = threading.Event(), threading.Event()
 
     def patched(customer_: Any, raw: str) -> bool:
@@ -424,7 +427,7 @@ def test_known_device_login_with_the_old_password_loses_to_a_committed_reset(
             go.wait(WAIT)
         return result
 
-    monkeypatch.setattr(services, "check_login_password", patched)
+    monkeypatch.setattr(customer_passwords, "check_login_password", patched)
     out: dict[str, Any] = {}
     login = run(
         "login",
@@ -533,7 +536,7 @@ def test_social_completion_survives_a_redis_failure_after_commit(monkeypatch: py
     )
     assert isinstance(step, services.PhoneStep)
     token = verification(phone, "link_social", jti=services.read_social_ticket(step.ticket, fid=FID_A).jti)
-    monkeypatch.setattr(services, "cache", FailingCache("gd:social:apple:"))
+    monkeypatch.setattr(social_completion, "cache", FailingCache("gd:social:apple:"))
     result = services.complete_social(
         step.ticket,
         token,
@@ -559,7 +562,7 @@ def test_social_completion_keeps_its_error_when_the_cleanup_fails(monkeypatch: p
     token = verification(
         "+998901000107", "link_social", jti=services.read_social_ticket(step.ticket, fid=FID_A).jti
     )
-    monkeypatch.setattr(services, "cache", FailingCache("gd:social:ticket:"))
+    monkeypatch.setattr(social_completion, "cache", FailingCache("gd:social:ticket:"))
     with pytest.raises(ValidationError):  # the name is missing: the original error, not ConnectionError
         services.complete_social(
             step.ticket,
