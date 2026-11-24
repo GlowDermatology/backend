@@ -210,6 +210,8 @@ def test_definitive_refusals_are_rejections_with_their_reason(answer: httpx.Resp
         httpx.Response(401, json={"success": False, "error_code": "token_expired"}),
         httpx.Response(403, json={"success": False, "error_code": "account_blocked"}),
         httpx.Response(403, json={"success": False, "error_code": "token_locked_by_plan"}),
+        httpx.Response(403, json={"success": False, "error_code": "something_new"}),
+        httpx.Response(403, content=b"<html>Access denied</html>"),
         reply("devsms", "rate_limited", 429),
         reply("devsms", "in_progress", 409),
         httpx.Response(500, json={"success": False, "error_code": "server_error"}),

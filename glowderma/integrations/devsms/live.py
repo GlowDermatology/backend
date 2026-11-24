@@ -18,8 +18,9 @@ Outcomes (the ``SmsPort`` contract). Because every request carries the code's id
 that may or may not have been processed is safe to repeat:
 
 * no answer (connect failure, timeout, a broken answer), a redirect, 5xx, 429 ``rate_limited``, 409
-  ``idempotency_request_in_progress``, or an authentication refusal (401, 403 ``forbidden`` /
-  ``account_blocked`` / ``token_locked_by_plan``: configuration, ERROR ``devsms.auth_failed``) →
+  ``idempotency_request_in_progress``, or an authentication refusal (401, and every 403 but the two
+  definitive ones below: ``forbidden`` / ``account_blocked`` / ``token_locked_by_plan``, an access-denied page
+  from an intermediary, …: configuration, ERROR ``devsms.auth_failed``) →
   ``SmsUnavailable(sent=False)``: the handler un-claims and the outbox repeats the request (same key);
 * 502 ``provider_outcome_unknown`` → ``SmsUnavailable(sent=True)`` with DevSMS's ``meta.sms_id``: DevSMS
   charged and cannot say whether the operator delivered; a repeat only replays that answer, so nothing is
@@ -66,8 +67,10 @@ TIMESTAMP_PATTERN = re.compile(
     r"[0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9]{2}:[0-9]{2}(:[0-9]{2})?([+-][0-9]{2}:[0-9]{2})?"
 )
 
-# 403 error codes of the account or the key (configuration): the request was not processed.
-AUTH_ERROR_CODES = frozenset({"forbidden", "account_blocked", "token_locked_by_plan"})
+# The only 403s that are definitive refusals of this message (a repeat would only add to DevSMS's count of
+# refusals). Every other 403 (``forbidden``, ``account_blocked``, ``token_locked_by_plan``, an intermediary's
+# access-denied page) means the request was not processed: repeatable (AGENTS.md, live adapters).
+DEFINITIVE_403_CODES = frozenset({"moderation_rejected", "otp_suspended"})
 REPEAT_LATER_ERROR_CODES = frozenset({"idempotency_request_in_progress", "rate_limited"})
 PHONE_ERROR_CODES = frozenset({"unsupported_country", "international_disabled"})
 
@@ -196,7 +199,7 @@ class LiveDevsms:
                 sent=True,
                 message_id=str(sms_id) if isinstance(sms_id, int | str) else "",
             )
-        if status == 401 or (status == 403 and code in AUTH_ERROR_CODES):
+        if status == 401 or (status == 403 and code not in DEFINITIVE_403_CODES):
             logger.error("devsms.auth_failed status=%s error_code=%s (check DEVSMS_API_TOKEN)", status, code)
             raise SmsUnavailable(f"devsms send: HTTP {status} {code}".strip(), sent=False)
         if (

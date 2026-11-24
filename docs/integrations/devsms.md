@@ -57,7 +57,7 @@ migration from Eskiz changed: [`docs/sms-template-audit.md`](../sms-template-aud
 |---|---|---|
 | 200 with `data.id` | `SmsDelivery` | stores the id |
 | no answer (connect failure, timeout, broken body), a redirect, 5xx other than 502 below, 429 `rate_limited`, 409 `idempotency_request_in_progress`, 2xx without an id | `SmsUnavailable(sent=False)` | un-claims; the outbox repeats the request with the **same key and code** (DevSMS sends at most once) |
-| 401 `unauthenticated` / `token_expired`, 403 `forbidden` / `account_blocked` / `token_locked_by_plan` | `SmsUnavailable(sent=False)`, ERROR `devsms.auth_failed` | as above (configuration: fix the token) |
+| 401 `unauthenticated` / `token_expired`, every other 403 (`forbidden` / `account_blocked` / `token_locked_by_plan`, an unknown code, an access-denied page) | `SmsUnavailable(sent=False)`, ERROR `devsms.auth_failed` | as above (configuration: fix the token) |
 | 502 `provider_outcome_unknown` (charged, operator outcome unknown) | `SmsUnavailable(sent=True)` with `meta.sms_id` | keeps the claim, stores the id, never resends (a repeat only replays the 502; the user resends after 60 s) |
 | 402 `insufficient_balance` | `SmsRejected("insufficient_balance")`, ERROR `devsms.insufficient_balance` | records `IntegrationState(devsms)` failure, never retries |
 | 403 `moderation_rejected` | `SmsRejected("moderation_rejected")`, ERROR `devsms.service_name_rejected remaining_attempts=…` | as above |
