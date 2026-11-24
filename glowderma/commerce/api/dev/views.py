@@ -12,8 +12,6 @@ from typing import Any, cast
 from urllib.parse import urlencode
 
 from django.test import RequestFactory
-from drf_spectacular.utils import extend_schema
-from rest_framework import serializers
 from rest_framework.exceptions import NotFound
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -21,37 +19,22 @@ from rest_framework.response import Response
 from glowderma.accounts.api.customer_base import CustomerAPIView
 from glowderma.accounts.models import Customer
 from glowderma.commerce import payment_ref, selectors, services
+from glowderma.commerce.api.dev.schemas.payments import SIMULATE_PAYMENT_POST
+from glowderma.commerce.api.dev.serializers import (
+    SimulateResultSerializer,
+    SimulateSerializer,
+)
 from glowderma.commerce.api.webhooks.click import ClickCompleteView, ClickPrepareView
 from glowderma.commerce.api.webhooks.payme import PaymeView, now_ms
 from glowderma.commerce.models import Order
 from glowderma.core import enums
-from glowderma.core.api.schema import CUSTOMER_ERRORS, DEVICE_HEADERS
 from glowderma.integrations.click import fake as fake_click
 from glowderma.integrations.click import sandbox as click_sandbox
 from glowderma.integrations.payme import fake as fake_payme
 from glowderma.integrations.payme import sandbox as payme_sandbox
 
-OUTCOMES = ("success", "fail")
 CLICK_DECLINED = -5017
 PAYME_REASON_EXECUTION_ERROR = 3
-
-
-class SimulateSerializer(serializers.Serializer[dict[str, Any]]):
-    outcome = serializers.ChoiceField(choices=list(OUTCOMES))
-    provider = serializers.ChoiceField(
-        choices=enums.PaymentProvider.values, required=False, allow_null=True, default=None
-    )
-
-
-class SimulateStepSerializer(serializers.Serializer[dict[str, Any]]):
-    call = serializers.CharField()
-    response = serializers.JSONField()
-
-
-class SimulateResultSerializer(serializers.Serializer[dict[str, Any]]):
-    order_id = serializers.IntegerField()
-    provider = serializers.ChoiceField(choices=enums.PaymentProvider.values)
-    steps = SimulateStepSerializer(many=True)
 
 
 def _digits(value: str) -> str:
@@ -159,14 +142,7 @@ def _call(view: Any, request: Any) -> dict[str, Any]:
 
 
 class SimulatePaymentView(CustomerAPIView):
-    @extend_schema(
-        operation_id="dev_payments_simulate",
-        parameters=DEVICE_HEADERS,
-        request=SimulateSerializer,
-        responses={200: SimulateResultSerializer, **CUSTOMER_ERRORS},
-        description="Local/test settings only: a signed provider callback sequence through the real webhook "
-        "views.",
-    )
+    @SIMULATE_PAYMENT_POST
     def post(self, request: Request, order_id: int) -> Response:
         customer = cast(Customer, request.user)
         order = selectors.customer_order(order_id, customer.pk)

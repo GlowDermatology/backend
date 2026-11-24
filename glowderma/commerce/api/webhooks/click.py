@@ -21,14 +21,17 @@ from django.conf import settings
 from django.core.exceptions import SuspiciousOperation, TooManyFieldsSent
 from django.db import connection, transaction
 from django.http import QueryDict
-from drf_spectacular.types import OpenApiTypes
-from drf_spectacular.utils import extend_schema
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from glowderma.accounts.api.customer_base import WebhookAPIView
 from glowderma.commerce import payment_ref, selectors, services, state
 from glowderma.commerce.api.webhooks import inbox
+from glowderma.commerce.api.webhooks.schemas.click import (
+    CLICK_COMPLETE_POST,
+    CLICK_PREPARE_POST,
+    FORM_CONTENT_TYPE,
+)
 from glowderma.core import enums, integration_modes, timeutils
 from glowderma.core.api.exceptions import AlreadyPaid, InvalidTransition, PaymentInProgress
 from glowderma.integrations.click import protocol
@@ -37,7 +40,6 @@ from glowderma.payments import services as payment_services
 
 logger = logging.getLogger(__name__)
 PROVIDER = "click"
-FORM_CONTENT_TYPE = "application/x-www-form-urlencoded"
 FAKE_MODE = "fake_mode"
 BAD_SIGNATURE = "bad_signature"
 _PREPARED = (enums.PaymentStatus.PENDING, enums.PaymentStatus.PAID, enums.PaymentStatus.REFUNDED)
@@ -364,21 +366,10 @@ def _failed_by_click(error_code: str) -> bool:
     return True
 
 
-SCHEMA = {
-    "request": {FORM_CONTENT_TYPE: OpenApiTypes.OBJECT},
-    "responses": {200: OpenApiTypes.OBJECT, 500: OpenApiTypes.OBJECT},
-    "auth": [],
-}
-
-
 class ClickPrepareView(_ClickCallback):
     complete = False
 
-    @extend_schema(
-        operation_id="webhook_click_prepare",
-        description="Click SHOP API Prepare (action 0); provider-native body (customer contract §2.13.1).",
-        **SCHEMA,  # type: ignore[arg-type]
-    )
+    @CLICK_PREPARE_POST
     def post(self, request: Request) -> Response:
         return super().post(request)
 
@@ -386,10 +377,6 @@ class ClickPrepareView(_ClickCallback):
 class ClickCompleteView(_ClickCallback):
     complete = True
 
-    @extend_schema(
-        operation_id="webhook_click_complete",
-        description="Click SHOP API Complete (action 1); provider-native body (customer contract §2.13.1).",
-        **SCHEMA,  # type: ignore[arg-type]
-    )
+    @CLICK_COMPLETE_POST
     def post(self, request: Request) -> Response:
         return super().post(request)

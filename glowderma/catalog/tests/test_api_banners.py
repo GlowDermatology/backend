@@ -13,7 +13,7 @@ from django.http import QueryDict
 from rest_framework.test import APIClient
 
 from glowderma.accounts.models import StaffUser
-from glowderma.catalog.api.admin.views import form_to_nested
+from glowderma.catalog.api.admin.views.forms import form_to_nested
 from glowderma.catalog.models import Banner
 from glowderma.catalog.tests.factories import BannerFactory, CategoryFactory, ProductFactory
 from glowderma.catalog.tests.helpers import errors_of, upload

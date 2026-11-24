@@ -12,7 +12,6 @@ from __future__ import annotations
 from typing import Any, cast
 
 from django.conf import settings
-from drf_spectacular.utils import extend_schema
 from rest_framework import serializers
 from rest_framework.exceptions import NotFound
 from rest_framework.request import Request
@@ -21,6 +20,7 @@ from rest_framework.response import Response
 from glowderma.accounts.api.base import AdminAPIView
 from glowderma.commerce import selectors, services, yandex_flow
 from glowderma.commerce.api.admin.serializers import OrderDetailSerializer
+from glowderma.commerce.api.dev.schemas.yandex import YANDEX_ADVANCE_POST
 from glowderma.core.api.exceptions import Conflict
 from glowderma.delivery import selectors as delivery_selectors
 from glowderma.delivery import yandex as delivery_yandex
@@ -40,7 +40,7 @@ class AdvanceSerializer(serializers.Serializer[dict[str, Any]]):
 
 
 class YandexAdvanceView(AdminAPIView):
-    @extend_schema(exclude=True)
+    @YANDEX_ADVANCE_POST
     def post(self, request: Request, pk: int) -> Response:
         if not enabled():
             raise NotFound

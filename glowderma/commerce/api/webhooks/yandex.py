@@ -23,14 +23,13 @@ import time
 from typing import Any
 
 from django.db import transaction
-from drf_spectacular.types import OpenApiTypes
-from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from glowderma.accounts.api.customer_base import WebhookAPIView
 from glowderma.commerce import topics, yandex_ref
 from glowderma.commerce.api.webhooks import inbox
+from glowderma.commerce.api.webhooks.schemas.yandex import YANDEX_DELIVERY_WEBHOOK_POST
 from glowderma.core import integration_modes, outbox, timeutils
 from glowderma.delivery import selectors as delivery_selectors
 from glowderma.integrations.yandex_delivery import protocol as yandex_protocol
@@ -46,20 +45,7 @@ UPDATED_TS_MAX = 40
 class YandexDeliveryWebhookView(WebhookAPIView):
     parser_classes = []  # the body is never read
 
-    @extend_schema(
-        operation_id="webhook_yandex_delivery_status",
-        description="Yandex Delivery claim callback (an unauthenticated hint): `?ref=<order>-<hmac>` (our "
-        "own reference, registered per claim) plus the `updated_ts` and `claim_id` Yandex appends; answers "
-        "200 for a verified ref and re-reads the claim asynchronously.",
-        parameters=[
-            OpenApiParameter("ref", OpenApiTypes.STR, required=True),
-            OpenApiParameter("claim_id", OpenApiTypes.STR, required=False),
-            OpenApiParameter("updated_ts", OpenApiTypes.STR, required=False),
-        ],
-        request=None,
-        responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT},
-        auth=[],
-    )
+    @YANDEX_DELIVERY_WEBHOOK_POST
     def post(self, request: Request) -> Response:
         started = time.monotonic()
         try:

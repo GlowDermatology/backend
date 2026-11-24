@@ -421,7 +421,7 @@ msgstr "Скачать файлом .txt"
 msgid "10 daqiqada bir qayta hisoblanadi"
 msgstr "пересчитывается раз в 10 минут"
 
-#: glowderma/commerce/api/admin/serializers.py
+#: glowderma/commerce/api/admin/serializers/delivery_issues.py
 msgid "1000 belgidan oshmasin."
 msgstr "Не более 1000 символов."
 
@@ -455,7 +455,7 @@ msgstr "Введите один из 10 кодов восстановления,
 msgid "30 kun ichida yangi mijoz yo‘q"
 msgstr "За 30 дней новых клиентов нет"
 
-#: glowderma/commerce/api/admin/serializers.py
+#: glowderma/commerce/api/admin/serializers/delivery_issues.py
 msgid "300 belgidan oshmasin."
 msgstr "Не более 300 символов."
 
@@ -467,7 +467,7 @@ msgstr "Прошло более 36 часов — возможно, не раб�
 msgid "5 dan 60 gacha daqiqa kiriting."
 msgstr "Введите количество минут от 5 до 60."
 
-#: glowderma/commerce/api/admin/serializers.py
+#: glowderma/commerce/api/admin/serializers/messages.py
 msgid "500 belgidan oshmasin."
 msgstr "Не более 500 символов."
 
@@ -928,7 +928,7 @@ msgstr "Billz"
 msgid "Billz ID"
 msgstr "Billz ID"
 
-#: glowderma/catalog/api/admin/serializers.py
+#: glowderma/catalog/api/admin/serializers/products.py
 msgid "Billz ID yoki shtrix-kod 6–14 ta raqamdan iborat bo‘lsin."
 msgstr "Billz ID или штрихкод должен состоять из 6–14 цифр."
 
@@ -1053,7 +1053,7 @@ msgstr "Попытка платежа в Billz"
 msgid "Billz’da allaqachon yozilgan: %(when)s (qo‘lda yoki oldingi yuborishda)"
 msgstr "Уже зарегистрировано в Billz: %(when)s (вручную или при предыдущей отправке)"
 
-#: glowderma/catalog/api/admin/serializers.py
+#: glowderma/catalog/api/admin/serializers/products.py
 msgid "Billz’da bunday mahsulot topilmadi."
 msgstr "Такой товар в Billz не найден."
 
@@ -1301,7 +1301,7 @@ msgstr "Это поле нельзя изменить."
 msgid "Bu mijozning push qabul qiladigan qurilmasi yo‘q."
 msgstr "У этого клиента нет устройства, принимающего push-уведомления."
 
-#: glowderma/commerce/api/admin/views.py
+#: glowderma/commerce/api/admin/views/delivery_issues.py
 msgid "Bu muammo allaqachon hal qilingan."
 msgstr "Эта проблема уже решена."
 
@@ -1330,17 +1330,17 @@ msgstr "Это значение уже занято."
 msgid "Bu qurilma allaqachon ro‘yxatda."
 msgstr "Это устройство уже в списке."
 
-#: glowderma/appointments/api/admin/serializers.py
+#: glowderma/appointments/api/admin/serializers/messages.py
 #: glowderma/notifications/api/admin/serializers/messages.py
 #: glowderma/notifications/services/campaigns/test_devices.py
 msgid "Bu raqam bilan mijoz topilmadi."
 msgstr "Клиент с таким номером не найден."
 
-#: glowderma/appointments/api/admin/serializers.py
+#: glowderma/appointments/api/admin/serializers/messages.py
 msgid "Bu raqam bilan mijoz topilmadi: yangi mijozning ismini kiriting."
 msgstr "Клиент с этим номером не найден: введите имя нового клиента."
 
-#: glowderma/appointments/api/admin/serializers.py
+#: glowderma/appointments/api/admin/serializers/messages.py
 #: glowderma/appointments/services.py
 msgid "Bu raqamdagi mijoz hisobi faol emas."
 msgstr "Учётная запись клиента с этим номером неактивна."
@@ -2016,7 +2016,7 @@ msgstr "Чтобы активировать, сначала успешно пр�
 msgid "Faqat JPEG, PNG yoki WebP rasm."
 msgstr "Только изображения JPEG, PNG или WebP."
 
-#: glowderma/catalog/api/admin/serializers.py
+#: glowderma/catalog/api/admin/serializers/products.py
 #: glowderma/professionals/api/admin/serializers/specialists.py
 msgid "Faqat lotin kichik harflari, raqamlar va chiziqcha (faqat raqam emas)."
 msgstr "Только строчные латинские буквы, цифры и дефис (не только цифры)."
@@ -2549,7 +2549,7 @@ msgstr "Имя"
 msgid "Izoh"
 msgstr "Примечание"
 
-#: glowderma/commerce/api/admin/serializers.py
+#: glowderma/commerce/api/admin/serializers/delivery_issues.py
 msgid "Izohni kiriting."
 msgstr "Введите комментарий."
 
@@ -2630,7 +2630,7 @@ msgstr "Посылка вне учёта"
 msgid "Jo‘natma qaytdi"
 msgstr "Отправление возвращено"
 
-#: glowderma/commerce/api/admin/serializers.py
+#: glowderma/commerce/api/admin/serializers/order_actions.py
 msgid "Jo‘natma tarkibini tekshirganingizni tasdiqlang."
 msgstr "Подтвердите, что вы проверили содержимое отправления."
 
@@ -2735,7 +2735,7 @@ msgstr "Недочёт"
 msgid "Kamida 12 ta belgi."
 msgstr "Не менее 12 символов."
 
-#: glowderma/commerce/api/admin/serializers.py
+#: glowderma/commerce/api/admin/serializers/messages.py
 msgid "Kamida 3 ta belgi kiriting."
 msgstr "Введите не менее 3 символов."
 
@@ -2860,7 +2860,7 @@ msgid "Kelajakdagi sanani tanlang."
 msgstr "Выберите дату в будущем."
 
 #: glowderma/appointments/services.py
-#: glowderma/commerce/api/admin/serializers.py
+#: glowderma/commerce/api/admin/serializers/delivery_issues.py
 #: glowderma/notifications/api/admin/serializers/messages.py
 msgid "Kelajakdagi vaqtni tanlang."
 msgstr "Выберите время в будущем."
@@ -3013,7 +3013,7 @@ msgstr "Не более 2 знаков после запятой."
 msgid "Ko‘pi bilan 366 kunlik davr."
 msgstr "Период не более 366 дней."
 
-#: glowderma/appointments/api/admin/serializers.py
+#: glowderma/appointments/api/admin/serializers/range.py
 msgid "Ko‘pi bilan 42 kunlik davr."
 msgstr "Период не более 42 дней."
 
@@ -3391,7 +3391,7 @@ msgstr "Завершить сеанс клиента"
 msgid "Mijoz shu qurilmada tizimdan chiqariladi (sabab: «Admin tugatdi»). Qurilmada boshqa ochiq sessiya qolmasa, unga push xabarlar yuborilmaydi. Mijoz qaytadan kirishi mumkin."
 msgstr "Клиент будет выведен из системы на этом устройстве (причина: «Завершён администратором»). Если на устройстве не останется других открытых сеансов, push-сообщения на него отправляться не будут. Клиент может войти снова."
 
-#: glowderma/appointments/api/admin/serializers.py
+#: glowderma/appointments/api/admin/serializers/messages.py
 msgid "Mijoz topilmadi."
 msgstr "Клиент не найден."
 
@@ -3533,7 +3533,7 @@ msgstr "Расписание специалиста сейчас недосту�
 msgid "Mutaxassis profili o‘z hisobiga butun umri davomida bog‘langan."
 msgstr "Профиль специалиста навсегда привязан к своей учётной записи."
 
-#: glowderma/appointments/api/admin/serializers.py
+#: glowderma/appointments/api/admin/serializers/messages.py
 #: glowderma/appointments/services.py
 msgid "Mutaxassis topilmadi."
 msgstr "Специалист не найден."
@@ -3613,12 +3613,12 @@ msgstr "Цена (сум)"
 msgid "Narx hisoblash uchun: provayder narxlar sahifasidan oling."
 msgstr "Для расчёта стоимости: возьмите со страницы цен провайдера."
 
-#: glowderma/catalog/api/admin/serializers.py
+#: glowderma/catalog/api/admin/serializers/products.py
 #: glowderma/professionals/api/admin/serializers/messages.py
 msgid "Narx juda katta."
 msgstr "Слишком высокая цена."
 
-#: glowderma/catalog/api/admin/serializers.py
+#: glowderma/catalog/api/admin/serializers/products.py
 #: glowderma/catalog/services.py
 msgid "Narx kamida 1 000 so‘m bo‘lsin."
 msgstr "Цена должна быть не меньше 1 000 сум."
@@ -3841,7 +3841,7 @@ msgstr "Вернуть предыдущий ключ"
 msgid "Oldingi versiya"
 msgstr "Предыдущая версия"
 
-#: glowderma/commerce/api/admin/views.py
+#: glowderma/commerce/api/admin/views/delivery_issues.py
 msgid "Olib ketiladigan buyurtma uchun yetkazish muammosi ochilmaydi."
 msgstr "Для заказа с самовывозом нельзя открыть проблему доставки."
 
@@ -3977,7 +3977,7 @@ msgstr "Из Billz загружаются изменения с момента �
 msgid "Oxirgi o‘zgarish: %(at)s · %(author)s"
 msgstr "Последнее изменение: %(at)s · %(author)s"
 
-#: glowderma/appointments/api/admin/serializers.py
+#: glowderma/appointments/api/admin/serializers/range.py
 #: glowderma/professionals/api/admin/serializers/messages.py
 msgid "Oxirgi sana boshlang‘ich sanadan oldin bo‘lmasin."
 msgstr "Конечная дата не должна быть раньше начальной."
@@ -4084,7 +4084,7 @@ msgstr "Узбекский"
 msgid "O‘zbekcha nom yo‘q"
 msgstr "Нет названия на узбекском"
 
-#: glowderma/catalog/api/admin/serializers.py
+#: glowderma/catalog/api/admin/serializers/product_texts.py
 msgid "O‘zbekcha nomni kiriting (kamida 2 belgi)."
 msgstr "Введите название на узбекском (не менее 2 символов)."
 
@@ -4700,7 +4700,7 @@ msgstr "SMS-код"
 msgid "SMS kodlar"
 msgstr "SMS-коды"
 
-#: glowderma/commerce/api/admin/serializers.py
+#: glowderma/commerce/api/admin/serializers/messages.py
 #: glowderma/loyalty/services.py
 msgid "Sababni kiriting."
 msgstr "Укажите причину."
@@ -5456,7 +5456,7 @@ msgstr "Оплаченные, но не отправленные заказы"
 msgid "To‘lanmagan buyurtma mahsulotlarni shuncha vaqt ushlab turadi (%(min)s–%(max)s)."
 msgstr "Неоплаченный заказ удерживает товары в резерве в течение этого времени (%(min)s–%(max)s)."
 
-#: glowderma/appointments/api/admin/serializers.py
+#: glowderma/appointments/api/admin/serializers/range.py
 msgid "To‘liq ko‘rinish ko‘pi bilan 7 kunlik davr uchun."
 msgstr "Полный вид доступен для периода не более 7 дней."
 
@@ -5854,7 +5854,7 @@ msgstr "Безопасность"
 msgid "Xizmat"
 msgstr "Услуга"
 
-#: glowderma/appointments/api/admin/serializers.py
+#: glowderma/appointments/api/admin/serializers/messages.py
 #: glowderma/appointments/services.py
 msgid "Xizmat topilmadi."
 msgstr "Услуга не найдена."
@@ -6391,7 +6391,7 @@ msgstr "занятые периоды"
 msgid "banner"
 msgstr "баннер"
 
-#: glowderma/catalog/api/admin/views.py
+#: glowderma/catalog/api/admin/views/banners.py
 #: model metadata
 msgid "bannerlar"
 msgstr "баннеры"
@@ -6565,7 +6565,7 @@ msgstr "история заказа"
 msgid "buyurtma №%(number)s"
 msgstr "заказ №%(number)s"
 
-#: glowderma/commerce/api/admin/views.py
+#: glowderma/commerce/api/admin/views/orders.py
 #: model metadata
 msgid "buyurtmalar"
 msgstr "заказы"
@@ -6634,7 +6634,7 @@ msgstr "цена вывода (1 млн токенов, USD)"
 msgid "chiqish tokenlari"
 msgstr "токены ответа"
 
-#: glowderma/appointments/api/admin/serializers.py
+#: glowderma/appointments/api/admin/serializers/messages.py
 msgid "customer_id yoki phone dan faqat bittasini yuboring."
 msgstr "Передайте только одно из полей: customer_id или phone."
 
@@ -7103,11 +7103,11 @@ msgstr "канал"
 msgid "kategoriya"
 msgstr "категория"
 
-#: glowderma/catalog/api/admin/views.py
+#: glowderma/catalog/api/admin/views/banners.py
 msgid "kategoriya %(slug)s"
 msgstr "категория %(slug)s"
 
-#: glowderma/catalog/api/admin/views.py
+#: glowderma/catalog/api/admin/views/categories.py
 #: model metadata
 msgid "kategoriyalar"
 msgstr "категории"
@@ -7250,7 +7250,7 @@ msgstr[1] "товара"
 msgstr[2] "товаров"
 msgstr[3] "товаров"
 
-#: glowderma/catalog/api/admin/views.py
+#: glowderma/catalog/api/admin/views/banners.py
 #: glowderma/notifications/api/admin/views/common.py
 msgid "mahsulot #%(id)s"
 msgstr "товар #%(id)s"
@@ -7263,7 +7263,7 @@ msgstr "изображение товара"
 msgid "mahsulot rasmlari"
 msgstr "изображения товаров"
 
-#: glowderma/catalog/api/admin/views.py
+#: glowderma/catalog/api/admin/views/products.py
 #: model metadata
 msgid "mahsulotlar"
 msgstr "товары"

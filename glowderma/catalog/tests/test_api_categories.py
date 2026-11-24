@@ -296,7 +296,7 @@ def test_create_losing_the_slug_race_is_a_unique_error(staff_client: APIClient, 
         CategoryFactory.create(slug=slug)  # the competitor commits between validation and the service
         return original(slug, name, **kwargs)
 
-    with patch("glowderma.catalog.api.admin.views.services.create_category", create_after_competitor):
+    with patch("glowderma.catalog.services.create_category", create_after_competitor):
         response = staff_client.post(CATEGORIES, {"slug": "serums", "name": {"uz": "Serumlar"}})
     assert response.status_code == 400, response.json()
     assert errors_of(response)["slug"] == ("unique", "Bu qiymat band.")

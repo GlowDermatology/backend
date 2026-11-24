@@ -21,8 +21,6 @@ from typing import Any
 
 from django.conf import settings
 from django.db import transaction
-from drf_spectacular.types import OpenApiTypes
-from drf_spectacular.utils import extend_schema
 from rest_framework.request import Request
 from rest_framework.response import Response
 
@@ -30,6 +28,7 @@ from glowderma.accounts.api.customer_base import WebhookAPIView
 from glowderma.commerce import payment_ref, selectors, services, state
 from glowderma.commerce.api.webhooks import inbox
 from glowderma.commerce.api.webhooks.click import advisory_lock
+from glowderma.commerce.api.webhooks.schemas.payme import PAYME_GET, PAYME_OPTIONS, PAYME_POST
 from glowderma.commerce.models import Order
 from glowderma.core import enums, integration_modes, timeutils
 from glowderma.core.api.exceptions import AlreadyPaid, InvalidTransition, PaymentInProgress
@@ -75,14 +74,7 @@ def _state(payment: payment_selectors.PaymentRow) -> dict[str, Any]:
 class PaymeView(WebhookAPIView):
     http_method_names = ["post", "get", "put", "patch", "delete", "head", "options"]
 
-    @extend_schema(
-        operation_id="webhook_payme_rpc",
-        description="Payme Merchant API (JSON-RPC 2.0); HTTP 200 with a JSON-RPC body (customer contract "
-        "§2.13.2).",
-        request={"application/json": OpenApiTypes.OBJECT},
-        responses={200: OpenApiTypes.OBJECT},
-        auth=[],
-    )
+    @PAYME_POST
     def post(self, request: Request) -> Response:
         return self._guarded(self._handle, request)
 
@@ -139,7 +131,7 @@ class PaymeView(WebhookAPIView):
             logger.exception("payme.%s failed; everything rolled back", method)
             return Response(rpc.rpc_error(request_id, rpc.ERR_SYSTEM))
 
-    @extend_schema(exclude=True)
+    @PAYME_GET
     def get(self, request: Request) -> Response:
         """Any non-POST: JSON-RPC ``-32300`` (HTTP 200, as the protocol requires); a fake Payme under the
         production settings answers ``-32504`` to every call first (§2.13.0)."""
@@ -152,7 +144,7 @@ class PaymeView(WebhookAPIView):
 
     put = patch = delete = head = get
 
-    @extend_schema(exclude=True)
+    @PAYME_OPTIONS
     def options(self, request: Request, *args: Any, **kwargs: Any) -> Response:  # type: ignore[override]
         return self.get(request)
 

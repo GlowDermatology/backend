@@ -37,14 +37,13 @@ from django.core.exceptions import SuspiciousOperation
 from django.db import transaction
 from django.http import QueryDict
 from django.http.multipartparser import MultiPartParser, MultiPartParserError
-from drf_spectacular.types import OpenApiTypes
-from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from glowderma.accounts.api.customer_base import WebhookAPIView
 from glowderma.commerce import services, tasks
 from glowderma.commerce.api.webhooks import inbox
+from glowderma.commerce.api.webhooks.schemas.bts import BTS_WEBHOOK_POST
 from glowderma.commerce.models import Order
 from glowderma.core import enums, integration_modes
 from glowderma.delivery import selectors as delivery_selectors
@@ -138,25 +137,7 @@ def _status_ref(status: object) -> str:
 
 
 class BtsWebhookView(WebhookAPIView):
-    @extend_schema(
-        operation_id="webhook_bts_status",
-        description="BTS status notification (JSON or form-data, customer contract §2.13.3), authenticated "
-        "by `?token=<BTS_WEBHOOK_SECRET>` or the `X-GD-Webhook-Token` header; the status is re-tracked with "
-        "our tracking number.",
-        parameters=[OpenApiParameter("token", OpenApiTypes.STR, required=False)],
-        request={
-            "application/json": OpenApiTypes.OBJECT,
-            "multipart/form-data": OpenApiTypes.OBJECT,
-            "application/x-www-form-urlencoded": OpenApiTypes.OBJECT,
-        },
-        responses={
-            200: OpenApiTypes.OBJECT,
-            401: OpenApiTypes.OBJECT,
-            413: OpenApiTypes.OBJECT,
-            503: OpenApiTypes.OBJECT,
-        },
-        auth=[],
-    )
+    @BTS_WEBHOOK_POST
     def post(self, request: Request) -> Response:
         started = time.monotonic()
         try:

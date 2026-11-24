@@ -598,7 +598,7 @@ def test_create_losing_the_billz_id_race_is_a_unique_error(staff_client: APIClie
         ProductFactory.create(billz_id="4607012301")
         return original(data, **kwargs)
 
-    with patch("glowderma.catalog.api.admin.views.services.create_product", create_after_competitor):
+    with patch("glowderma.catalog.services.create_product", create_after_competitor):
         response = staff_client.post(PRODUCTS, valid_body())
     assert response.status_code == 400, response.json()
     assert errors_of(response)["billz_id"] == ("unique", "Bu Billz ID bilan mahsulot allaqachon bor.")
