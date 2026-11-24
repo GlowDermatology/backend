@@ -16,7 +16,8 @@ write other modules only through their services (``accounts``, ``commerce``, ``a
 customer-level lock (``FOR NO KEY UPDATE``) before any other row (C§2.7.1); a signed-in write re-checks the
 customer and the request's session under it (``accounts.services.lock_signed_in_customer``, C§6.17).
 
-The package groups them by subject: ``cashback`` (the admin adjustment), ``auth`` (registration, login,
+The package groups them by subject: ``cashback`` (the admin adjustment), ``purge`` (the ops console's full
+purge of a customer without money), ``auth`` (registration, login,
 reset and the dormant-account rule), ``social`` (the token checks, sign-in, the social ticket, its completion
 and the Apple token revocation), ``me`` (re-authentication, social links, password, contacts, profile,
 addresses and deletion) and ``common`` (identifiers, results, passwords, terms, identities and the audit
@@ -96,6 +97,13 @@ from glowderma.customers.services.me.social_links import (
     link_social,
     unlink_social,
 )
+from glowderma.customers.services.purge import (
+    PURGE_BLOCKERS,
+    PurgeRefused,
+    PurgeResult,
+    purge_blockers,
+    purge_customer,
+)
 from glowderma.customers.services.social.apple_revocation import (
     RefusedAppleToken,
     revoke_refused_apple_tokens,
@@ -129,6 +137,7 @@ __all__ = [
     "OPEN_APPOINTMENT_STATUSES",
     "PASSWORD_CODE_KEYS",
     "PROVIDER_LABELS",
+    "PURGE_BLOCKERS",
     "REAUTH_SCOPE",
     "SOCIAL_APPLE_KEY",
     "SOCIAL_TICKET_SALT",
@@ -140,6 +149,8 @@ __all__ = [
     "DeviceContext",
     "DeviceStep",
     "PhoneStep",
+    "PurgeRefused",
+    "PurgeResult",
     "RefusedAppleToken",
     "SignIn",
     "SocialTicket",
@@ -161,6 +172,8 @@ __all__ = [
     "login",
     "password_signs_in",
     "phone_guard_key",
+    "purge_blockers",
+    "purge_customer",
     "read_social_ticket",
     "reauthenticate",
     "register",

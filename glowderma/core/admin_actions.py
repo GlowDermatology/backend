@@ -9,7 +9,8 @@ active staff session, ``csrf_protect``). The decorator then guarantees, for ever
   with ``hx-select="#dialog"``, or the same page in the console layout without JavaScript); only a ``POST``
   of the confirm form (CSRF token + the hidden ``confirm`` field) runs the action; other methods answer 405;
 * **permissions** — active staff, or managers only (``StaffUser.is_manager`` / superuser) for
-  ``manager_only`` actions, checked on every request (Unfold's ``allowed_permissions`` only hides buttons);
+  ``manager_only`` actions, or superusers only for ``superuser_only`` ones, checked on every request (Unfold's
+  ``allowed_permissions`` only hides buttons);
 * **availability** — ``available(model_admin, request, obj)`` returns why the action makes no sense for that
   row ("" when it does): the change-page button is hidden (:meth:`OpsActionsMixin.get_actions_detail`) and a
   direct request is refused with that reason;
@@ -17,7 +18,8 @@ active staff session, ``csrf_protect``). The decorator then guarantees, for ever
   written with the staff member as the actor, in the same transaction as the effect (the services keep
   writing their own domain rows, e.g. ``outbox.requeued``);
 * **feedback** — an Uzbek success / warning / error message, then a redirect (PRG) to the change page or the
-  changelist (``next`` when it is a safe same-host URL).
+  changelist (``next`` when it is a safe same-host URL; always the changelist after a ``deletes_object``
+  action succeeded: the change page is gone).
 
 Actions call the owning module's services or enqueue its existing Celery tasks; a module below the one that
 owns a task enqueues it by its registered name (:func:`enqueue_task`, like an outbox string topic), never by
@@ -59,6 +61,7 @@ logger = logging.getLogger(__name__)
 CONFIRM_TEMPLATE = "admin/ops/confirm_action.html"
 FAILED_MESSAGE = _("Amal bajarilmadi: kutilmagan xato. Tafsilotlar server jurnalida.")
 MANAGER_ONLY_NOTE = _("Faqat menejerlar uchun.")
+SUPERUSER_ONLY_NOTE = _("Faqat superadminlar uchun.")
 
 __all__ = [
     "ActionResult",
@@ -70,6 +73,7 @@ __all__ = [
     "enqueue_task",
     "failed",
     "is_manager",
+    "is_superuser",
     "ops_action",
     "refused",
 ]
@@ -88,6 +92,11 @@ def is_manager(request: HttpRequest) -> bool:
     return is_active_staff(request) and bool(
         getattr(user, "is_superuser", False) or getattr(user, "is_manager", False)
     )
+
+
+def is_superuser(request: HttpRequest) -> bool:
+    """An active staff member who is a superuser."""
+    return is_active_staff(request) and bool(getattr(request.user, "is_superuser", False))
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +209,8 @@ def ops_action(
     icon: str,
     variant: ActionVariant = ActionVariant.PRIMARY,
     manager_only: bool = False,
+    superuser_only: bool = False,
+    deletes_object: bool = False,
     form_class: type[ConfirmForm] = ConfirmForm,
     url_path: str | None = None,
     available: Availability | None = None,
@@ -217,7 +228,11 @@ def ops_action(
         def view(
             model_admin: Any, request: HttpRequest, object_id: str | None = None, **_kwargs: Any
         ) -> HttpResponse:
-            if not is_active_staff(request) or (manager_only and not is_manager(request)):
+            if (
+                not is_active_staff(request)
+                or (manager_only and not is_manager(request))
+                or (superuser_only and not is_superuser(request))
+            ):
                 raise PermissionDenied
             if request.method not in ("GET", "POST"):
                 return HttpResponseNotAllowed(["GET", "POST"])
@@ -237,7 +252,10 @@ def ops_action(
                     return HttpResponseRedirect(back)
                 form = form_class(request.POST, request=request, obj=obj)
                 if form.is_valid():
-                    messages.add_message(request, *_run(func, model_admin, request, obj, form))
+                    level, message = _run(func, model_admin, request, obj, form)
+                    messages.add_message(request, level, message)
+                    if deletes_object and level == messages.SUCCESS:
+                        back = _default_back(model_admin, None)
                     return HttpResponseRedirect(back)
             else:
                 form = form_class(initial={"confirm": True, "next": back}, request=request, obj=obj)
@@ -257,6 +275,7 @@ def ops_action(
                     for note in [
                         *(notes(model_admin, request, obj) if notes is not None else []),
                         *([MANAGER_ONLY_NOTE] if manager_only else []),
+                        *([SUPERUSER_ONLY_NOTE] if superuser_only else []),
                     ]
                 ],
                 "action_submit": submit,
@@ -272,7 +291,9 @@ def ops_action(
         # The attributes Unfold reads from an ``@action`` (unfold.decorators.action) plus ours.
         vars(view).update(
             {
-                "allowed_permissions": ("ops_manager",) if manager_only else ("ops",),
+                "allowed_permissions": (
+                    ("ops_superuser",) if superuser_only else ("ops_manager",) if manager_only else ("ops",)
+                ),
                 "short_description": description,
                 "url_path": url_path or func.__name__.replace("_", "-"),
                 "icon": icon,
@@ -283,6 +304,7 @@ def ops_action(
                 "original_function_name": func.__name__,
                 "ops_available": available,
                 "ops_manager_only": manager_only,
+                "ops_superuser_only": superuser_only,
             }
         )
         return view
@@ -335,6 +357,9 @@ class OpsActionsMixin(_MixinBase):
 
     def has_ops_manager_permission(self, request: HttpRequest, object_id: Any = None) -> bool:
         return is_manager(request)
+
+    def has_ops_superuser_permission(self, request: HttpRequest, object_id: Any = None) -> bool:
+        return is_superuser(request)
 
     def get_actions_detail(self, request: HttpRequest, object_id: int | str) -> list[Any]:
         # Unfold filters by ``allowed_permissions``; an action that makes no sense for this record (a

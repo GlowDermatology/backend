@@ -140,6 +140,32 @@ retention), raw provider callbacks (purged after 180 days), Billz's own client r
 (delete it in Billz), BTS, Yandex Delivery and DevSMS (earlier Eskiz) records (provider-side retention). The pin and recipient
 snapshot of a paid order stay with the order (Q4).
 
+### 3.1 Full purge from the ops console (superusers)
+
+For a customer **without money** a superuser can erase the account completely: the customer page in the ops
+console, «To‘liq o‘chirish», after typing the customer's phone or e-mail address in full (`#<id>` when the
+account has neither). `customers.services.purge_customer`, in one transaction under the customer's row lock:
+
+* **refuses**, deleting nothing, while the customer has an order past `awaiting_payment` / `cancelled`, any payment
+  attempt or refund (also a failed one: Click and Payme keep it for reconciliation), a shipment or delivery issue,
+  any loyalty ledger entry, hold, purchase or balance, or a campaign to them alone that is still going out. Those
+  customers can only use `DELETE me/` (§3), which keeps the money records;
+* **deletes** the customer row and, with it, the unpaid and cancelled orders (items, stock reservations — the stock
+  is free again — and their `OrderEvent` history), the appointments and their `AppointmentEvent` history (the
+  append-only trigger lets these two tables delete only inside `core.db.customer_purge_window`), the empty
+  loyalty account, cart, delivery quotes, saved addresses, social identities (Apple grants revoked through
+  `apple.revoke` first), devices, sessions (revoked first), inbox rows, campaign deliveries, segment memberships,
+  test devices and test pushes, the campaigns addressed to the customer alone (with their image), the one-time
+  codes sent to the phone or address (and their sealed payloads in Redis), the outbox messages about the
+  customer, the stored Idempotency-Key responses and the profile image file;
+* **clears**, after the commit, the sign-in guard and per-number OTP throttle keys of the phone, the address and
+  the account, so the number registers again at once as a **new** customer (new id, no history, no reactivation).
+
+Kept: the audit log as it is (decision of 2026-11-24; the action adds `ops.customer_purged` with counts only, no
+contact), a pending `apple.revoke` (it must still reach Apple; its token is blanked after the outcome), a pending
+`email.notice` (the address is sealed; the message ages out with the outbox retention), backups, and the
+providers' own records (Billz's client card, DevSMS, FCM, Firebase).
+
 ## 4. Retention
 
 | Data | Retention | Mechanism |
@@ -155,7 +181,7 @@ snapshot of a paid order stay with the order (Q4).
 | Backups | 14 days on the host | `deploy/backup.sh` from cron (`docs/ops/deploy.md` §11); the off-host copy's rule is a placeholder until Q6 |
 | Audit log (`AuditEntry`) | kept indefinitely | **not purged** — legal retention unknown (Q1). The purge window allows `core_auditentry`, but no job uses it |
 | Orders, payments, refunds, ledger, purchases, appointments | kept indefinitely | accounting and loyalty history (Q2) |
-| Customer row and phone after deletion | kept | decision A1 (Q3) |
+| Customer row and phone after deletion | kept; erased by the console's full purge when the customer has no money (§3.1) | decision A1 (Q3) |
 | Inbox notifications, campaign recipients | kept | the M1 design proposed 365 / 180 days (N-8, N-9); not implemented (Q5) |
 | Unused delivery quotes (address text and pin) | 1 day after they expired (15 min validity); at once on account deletion | beat `delivery-purge-quotes` 03:35 (`delivery.services.purge_quotes`), `customers.services.delete_account` |
 | Used delivery quotes | with the order | — (the order keeps the same snapshot; Q4) |

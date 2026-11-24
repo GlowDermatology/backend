@@ -4,12 +4,17 @@
 account, appointments) as inline tabs, so it is registered here, in the top layer. Secrets stay out:
 ``Customer.password`` is excluded, and the device/session inlines list no token or hash column.
 
-Safe audited action (glowderma.core.admin_actions): «Barcha sessiyalarni tugatish» signs the customer out
-everywhere through ``accounts.services.revoke_all_customer_sessions`` (reason ``admin_revoked``).
+Safe audited actions (glowderma.core.admin_actions): «Barcha sessiyalarni tugatish» signs the customer out
+everywhere through ``accounts.services.revoke_all_customer_sessions`` (reason ``admin_revoked``); «To‘liq
+o‘chirish» (superusers only) purges a customer without money for good through ``customers.services.
+purge_customer``, after the operator typed the customer's phone or e-mail address (or ``#<id>`` when there is
+neither) — the phone and the address can then register as a new customer.
 """
 
+import re
 from typing import Any, cast
 
+from django import forms
 from django.contrib import admin
 from django.db import models
 from django.http import HttpRequest
@@ -19,6 +24,7 @@ from django.utils.translation import gettext_lazy as _
 from glowderma.accounts import selectors as account_selectors
 from glowderma.accounts import services as account_services
 from glowderma.accounts.models import Address, AuthSession, Customer, CustomerSocialIdentity, Device
+from glowderma.accounts.security.identifiers import canonical_email, canonical_phone
 from glowderma.appointments.models import Appointment
 from glowderma.commerce.admin import ORDER_STATUS_VARIANTS
 from glowderma.commerce.models import Order
@@ -41,12 +47,15 @@ from glowderma.core.admin_actions import (
     ActionVariant,
     ConfirmForm,
     OpsActionsMixin,
+    WarningNote,
     done,
+    failed,
     ops_action,
     refused,
 )
 from glowderma.core.labels import CUSTOMER_STATUS, ORDER_STATUS
 from glowderma.core.pii import mask_email, mask_phone
+from glowderma.customers import services as customer_services
 from glowderma.loyalty.models import LoyaltyAccount
 
 
@@ -127,6 +136,67 @@ def _no_open_session(model_admin: Any, request: HttpRequest, customer: Customer)
     )
 
 
+PURGE_REFUSALS = {
+    "paid_orders": _("mijozning to‘langan buyurtmalari bor"),
+    "payments": _("mijozning to‘lov urinishlari bor (Click / Payme)"),
+    "deliveries": _("mijozning yetkazib berishlari yoki yetkazish muammolari bor"),
+    "loyalty": _("mijozning cashback tarixi yoki balansi bor"),
+    "campaign_in_flight": _("faqat shu mijozga yuborilayotgan xabarnoma bor (avval uni to‘xtating)"),
+}
+
+
+def purge_refusal(reasons: Any) -> str:
+    """The sentence a refused purge shows: what keeps the customer's records."""
+    return gettext("To‘liq o‘chirib bo‘lmaydi: %(reasons)s. Pulga oid yozuvlar hisob uchun saqlanadi.") % {
+        "reasons": "; ".join(str(PURGE_REFUSALS[reason]) for reason in reasons)
+    }
+
+
+def _has_money(model_admin: Any, request: HttpRequest, customer: Customer) -> str:
+    reasons = customer_services.purge_blockers(customer.pk)
+    return purge_refusal(reasons) if reasons else ""
+
+
+# What an operator types between the digits of a phone ("+998 90 777-11-22", "+998 (90) 7771122").
+PHONE_SEPARATORS = re.compile(r"[\s\-()]")
+
+
+class PurgeConfirmForm(ConfirmForm):
+    """The purge's confirm step: the customer's phone or e-mail address typed in full (``#<id>`` when the
+    customer has neither), so the record purged is the one the operator meant."""
+
+    identifier = forms.CharField(
+        label=_("Mijozning telefon raqami yoki e-mail manzili"),
+        max_length=254,
+        help_text=_("Tasdiqlash uchun to‘liq yozing (telefon ham, e-mail ham bo‘lmasa: #<mijoz raqami>)."),
+    )
+
+    def clean_identifier(self) -> str:
+        typed = self.cleaned_data["identifier"].strip()
+        customer = cast(Customer, self.obj)
+        matches: bool = (
+            typed == f"#{customer.pk}"
+            if not (customer.phone or customer.email)
+            else (
+                customer.phone is not None
+                and canonical_phone(PHONE_SEPARATORS.sub("", typed)) == customer.phone
+            )
+            or (customer.email is not None and canonical_email(typed) == canonical_email(customer.email))
+        )
+        if not matches:
+            raise forms.ValidationError(gettext("Bu mijozning telefon raqami yoki e-mail manzili emas."))
+        return str(typed)
+
+
+def _purge_notes(model_admin: Any, request: HttpRequest, customer: Customer) -> list[Any]:
+    return [
+        WarningNote(gettext("Bu amalni qaytarib bo‘lmaydi.")),
+        gettext(
+            "Audit jurnalidagi yozuvlar saqlanadi; Billz, DevSMS va Firebase o‘z yozuvlarini o‘zida saqlaydi."
+        ),
+    ]
+
+
 class CustomerAdmin(OpsActionsMixin, ReadOnlyAdmin):
     # The phone and e-mail are masked here as on every list (customer contract §1.4, the page title too): the
     # console is an inspection window; a full contact is the admin panel's (role-checked, audited).
@@ -184,7 +254,7 @@ class CustomerAdmin(OpsActionsMixin, ReadOnlyAdmin):
         ),
         (_("Rozilik"), ("terms_version", "consent_at", "consent_ip")),
     )
-    actions_detail = ("revoke_all_sessions",)
+    actions_detail = ("revoke_all_sessions", "purge_customer")
 
     def object_title(self, obj: models.Model) -> str:
         """``Mijoz #12 · Malika Karimova · +998 90 *** ** 67``: like the fields below, the title never carries
@@ -225,6 +295,42 @@ class CustomerAdmin(OpsActionsMixin, ReadOnlyAdmin):
             entity_type="customer",
             entity_id=customer.pk,
             after={"count": count},
+        )
+
+    @ops_action(
+        description=_("To‘liq o‘chirish"),
+        title=_("Mijozni to‘liq o‘chirish"),
+        body=_(
+            "Mijoz va unga tegishli hamma narsa butunlay o‘chiriladi: profil va rasm, manzillar, "
+            "qurilmalar va sessiyalar, ijtimoiy kirishlar, to‘lanmagan va bekor qilingan buyurtmalar, "
+            "qabullar, savatcha, xabarnomalar, bir martalik kodlar. Shundan so‘ng shu telefon raqami va "
+            "e-mail bilan yangi mijoz sifatida qaytadan ro‘yxatdan o‘tish mumkin. Pulga oid tarixi bor "
+            "mijozni o‘chirib bo‘lmaydi."
+        ),
+        submit=_("Butunlay o‘chirish"),
+        icon="delete_forever",
+        variant=ActionVariant.DANGER,
+        superuser_only=True,
+        deletes_object=True,
+        form_class=PurgeConfirmForm,
+        url_path="purge",
+        available=_has_money,
+        notes=_purge_notes,
+    )
+    def purge_customer(self, request: HttpRequest, customer: Customer, form: ConfirmForm) -> ActionResult:
+        try:
+            result = customer_services.purge_customer(customer.pk)
+        except customer_services.PurgeRefused as exc:
+            return refused(purge_refusal(exc.reasons))
+        except Customer.DoesNotExist:
+            return failed(gettext("Mijoz allaqachon o‘chirilgan."))
+        forget_cached_counts("dash:customers")
+        return done(
+            gettext("Mijoz #%(id)s butunlay o‘chirildi.") % {"id": customer.pk},
+            audit_action="ops.customer_purged",
+            entity_type="customer",
+            entity_id=customer.pk,
+            after=result.as_dict(),
         )
 
 
