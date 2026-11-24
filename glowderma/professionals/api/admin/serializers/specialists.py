@@ -25,6 +25,7 @@ from glowderma.professionals.api.admin.serializers.messages import MESSAGES
 from glowderma.professionals.api.admin.serializers.texts import SpecialistTextSerializer
 from glowderma.professionals.api.admin.serializers.weekly_hours import WorkingDaySerializer
 from glowderma.professionals.models import (
+    RESERVED_SPECIALIST_SLUGS,
     Location,
     Professional,
 )
@@ -149,13 +150,17 @@ class ClinicSpecialistWriteSerializer(serializers.Serializer[dict[str, Any]]):
     )
 
     def validate_slug(self, value: str) -> str:
-        """B-W1: ``^[a-z0-9]+(-[a-z0-9]+)*$``, not only digits, ≤160, unique."""
+        """B-W1: ``^[a-z0-9]+(-[a-z0-9]+)*$``, not only digits, ≤160, not reserved, unique."""
         value = value.strip()
         if not slugs.is_valid_slug(value, max_length=160):
             raise serializers.ValidationError(
                 field_error(
                     "invalid", N_("Faqat lotin kichik harflari, raqamlar va chiziqcha (faqat raqam emas).")
                 )
+            )
+        if value in RESERVED_SPECIALIST_SLUGS:
+            raise serializers.ValidationError(
+                field_error("invalid", N_("Bu manzil (slug) tizim uchun band qilingan."))
             )
         taken = Professional.objects.filter(slug=value)
         editing = self.context.get("professional_id")

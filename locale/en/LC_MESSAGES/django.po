@@ -1224,6 +1224,11 @@ msgstr "This address (slug) is already used by another product."
 msgid "Bu manzil (slug) boshqa mutaxassisda bor."
 msgstr "This address (slug) is already used by another specialist."
 
+#: glowderma/professionals/api/admin/serializers/specialists.py
+#: glowderma/professionals/models.py
+msgid "Bu manzil (slug) tizim uchun band qilingan."
+msgstr "This address (slug) is reserved by the system."
+
 #: glowderma/assistant/services.py
 msgid "Bu maydon uchun taklif yo‘q."
 msgstr "There is no suggestion for this field."

@@ -6,6 +6,7 @@ All times in this module are Tashkent wall-clock: ``WorkingHours``/``WorkingHour
 
 from typing import Any
 
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import F, Q
 from django.utils.translation import gettext
@@ -22,9 +23,16 @@ PROFESSIONAL_SLUG_CONSTRAINT = "professional_slug_unique"
 SERVICE_NAME_CONSTRAINT = "service_professional_name_unique"
 
 
+# Path segments the customer API routes under ``specialists/`` itself (``specialists/availability/``): never a
+# specialist's slug, or ``specialists/{slug}/`` could not reach that specialist.
+RESERVED_SPECIALIST_SLUGS = frozenset({"availability"})
+
+
 def professional_slug_base(name: str) -> str:
-    """The derived slug of a specialist (``Professional.save`` and the ``professionals.0003`` backfill)."""
-    return slugs.derive_slug(name, prefix="mutaxassis", max_length=SLUG_MAX_LENGTH)
+    """The derived slug of a specialist (``Professional.save`` and the ``professionals.0003`` backfill); a
+    reserved segment gets the ``mutaxassis-`` prefix."""
+    slug = slugs.derive_slug(name, prefix="mutaxassis", max_length=SLUG_MAX_LENGTH)
+    return f"mutaxassis-{slug}"[:SLUG_MAX_LENGTH] if slug in RESERVED_SPECIALIST_SLUGS else slug
 
 
 class Location(TimeStampedModel):
@@ -154,6 +162,11 @@ class Professional(TimeStampedModel):
 
     def slug_base(self) -> str:
         return professional_slug_base(self.name)
+
+    def clean(self) -> None:
+        super().clean()
+        if self.slug in RESERVED_SPECIALIST_SLUGS:
+            raise ValidationError({"slug": gettext("Bu manzil (slug) tizim uchun band qilingan.")})
 
     @property
     def clinic_id(self) -> int:
