@@ -92,7 +92,7 @@ def test_ready_emits_the_warning_and_no_system_check_reports_fake_mode(
         caplog.at_level(logging.WARNING, logger="glowderma.integrations"),
     ):
         django_apps.get_app_config("integrations").ready()
-        messages = checks.run_checks()
+        messages = checks.run_checks(databases=[])  # static checks: no connection outside a db test
     assert _lines(caplog) == [
         (
             "WARNING",
