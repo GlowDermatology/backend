@@ -15,6 +15,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Protocol, TypedDict
 
 from django.conf import settings
+from django.core.cache import cache
 from django.db.models import (
     BigIntegerField,
     Count,
@@ -60,26 +61,10 @@ STATUS_COUNT_KEYS: tuple[str, ...] = ("all", *enums.OrderStatus.values)
 # --- available stock (03 §1.6) ------------------------------------------------------------------------------
 
 
-def available_stock(product_ids: Iterable[int]) -> dict[int, int]:
-    """``{product_id: Billz quantity − active reservations − converted units Billz has not seen sold}``.
-
-    Billz owns ``ProductStock.quantity`` (read at ``synced_at``). A converted reservation (a paid order) keeps
-    counting until its sale is in Billz **and** the stock was read after that (review A M3): while the
-    purchase is unpushed (``billz_pushed_at`` null — a push still running, deferred for a closed shift or
-    dead-lettered for staff) Billz still counts the unit as in stock, so every sync would otherwise offer it
-    again. It also counts while converted after the last read (``converted_at > synced_at``). It stops
-    counting once a read after the push reflects the sale, and for a cancelled order whose sale never reached
-    Billz (the unit never left Billz's stock). ``synced_at`` null (never read from Billz) → converted units
-    are ignored. A product without a stock row has 0 available.
-
-    Staff entering a dead sale in Billz by hand record it with ``manage.py billz_mark_recorded`` (it sets
-    ``billz_pushed_at``), so it stops counting after the next read too (review NEW-2). A reservation whose
-    "stopped counting" is final is stamped ``billz_settled_at`` (``services.settle_billz_reservations``): the
-    read looks only at the unsettled ones (partial index ``reservation_unsettled_prod_idx``), so its cost does
-    not grow with the shop's sales history.
-    """
-    ids = list(product_ids)
-    result = dict.fromkeys(ids, 0)
+def _stock_rows() -> QuerySet[ProductStock]:
+    """Every ``ProductStock`` row annotated with ``held`` (active reservations), ``sold`` (converted units
+    Billz has not seen sold) and ``available`` (``quantity − held − sold``): the rules of
+    :func:`available_stock`, shared by the customer stock counts below."""
     active = (
         StockReservation.objects.filter(
             product_id=OuterRef("product_id"), state=StockReservation.State.ACTIVE
@@ -110,14 +95,33 @@ def available_stock(product_ids: Iterable[int]) -> dict[int, int]:
         .annotate(total=Sum("quantity"))
         .values("total")[:1]
     )
-    rows = (
-        ProductStock.objects.filter(product_id__in=ids)
-        .annotate(
-            held=Coalesce(Subquery(active, output_field=IntegerField()), Value(0)),
-            sold=Coalesce(Subquery(converted, output_field=IntegerField()), Value(0)),
-        )
-        .values_list("product_id", "quantity", "held", "sold")
-    )
+    return ProductStock.objects.annotate(
+        held=Coalesce(Subquery(active, output_field=IntegerField()), Value(0)),
+        sold=Coalesce(Subquery(converted, output_field=IntegerField()), Value(0)),
+    ).annotate(available=F("quantity") - F("held") - F("sold"))
+
+
+def available_stock(product_ids: Iterable[int]) -> dict[int, int]:
+    """``{product_id: Billz quantity − active reservations − converted units Billz has not seen sold}``.
+
+    Billz owns ``ProductStock.quantity`` (read at ``synced_at``). A converted reservation (a paid order) keeps
+    counting until its sale is in Billz **and** the stock was read after that (review A M3): while the
+    purchase is unpushed (``billz_pushed_at`` null — a push still running, deferred for a closed shift or
+    dead-lettered for staff) Billz still counts the unit as in stock, so every sync would otherwise offer it
+    again. It also counts while converted after the last read (``converted_at > synced_at``). It stops
+    counting once a read after the push reflects the sale, and for a cancelled order whose sale never reached
+    Billz (the unit never left Billz's stock). ``synced_at`` null (never read from Billz) → converted units
+    are ignored. A product without a stock row has 0 available.
+
+    Staff entering a dead sale in Billz by hand record it with ``manage.py billz_mark_recorded`` (it sets
+    ``billz_pushed_at``), so it stops counting after the next read too (review NEW-2). A reservation whose
+    "stopped counting" is final is stamped ``billz_settled_at`` (``services.settle_billz_reservations``): the
+    read looks only at the unsettled ones (partial index ``reservation_unsettled_prod_idx``), so its cost does
+    not grow with the shop's sales history.
+    """
+    ids = list(product_ids)
+    result = dict.fromkeys(ids, 0)
+    rows = _stock_rows().filter(product_id__in=ids).values_list("product_id", "quantity", "held", "sold")
     for product_id, quantity, held, sold in rows:
         result[int(product_id)] = int(quantity) - int(held) - int(sold)
     return result
@@ -134,6 +138,48 @@ def customer_available_stock(product_ids: Iterable[int]) -> dict[int, int]:
     if not integration_modes.online_sales_enabled():
         return dict.fromkeys(ids, 0)
     return {product_id: max(0, quantity) for product_id, quantity in available_stock(ids).items()}
+
+
+def customer_in_stock_count(products: QuerySet[Product]) -> int | None:
+    """How many of ``products`` a customer can buy now (``customer_available_stock`` > 0), in one query;
+    ``None`` while online selling is off (the stock is unknown)."""
+    if not integration_modes.online_sales_enabled():
+        return None
+    return _stock_rows().filter(product__in=products.values("pk"), available__gt=0).count()
+
+
+def customer_low_stock_ids(
+    products: QuerySet[Product], *, minimum: int, maximum: int, limit: int
+) -> list[int]:
+    """Up to ``limit`` ids of ``products`` whose customer availability is within ``[minimum, maximum]``,
+    newest product first (one query); none while online selling is off."""
+    if not integration_modes.online_sales_enabled():
+        return []
+    rows = (
+        _stock_rows()
+        .filter(product__in=products.values("pk"), available__gte=minimum, available__lte=maximum)
+        .order_by("-product__created_at", "-product_id")
+        .values_list("product_id", flat=True)
+    )
+    return [int(pk) for pk in rows[:limit]]
+
+
+# --- bestsellers (storefront landing page; refreshed by the beat task ``commerce.refresh_bestsellers``) ---
+
+BESTSELLERS_CACHE_KEY = "commerce:bestseller_ids"
+BESTSELLERS_DAYS = 30
+BESTSELLERS_LIMIT = 12
+# Three hourly runs: one missed beat keeps the rail, a stopped beat drops it within hours.
+BESTSELLERS_CACHE_SECONDS = 3 * 3600
+
+
+def cached_bestseller_ids() -> list[int]:
+    """The product ids of the last :func:`top_products` refresh, best first; ``[]`` when the cache holds none
+    (never computed on a request)."""
+    value = cache.get(BESTSELLERS_CACHE_KEY)
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, int) and not isinstance(item, bool)]
 
 
 # --- orders list (03 §6.1) ----------------------------------------------------------------------------------
@@ -546,7 +592,14 @@ def top_products(start: datetime, end: datetime, *, limit: int = 10) -> list[Top
 
 
 __all__ = [
+    "BESTSELLERS_CACHE_KEY",
+    "BESTSELLERS_CACHE_SECONDS",
+    "BESTSELLERS_DAYS",
+    "BESTSELLERS_LIMIT",
     "STATUS_COUNT_KEYS",
+    "cached_bestseller_ids",
+    "customer_in_stock_count",
+    "customer_low_stock_ids",
     "TopProduct",
     "paid_orders_by_day_and_channel",
     "status_breakdown",

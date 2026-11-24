@@ -253,6 +253,8 @@ class Product(TimeStampedModel):
                 F("id").desc(),
                 name="catalog_product_default_order",
             ),  # exact match for ordering=default
+            # the customer catalog's newest-first order and the storefront feed's keyset (created_at, id)
+            models.Index(fields=["-created_at", "-id"], name="catalog_product_created_order"),
             models.Index(
                 fields=["is_new_from_billz"], condition=Q(is_new_from_billz=True), name="catalog_product_new"
             ),

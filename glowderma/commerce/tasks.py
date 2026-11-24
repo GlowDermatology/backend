@@ -1208,3 +1208,15 @@ def review_delivery_issues() -> dict[str, int]:
     stopped half-way, reminders of urgent issues (``commerce.delivery_review``). Counts only."""
     result = delivery_review.review_delivery_issues()
     return {"opened": len(result.opened), "resolved": len(result.resolved), "reminded": len(result.reminded)}
+
+
+@shared_task(name="commerce.refresh_bestsellers")  # type: ignore[untyped-decorator]
+def refresh_bestsellers() -> list[int]:
+    """Hourly (beat ``commerce-refresh-bestsellers``): the ``BESTSELLERS_LIMIT`` products with the largest
+    revenue over the last ``BESTSELLERS_DAYS`` days (``selectors.top_products``) are stored in the cache for
+    the storefront's ``home/`` bestsellers rail, which never computes them on a request."""
+    end = timeutils.now()
+    start = end - timedelta(days=selectors.BESTSELLERS_DAYS)
+    ids = [row.product_id for row in selectors.top_products(start, end, limit=selectors.BESTSELLERS_LIMIT)]
+    cache.set(selectors.BESTSELLERS_CACHE_KEY, ids, timeout=selectors.BESTSELLERS_CACHE_SECONDS)
+    return ids
