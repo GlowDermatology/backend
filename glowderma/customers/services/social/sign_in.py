@@ -12,7 +12,7 @@ from django.core.cache import cache
 from django.db import IntegrityError, transaction
 
 from glowderma.accounts import services as account_services
-from glowderma.accounts.models import CustomerSocialIdentity
+from glowderma.accounts.models import Customer, CustomerSocialIdentity
 from glowderma.core import enums
 from glowderma.core.pii import pii_ref
 from glowderma.customers.services.common import results, trail
@@ -48,7 +48,9 @@ def social_sign_in(
     if identity is not None and identity.customer.status == enums.CustomerStatus.ACTIVE:
         if provider == enums.CustomerSocialProvider.APPLE and not identity.provider_refresh_token:
             sealed, client_id = tokens.exchange_apple_code(authorization_code, claims)
-        signed = _sign_in_linked(identity, provider, sealed, client_id, device=device, request=request)
+        signed = _sign_in_linked(
+            identity, provider, sealed, client_id, claims, device=device, request=request
+        )
         if signed is not None:
             return signed
         # The identity was unlinked (reset, dormant rule, unlink) or the account deleted meanwhile: it is an
@@ -130,6 +132,7 @@ def _sign_in_linked(
     provider: str,
     sealed: str,
     client_id: str,
+    claims: AppTokenClaims,
     *,
     device: results.DeviceContext,
     request: Any,
@@ -145,6 +148,10 @@ def _sign_in_linked(
             identity.pk, customer.pk, sealed_token=sealed, client_id=client_id
         ):
             return None
+        # Repairs social-only accounts created before the address was kept on sign-up. Never an account with
+        # a phone or password: the identity alone must not add a way to reset it (review B-W2 #1).
+        if claims.trusted_email and not customer.phone and not customer.password:
+            adopt_trusted_email(customer, claims.email)
         started = account_services.start_customer_session(
             customer.pk,
             device.fid,
@@ -157,6 +164,24 @@ def _sign_in_linked(
         return results.SignIn(started, customer.pk)
 
 
+def adopt_trusted_email(customer: Customer, email: str | None) -> None:
+    """One mailbox, one account, completed: an account with a trusted Google identity (``trusted_email``,
+    vouched by the provider) but no address of its own takes that address (``email_verified_at`` = now),
+    unless another account holds it. Called under the caller's customer lock after a Google sign-in or a
+    phone completion; a lost race for the address keeps the account without one rather than failing."""
+    if customer.email or not email:
+        return
+    address = account_services.normalize_email(email)
+    if Customer.objects.filter(email=address).exists():
+        return
+    try:
+        account_services.set_customer_email(customer.pk, address)
+    except IntegrityError:
+        return
+    customer.email = address
+
+
 __all__ = [
+    "adopt_trusted_email",
     "social_sign_in",
 ]

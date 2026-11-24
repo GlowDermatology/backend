@@ -25,7 +25,7 @@ from glowderma.core.api.exceptions import (
 from glowderma.customers import selectors
 from glowderma.customers.services.auth import dormancy, registration
 from glowderma.customers.services.common import identifiers, passwords, published_terms, results, trail
-from glowderma.customers.services.social import apple_revocation, tickets, tokens
+from glowderma.customers.services.social import apple_revocation, sign_in, tickets, tokens
 
 logger = logging.getLogger("glowderma.customers.services")
 
@@ -155,23 +155,6 @@ def _trusted_signup_email(social: tickets.SocialTicket, identifier: str) -> str 
     return email
 
 
-def _adopt_trusted_email(customer: Customer, social: tickets.SocialTicket) -> None:
-    """One mailbox, one account, completed: an account that gets a trusted Google identity (a phone
-    verified in this step — new, reactivated or existing) but has no address of its own takes the
-    provider-vouched address, unless another account holds it. Under the caller's customer lock; a lost race
-    for the address keeps the account without one rather than failing the sign-in."""
-    if customer.email or not social.trusted or not social.email:
-        return
-    email = account_services.normalize_email(social.email)
-    if Customer.objects.filter(email=email).exists():
-        return
-    try:
-        account_services.set_customer_email(customer.pk, email)
-    except IntegrityError:
-        return
-    customer.email = email
-
-
 def _complete_social(
     social: tickets.SocialTicket,
     verification_token: str,
@@ -259,7 +242,8 @@ def _complete_social(
             raise SocialIdentityLinked(
                 details={"provider": social.provider}, params={"provider": label}
             ) from exc
-        _adopt_trusted_email(customer, social)
+        if social.trusted:
+            sign_in.adopt_trusted_email(customer, social.email)
         started = account_services.start_customer_session(
             customer.pk,
             device.fid,

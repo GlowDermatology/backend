@@ -195,3 +195,24 @@ def test_an_untrusted_link_to_a_phone_account_adds_no_address(world: World) -> N
     done = complete_with_phone(app, step.json()["social_ticket"], "+998901240083", password=PASSWORD)
     assert done.status_code == 200, done.content
     assert done.json()["customer"]["email"] is None
+
+
+def test_a_linked_google_account_without_an_address_gets_it_at_the_next_sign_in(world: World) -> None:
+    # An account created before the address was kept (here: an unverified first sign-in) is repaired.
+    app = world.app("fid-repair")
+    step = social(app, "fake-unverified:sub-repair:Dilnoza@gmail.com")
+    done = app.post(
+        "auth/social/complete/",
+        {
+            "social_ticket": step.json()["social_ticket"],
+            "verification_token": None,
+            "name": "Dilnoza",
+            "terms_version": TERMS_V1,
+        },
+        auth=False,
+    )
+    assert done.status_code == 201 and done.json()["customer"]["email"] is None, done.content
+    again = social(app, "fake:sub-repair:dilnoza@gmail.com")
+    assert again.status_code == 200, again.content
+    assert again.json()["customer"]["email"] == "dilnoza@gmail.com"
+    assert again.json()["customer"]["id"] == done.json()["customer"]["id"]
