@@ -83,6 +83,29 @@ def _clones_from_template(config: pytest.Config) -> bool:
 _SEQUENCE_FLOOR = 200_000
 
 
+def _raise_sequences_to_floor(connection: BaseDatabaseWrapper) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT setval(format('%%I.%%I', schemaname, sequencename)::regclass, %s, false) "
+            "FROM pg_sequences WHERE COALESCE(last_value, start_value) < %s",
+            [_SEQUENCE_FLOOR, _SEQUENCE_FLOOR],
+        )
+
+
+@pytest.fixture(autouse=True)
+def sequence_floor(request: pytest.FixtureRequest, django_db_blocker: DjangoDbBlocker) -> Iterator[None]:
+    """Keep every sequence past the seeded ids for the next test. ``seeding.reset_sequences`` (and
+    ``seed_demo``, which calls it) re-syncs sequences with ``setval``, which no rollback undoes: a
+    later test of the same worker that runs a seeder and then creates a row would collide with a seeded id."""
+    yield
+    if "_django_db_helper" not in request.fixturenames:
+        return
+    from django.db import connection
+
+    with django_db_blocker.unblock():
+        _raise_sequences_to_floor(connection)
+
+
 def _template_name(test_name: str) -> str:
     return f"{test_name}_template"
 
@@ -98,12 +121,7 @@ def _build_template(connection: BaseDatabaseWrapper, template: str) -> None:
         # `seed_demo` re-syncs the sequences afterwards; a test that calls a seeder directly and then
         # creates a row relied on earlier tests having advanced the sequence (sequences ignore rollbacks),
         # which a fresh worker database does not give. Every sequence starts past any seeded id instead.
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT setval(format('%%I.%%I', schemaname, sequencename)::regclass, %s, false) "
-                "FROM pg_sequences WHERE COALESCE(last_value, start_value) < %s",
-                [_SEQUENCE_FLOOR, _SEQUENCE_FLOOR],
-            )
+        _raise_sequences_to_floor(connection)
     finally:
         # CREATE DATABASE … TEMPLATE refuses a template that has open sessions.
         connection.close()
