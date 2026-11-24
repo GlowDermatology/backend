@@ -409,7 +409,7 @@ containers =
 exhaustive = true
 layers =
     completion | sign_in
-    tickets | tokens | apple_revocation
+    tickets | tokens | apple_revocation | trusted_email
 
 [importlinter:contract:customers-services-me]
 name = customers.services.me: social links above the other writes above re-authentication
