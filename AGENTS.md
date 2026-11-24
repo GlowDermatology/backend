@@ -86,8 +86,11 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   auth_sessions, defaults), `services/` (common, otp, customer, staff), `selectors/`, `tasks/` (one module per
   outbox handler), `admin/`, `authentication/`, `mfa/`, `second_factor/`, `security/` (lockout primitives),
   `api/throttles/`, `api/admin/{views,serializers}/` with `api/admin/payloads.py` (response bodies), and
-  `console/views/` (one module per sign-in step). Shapes are checked by `accounts/tests/test_services_package.py`,
-  `models/test_models_package.py` and `test_package_facades.py`.
+  `console/views/` (one module per sign-in step). The other apps follow it (`customers/services/{common,auth,
+  social,me}/`, `professionals/services/`, `notifications/services/campaigns/`, `payments/{services,selectors}/`,
+  `integrations/billz/{client,live}/`, every `api/<audience>/{views,serializers,schemas}/`). Shapes are checked
+  by `accounts/tests/test_services_package.py`, `models/test_models_package.py`, `test_package_facades.py` and
+  `core/tests/test_package_facades.py` (every facade in the project).
   - Submodules import siblings as modules (`locks.lock_customer(...)`) with absolute imports, never a name through
     their own facade, and their layering is an exhaustive `.importlinter` contract (the whole accounts app has
     one too: a new accounts module must be placed in it).
@@ -104,6 +107,15 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
     byte-identical: never rename a serializer, never add a docstring to a base class or mixin, keep field order.
   - Tests mirror the source layout (`accounts/tests/{api/admin, console, services/staff, …}`); helper modules
     other apps import by path stay at the root of their `tests/` package.
+  - Every API package keeps its OpenAPI declarations out of the views: `api/<audience>/schemas/<module>.py`
+    (one per views module; `schemas.py` next to a single `views.py`) declares each `extend_schema(...)` as a
+    named constant, `<VIEW>_<METHOD>` for a handler and `<VIEW>_VIEW` for a class-level `extend_schema_view`
+    (the name drops `View`/`ViewSet`/`APIView`), and the handler is decorated with the name alone
+    (`@LOGIN_POST`). Parameters and form components only the declarations use live there too; shared ones
+    in `schemas/common.py`. Layers: `urls` > `views` > `schemas` (| `payloads`) > `serializers`.
+  - Views are classes (`APIView`, a viewset, or Django's `View` for the console); no function-based views.
+    Django decorators go on `dispatch` through `method_decorator`; a dotted setting that needs a callable
+    (`CSRF_FAILURE_VIEW`) names the module-level `as_view()` of the class.
 - Layering, enforced by import-linter (a module imports only strictly lower layers; siblings never import each
   other):
   ```
@@ -208,7 +220,7 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   codes `fake:<subject>:<email>[:hd]`, `fake-unverified:…`, `fake-fail`, `fake-down`; FakeGoogle nonce
   `nonce-<subject>` or `*`). Adapters never put a secret or bearer token in a URL (POST bodies / `Authorization`
   headers only), retry only on transport errors, and map failures to `OAuthExchangeError`-style typed errors.
-  **Billz is the documented exception** (`integrations/billz/client.py`): its 429 is Billz's documented rate-limit
+  **Billz is the documented exception** (the `integrations/billz/client/` package): its 429 is Billz's documented rate-limit
   signal (a shared limiter pauses every worker), and transport errors / 5xx are retried only for calls that are
   safe to repeat (reads, absolute upserts) or that certainly never reached Billz.
 - **Live adapters (M3: Click, Payme, BTS, Eskiz, FCM; Yandex Delivery)** share `glowderma/integrations/httpclient.py`: one
@@ -292,8 +304,8 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   `AppendOnlyModel` **and** get a trigger migration (`core.db.append_only_trigger_sql`); FKs to and from
   append-only rows use `on_delete=PROTECT` (a `SET_NULL` would be an UPDATE the trigger rejects).
 - API: snake_case keys, enum literals as in the contract, error envelope + pagination envelope from `core`.
-  Every admin view inherits `AdminAPIView`/`AdminGenericViewSet`; every handler method carries `@extend_schema`
-  (outermost) with an explicit `operation_id`; `@idempotent()` where the contract marks **I**.
+  Every admin view inherits `AdminAPIView`/`AdminGenericViewSet`; every handler method carries its schema constant
+  (outermost, declared in the `schemas` module) with an explicit `operation_id`; `@idempotent()` where the contract marks **I**.
 - Tests: pytest + factory-boy, one `tests/` package per module; service-level tests plus API tests for every
   endpoint (the auth matrix is automatic — add validation and happy-path tests); `format="json"` on APIClient
   calls; on-commit effects via `django_capture_on_commit_callbacks(execute=True)`; concurrency tests with

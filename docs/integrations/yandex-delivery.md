@@ -12,7 +12,7 @@ Code map:
 | Part | Where |
 |---|---|
 | Port, typed errors, dataclasses | `glowderma/integrations/yandex_delivery/ports.py` |
-| Endpoints, payload builders, parsers (pure) | `glowderma/integrations/yandex_delivery/protocol.py` |
+| Endpoints, payload builders, parsers (pure) | `glowderma/integrations/yandex_delivery/protocol/` |
 | Live adapter (`LiveYandexDelivery`) | `glowderma/integrations/yandex_delivery/live.py` |
 | Fake (`FakeYandexDelivery`, scenarios, `advance`) | `glowderma/integrations/yandex_delivery/fake.py` |
 | Mode switch | `glowderma/integrations/yandex_delivery/registry.py` (`get_yandex_delivery(scenario)`) |

@@ -10,8 +10,9 @@ visibility, the promo flag and (provisionally, O6) the price. Glow Derma reads t
 every paid online order back as a Billz sale.
 
 Code: `glowderma/integrations/billz/` — `ports.py` (the port, typed errors, the sale journal, stubs), `fake.py`,
-`live.py` (catalog sync, sale push), `client.py` (shared cache, auth, rate limiter, profiles and deadlines, circuit
-breaker, retries, error mapping), `registry.py`. Orchestration: `glowderma/catalog/tasks.py` (import job, beat),
+`live/` (catalog sync, sale push: `adapter`, `product_fields`, `sale_fields`, `sale_lock`), `client/` (`config`,
+`shared_cache`, `rate_limiter`, `error_mapping`, `http_client`: auth, profiles and deadlines, circuit breaker,
+retries), `registry.py`. Orchestration: `glowderma/catalog/tasks.py` (import job, beat),
 `glowderma/catalog/services.py` (`upsert_from_billz`, `hide_missing_from_billz`), `glowderma/commerce/tasks.py`
 (`billz.push_sale`), `glowderma/commerce/billz_sales.py` (`PurchaseJournal`), `glowderma/commerce/selectors.py`
 (`available_stock`), `glowderma/loyalty/services.py` (`record_billz_order`, `record_billz_payment_attempt`,
