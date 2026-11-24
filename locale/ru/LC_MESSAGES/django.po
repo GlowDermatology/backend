@@ -670,7 +670,7 @@ msgstr "Apple"
 msgid "Arxivda"
 msgstr "В архиве"
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/common.py
 msgid "Asosiy filial biriktirilgan filiallar orasida bo‘lishi kerak."
 msgstr "Основной филиал должен входить в список назначенных филиалов."
 
@@ -1126,7 +1126,7 @@ msgstr "Один клиент"
 msgid "Bitta mijoz · %(phone)s"
 msgstr "Один клиент · %(phone)s"
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/common.py
 msgid "Bitta mutaxassisda ko‘pi bilan %(n)s ta xizmat bo‘lishi mumkin."
 msgstr "У одного специалиста может быть не более %(n)s услуг."
 
@@ -1154,7 +1154,7 @@ msgstr "Запущено"
 msgid "Boshlang‘ich qiymatlar"
 msgstr "Исходные значения"
 
-#: glowderma/professionals/api/admin/serializers.py
+#: glowderma/professionals/api/admin/serializers/messages.py
 msgid "Boshlanish va tugash vaqtini birga kiriting (ikkalasi bo‘sh bo‘lsa, dam olish kuni)."
 msgstr "Укажите и время начала, и время окончания (если оба пусты — выходной день)."
 
@@ -1249,7 +1249,7 @@ msgstr "Сотрудник с таким email уже есть (если учё�
 msgid "Bu hafta kuni allaqachon kiritilgan."
 msgstr "Этот день недели уже добавлен."
 
-#: glowderma/professionals/api/admin/serializers.py
+#: glowderma/professionals/api/admin/serializers/messages.py
 msgid "Bu hafta kuni ikki marta berilgan."
 msgstr "Этот день недели указан дважды."
 
@@ -1279,8 +1279,8 @@ msgstr "Никому не передавайте этот ключ и не со�
 msgid "Bu manzil (slug) boshqa mahsulotda bor."
 msgstr "Этот адрес (slug) уже занят другим товаром."
 
-#: glowderma/professionals/api/admin/serializers.py
-#: glowderma/professionals/services.py
+#: glowderma/professionals/api/admin/serializers/specialists.py
+#: glowderma/professionals/services/common.py
 msgid "Bu manzil (slug) boshqa mutaxassisda bor."
 msgstr "Этот адрес (slug) уже занят другим специалистом."
 
@@ -1305,7 +1305,7 @@ msgstr "У этого клиента нет устройства, принима
 msgid "Bu muammo allaqachon hal qilingan."
 msgstr "Эта проблема уже решена."
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/common.py
 msgid "Bu mutaxassisda shu nomdagi xizmat allaqachon bor."
 msgstr "У этого специалиста уже есть услуга с таким названием."
 
@@ -1353,7 +1353,7 @@ msgstr "Этот режим используется только в консо�
 msgid "Bu sana allaqachon kiritilgan."
 msgstr "Эта дата уже добавлена."
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/common.py
 msgid "Bu sana uchun alohida jadval allaqachon bor."
 msgstr "Отдельное расписание на эту дату уже есть."
 
@@ -1385,7 +1385,7 @@ msgstr "У этого платежа нет номера платежа Click, �
 msgid "Bu vaqt band."
 msgstr "Это время уже занято."
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/common.py
 msgid "Bu vaqt boshqa band vaqt bilan kesishadi."
 msgstr "Это время пересекается с другим занятым временем."
 
@@ -1393,12 +1393,12 @@ msgstr "Это время пересекается с другим заняты�
 msgid "Bu versiya avval faol bo‘lgan: uni qayta faollashtirish joriy versiyani arxivga o‘tkazadi."
 msgstr "Эта версия уже была активной: её повторная активация отправит текущую версию в архив."
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/common.py
 msgid "Bu xizmatga qabullar yozilgan, uni o‘chirib bo‘lmaydi. Uning o‘rniga nofaol qiling."
 msgstr "На эту услугу есть записи, её нельзя удалить. Вместо этого деактивируйте её."
 
-#: glowderma/professionals/api/admin/serializers.py
-#: glowderma/professionals/services.py
+#: glowderma/professionals/api/admin/serializers/messages.py
+#: glowderma/professionals/services/common.py
 msgid "Bu xodim boshqa mutaxassisga bog‘langan."
 msgstr "Этот сотрудник уже привязан к другому специалисту."
 
@@ -1410,7 +1410,7 @@ msgstr "У этого сотрудника двухфакторная защит
 msgid "Bu yetkazish usuli o‘chirilgan."
 msgstr "Этот способ доставки отключён."
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/editable_rows.py
 msgid "Bu yozuvga boshqa yozuvlar bog‘langan; avval ularni o‘chiring yoki nofaol qiling."
 msgstr "С этой записью связаны другие записи; сначала удалите их или сделайте неактивными."
 
@@ -1597,7 +1597,7 @@ msgstr "ID задачи Celery"
 msgid "Celery vazifasi"
 msgstr "Задача Celery"
 
-#: glowderma/professionals/api/admin/views.py
+#: glowderma/professionals/api/admin/views/specialists.py
 msgid "Ch"
 msgstr "Ср"
 
@@ -1696,7 +1696,7 @@ msgstr "Длительность"
 msgid "Davomiyligi (daq.)"
 msgstr "Длительность (мин.)"
 
-#: glowderma/professionals/api/admin/serializers.py
+#: glowderma/professionals/api/admin/serializers/messages.py
 msgid "Davomiylik 5 daqiqaga karrali bo‘lsin."
 msgstr "Длительность должна быть кратна 5 минутам."
 
@@ -1762,7 +1762,7 @@ msgstr "Телефон магазина"
 msgid "Do‘kon xaridlari (POS)"
 msgstr "Покупки в магазине (POS)"
 
-#: glowderma/professionals/api/admin/views.py
+#: glowderma/professionals/api/admin/views/specialists.py
 msgid "Du"
 msgstr "Пн"
 
@@ -1941,11 +1941,11 @@ msgstr "Активен"
 msgid "Faol akkauntlar"
 msgstr "Активные учётные записи"
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/common.py
 msgid "Faol filial topilmadi."
 msgstr "Активный филиал не найден."
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/common.py
 msgid "Faol filialni ushbu mutaxassisga biriktiring."
 msgstr "Закрепите специалиста за действующим филиалом, прежде чем назначить там приём."
 
@@ -2012,12 +2012,12 @@ msgstr "Чтобы активировать, сначала успешно пр�
 
 #: glowderma.core.api.exceptions.FIELD_MESSAGES
 #: glowderma/core/api/exceptions.py
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/editable_rows.py
 msgid "Faqat JPEG, PNG yoki WebP rasm."
 msgstr "Только изображения JPEG, PNG или WebP."
 
 #: glowderma/catalog/api/admin/serializers.py
-#: glowderma/professionals/api/admin/serializers.py
+#: glowderma/professionals/api/admin/serializers/specialists.py
 msgid "Faqat lotin kichik harflari, raqamlar va chiziqcha (faqat raqam emas)."
 msgstr "Только строчные латинские буквы, цифры и дефис (не только цифры)."
 
@@ -2071,11 +2071,11 @@ msgstr "Филиал"
 msgid "Filiallar"
 msgstr "Филиалы"
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/common.py
 msgid "Filialni ajratishdan oldin ish jadvalidagi filialni o‘zgartiring."
 msgstr "Измените филиал в графике работы, прежде чем убрать его из списка специалиста."
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/common.py
 msgid "Filialni nofaol qilishdan oldin faol mutaxassislarni ajrating va kelgusi qabullarni ko‘chiring yoki bekor qiling."
 msgstr "Перед отключением филиала измените назначение действующих специалистов и перенесите или отмените предстоящие приёмы."
 
@@ -2642,7 +2642,7 @@ msgstr "Отправление создано"
 msgid "Jo‘natma yaratilmadi"
 msgstr "Отправление не создано"
 
-#: glowderma/professionals/api/admin/views.py
+#: glowderma/professionals/api/admin/views/specialists.py
 msgid "Ju"
 msgstr "Пт"
 
@@ -2886,7 +2886,7 @@ msgstr "Широта"
 msgid "Kenglik va uzunlikni birga kiriting yoki ikkalasini ham bo‘sh qoldiring."
 msgstr "Укажите широту и долготу вместе или оставьте обе пустыми."
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/common.py
 msgid "Kenglik va uzunlikni birga kiriting."
 msgstr "Укажите и широту, и долготу."
 
@@ -3009,7 +3009,7 @@ msgstr "Косметология"
 msgid "Ko‘pi bilan 2 ta kasr raqam."
 msgstr "Не более 2 знаков после запятой."
 
-#: glowderma/professionals/api/admin/serializers.py
+#: glowderma/professionals/api/admin/serializers/messages.py
 msgid "Ko‘pi bilan 366 kunlik davr."
 msgstr "Период не более 366 дней."
 
@@ -3017,7 +3017,7 @@ msgstr "Период не более 366 дней."
 msgid "Ko‘pi bilan 42 kunlik davr."
 msgstr "Период не более 42 дней."
 
-#: glowderma/professionals/api/admin/serializers.py
+#: glowderma/professionals/api/admin/serializers/messages.py
 msgid "Ko‘pi bilan 6 ta kasr raqam."
 msgstr "Не более 6 знаков после запятой."
 
@@ -3025,7 +3025,7 @@ msgstr "Не более 6 знаков после запятой."
 msgid "Ko‘pi bilan 8 ta rasm."
 msgstr "Не более 8 изображений."
 
-#: glowderma/professionals/api/admin/serializers.py
+#: glowderma/professionals/api/admin/serializers/messages.py
 msgid "Ko‘pi bilan bir yil oldinga kiritish mumkin."
 msgstr "Можно указать не более чем на год вперёд."
 
@@ -3244,7 +3244,7 @@ msgstr "Адрес (ru)"
 msgid "Manzil (uz)"
 msgstr "Адрес (uz)"
 
-#: glowderma/professionals/api/admin/serializers.py
+#: glowderma/professionals/api/admin/serializers/specialists.py
 msgid "Manzil topilmadi."
 msgstr "Адрес не найден."
 
@@ -3525,11 +3525,11 @@ msgstr "Аккаунт специалиста не может стать акк�
 msgid "Mutaxassis hisobiga konsolga kirish huquqini berib bo‘lmaydi."
 msgstr "Аккаунту специалиста нельзя предоставить доступ к консоли."
 
-#: glowderma/professionals/api/specialist.py
+#: glowderma/professionals/api/specialist/base.py
 msgid "Mutaxassis jadvali hozir mavjud emas."
 msgstr "Расписание специалиста сейчас недоступно."
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/editable_rows.py
 msgid "Mutaxassis profili o‘z hisobiga butun umri davomida bog‘langan."
 msgstr "Профиль специалиста навсегда привязан к своей учётной записи."
 
@@ -3542,7 +3542,7 @@ msgstr "Специалист не найден."
 msgid "Mutaxassis ushbu filialda qabul qilmaydi."
 msgstr "Специалист не принимает в этом филиале."
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/editable_rows.py
 msgid "Mutaxassisda %(n)s ta kelgusi qabul bor (kutilayotgan yoki tasdiqlangan). Avval ularni boshqa vaqtga yoki mutaxassisga ko‘chiring yoki bekor qiling."
 msgid_plural "Mutaxassisda %(n)s ta kelgusi qabul bor (kutilayotgan yoki tasdiqlangan). Avval ularni boshqa vaqtga yoki mutaxassisga ko‘chiring yoki bekor qiling."
 msgstr[0] "У специалиста %(n)s предстоящая запись на приём (ожидающая или подтверждённая). Сначала перенесите её на другое время или к другому специалисту либо отмените."
@@ -3550,7 +3550,7 @@ msgstr[1] "У специалиста %(n)s предстоящие записи �
 msgstr[2] "У специалиста %(n)s предстоящих записей на приём (ожидающих или подтверждённых). Сначала перенесите их на другое время или к другому специалисту либо отмените."
 msgstr[3] "У специалиста %(n)s предстоящих записей на приём (ожидающих или подтверждённых). Сначала перенесите их на другое время или к другому специалисту либо отмените."
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/common.py
 msgid "Mutaxassisda {n} ta kelgusi qabul bor (kutilayotgan yoki tasdiqlangan). Qabullar o‘zgarmaydi: avval ularni boshqa vaqtga yoki mutaxassisga ko‘chiring yoki bekor qiling, yoki baribir nofaol qiling."
 msgstr "Предстоящих записей у специалиста (ожидающих или подтверждённых): {n}. Записи не изменятся: сначала перенесите их на другое время или к другому специалисту либо отмените, или всё равно деактивируйте специалиста."
 
@@ -3614,7 +3614,7 @@ msgid "Narx hisoblash uchun: provayder narxlar sahifasidan oling."
 msgstr "Для расчёта стоимости: возьмите со страницы цен провайдера."
 
 #: glowderma/catalog/api/admin/serializers.py
-#: glowderma/professionals/api/admin/serializers.py
+#: glowderma/professionals/api/admin/serializers/messages.py
 msgid "Narx juda katta."
 msgstr "Слишком высокая цена."
 
@@ -3978,7 +3978,7 @@ msgid "Oxirgi o‘zgarish: %(at)s · %(author)s"
 msgstr "Последнее изменение: %(at)s · %(author)s"
 
 #: glowderma/appointments/api/admin/serializers.py
-#: glowderma/professionals/api/admin/serializers.py
+#: glowderma/professionals/api/admin/serializers/messages.py
 msgid "Oxirgi sana boshlang‘ich sanadan oldin bo‘lmasin."
 msgstr "Конечная дата не должна быть раньше начальной."
 
@@ -4048,7 +4048,7 @@ msgstr "Средний чек"
 msgid "O‘rtacha chek:"
 msgstr "Средний чек:"
 
-#: glowderma/professionals/api/admin/serializers.py
+#: glowderma/professionals/api/admin/serializers/messages.py
 msgid "O‘tgan sanani tanlab bo‘lmaydi."
 msgstr "Нельзя выбрать прошедшую дату."
 
@@ -4110,7 +4110,7 @@ msgstr "POS-устройство"
 msgid "POS qurilmalar"
 msgstr "POS-устройства"
 
-#: glowderma/professionals/api/admin/views.py
+#: glowderma/professionals/api/admin/views/specialists.py
 msgid "Pa"
 msgstr "Чт"
 
@@ -4165,7 +4165,7 @@ msgstr "Возврат посылки уже подтверждён."
 msgid "Professionalroq"
 msgstr "Профессиональнее"
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/specialists.py
 msgid "Profilni e’lon qilib bo‘lmaydi. Yetishmayapti: %(missing)s."
 msgstr "Профиль пока нельзя опубликовать. Не хватает: %(missing)s."
 
@@ -4528,7 +4528,7 @@ msgstr "Изображение"
 
 #: glowderma.core.api.exceptions.FIELD_MESSAGES
 #: glowderma/core/api/exceptions.py
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/editable_rows.py
 msgid "Rasm 5 MB dan oshmasin."
 msgstr "Изображение не должно превышать 5 МБ."
 
@@ -4607,7 +4607,7 @@ msgstr "По способу регистрации · 30 дней"
 msgid "Ruscha"
 msgstr "Русский"
 
-#: glowderma/professionals/api/admin/serializers.py
+#: glowderma/professionals/api/admin/serializers/messages.py
 msgid "Ruxsat etilgan qadamlar: 10, 15, 20, 30 yoki 60 daqiqa."
 msgstr "Допустимый шаг: 10, 15, 20, 30 или 60 минут."
 
@@ -4714,7 +4714,7 @@ msgstr "Страница устарела или сеанс был обновл�
 msgid "Sana"
 msgstr "Дата"
 
-#: glowderma/professionals/api/admin/serializers.py
+#: glowderma/professionals/api/admin/serializers/messages.py
 msgid "Sana bugundan ko‘pi bilan 10 yil uzoqlikda bo‘lsin."
 msgstr "Дата должна быть не дальше 10 лет от сегодняшнего дня."
 
@@ -4819,7 +4819,7 @@ msgstr "Сайт"
 msgid "Sayt sozlamalari"
 msgstr "Настройки сайта"
 
-#: glowderma/professionals/api/admin/views.py
+#: glowderma/professionals/api/admin/views/specialists.py
 msgid "Se"
 msgstr "Вт"
 
@@ -4878,7 +4878,7 @@ msgstr "Сеансы"
 msgid "Sessiyani tugatish"
 msgstr "Завершить сеанс"
 
-#: glowderma/professionals/api/admin/views.py
+#: glowderma/professionals/api/admin/views/specialists.py
 msgid "Sh"
 msgstr "Сб"
 
@@ -5178,7 +5178,7 @@ msgstr "Не требуется (самовывоз)"
 msgid "Tanaffus boshlanishi"
 msgstr "Начало перерыва"
 
-#: glowderma/professionals/api/admin/serializers.py
+#: glowderma/professionals/api/admin/serializers/messages.py
 msgid "Tanaffus ish vaqti ichida bo‘lsin."
 msgstr "Перерыв должен быть в пределах рабочего времени."
 
@@ -5186,7 +5186,7 @@ msgstr "Перерыв должен быть в пределах рабочег�
 msgid "Tanaffus tugashi"
 msgstr "Конец перерыва"
 
-#: glowderma/professionals/api/admin/serializers.py
+#: glowderma/professionals/api/admin/serializers/messages.py
 msgid "Tanaffusning boshlanishi va tugashini birga kiriting."
 msgstr "Укажите и начало, и конец перерыва."
 
@@ -5537,11 +5537,11 @@ msgstr "Нет в наличии (0 или нет записи в Billz)"
 msgid "Tugagan mahsulotlar"
 msgstr "Товары не в наличии"
 
-#: glowderma/professionals/api/admin/serializers.py
+#: glowderma/professionals/api/admin/serializers/messages.py
 msgid "Tugagan vaqtni band qilib bo‘lmaydi."
 msgstr "Нельзя заблокировать уже прошедшее время."
 
-#: glowderma/professionals/api/admin/serializers.py
+#: glowderma/professionals/api/admin/serializers/messages.py
 msgid "Tugash vaqti boshlanishidan keyin bo‘lsin."
 msgstr "Время окончания должно быть позже времени начала."
 
@@ -5664,7 +5664,7 @@ msgid "Vaqt"
 msgstr "Время"
 
 #: glowderma/appointments/services.py
-#: glowderma/professionals/api/admin/serializers.py
+#: glowderma/professionals/api/admin/serializers/messages.py
 msgid "Vaqt 5 daqiqalik qadamda bo‘lsin."
 msgstr "Время должно быть кратно 5 минутам."
 
@@ -5676,7 +5676,7 @@ msgstr "Перенесено"
 msgid "Vaqtlar"
 msgstr "Даты и время"
 
-#: glowderma/professionals/api/admin/serializers.py
+#: glowderma/professionals/api/admin/serializers/messages.py
 msgid "Vaqtni SS:DD ko‘rinishida kiriting."
 msgstr "Введите время в формате ЧЧ:ММ."
 
@@ -5887,7 +5887,7 @@ msgstr "Ошибки входа сотрудников"
 msgid "Xodim sessiyalari bu yerda tugatilmaydi."
 msgstr "Сеансы сотрудников здесь не завершаются."
 
-#: glowderma/professionals/api/admin/serializers.py
+#: glowderma/professionals/api/admin/serializers/messages.py
 msgid "Xodim topilmadi."
 msgstr "Сотрудник не найден."
 
@@ -5899,7 +5899,7 @@ msgstr "Сотрудник: {obj.email}"
 msgid "Xodimlar"
 msgstr "Сотрудники"
 
-#: glowderma/professionals/api/admin/views.py
+#: glowderma/professionals/api/admin/views/specialists.py
 msgid "Ya"
 msgstr "Вс"
 
@@ -6452,7 +6452,7 @@ msgstr "уведомления"
 msgid "bio (en)"
 msgstr "биография (en)"
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/specialists.py
 msgid "bio (o‘zbekcha)"
 msgstr "биография (на узбекском)"
 
@@ -6698,7 +6698,7 @@ msgstr[1] "активные учётные записи"
 msgstr[2] "активных учётных записей"
 msgstr[3] "активных учётных записей"
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/specialists.py
 msgid "faol asosiy filial"
 msgstr "активный основной филиал"
 
@@ -6714,7 +6714,7 @@ msgstr "активные клиенты, по сумме покупок за в�
 msgid "faol provayder"
 msgstr "активный провайдер"
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/specialists.py
 msgid "faol xizmat"
 msgstr "активная услуга"
 
@@ -6878,7 +6878,7 @@ msgstr "никогда"
 msgid "hisob"
 msgstr "счёт"
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/specialists.py
 msgid "hisob Mutaxassis rolida emas"
 msgstr "учётная запись не в роли «Специалист»"
 
@@ -6978,7 +6978,7 @@ msgstr "статус интеграции"
 msgid "integratsiya holatlari"
 msgstr "статусы интеграций"
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/specialists.py
 #: model metadata
 msgid "ish vaqti"
 msgstr "рабочее время"
@@ -7485,7 +7485,7 @@ msgstr "автор"
 msgid "mutaxassis"
 msgstr "специалист"
 
-#: glowderma/professionals/api/admin/views.py
+#: glowderma/professionals/api/admin/views/specialists.py
 #: model metadata
 msgid "mutaxassislar"
 msgstr "специалисты"
@@ -7632,7 +7632,7 @@ msgstr "долгота склада"
 msgid "omborga qaytgan"
 msgstr "вернулось на склад"
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/specialists.py
 msgid "ommaviy ism"
 msgstr "публичное имя"
 
@@ -8302,7 +8302,7 @@ msgstr "от суммы"
 msgid "summagacha"
 msgstr "до суммы"
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/specialists.py
 #: model metadata
 msgid "surat"
 msgstr "фотография"
@@ -8917,7 +8917,7 @@ msgstr "правила записи на приём (uz)"
 msgid "yo‘l"
 msgstr "путь"
 
-#: glowderma/professionals/services.py
+#: glowderma/professionals/services/specialists.py
 msgid "yo‘nalish"
 msgstr "направление"
 

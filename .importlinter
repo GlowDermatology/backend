@@ -431,3 +431,50 @@ exhaustive = true
 layers =
     admin | account | catalog
     common
+
+# professionals: the admin API (routes above views, above their schemas and payloads, above serializers), the
+# specialist API built on its serializers, and the services package behind its facade.
+[importlinter:contract:professionals-api-admin]
+name = professionals.api.admin: urls above views above schemas and payloads above serializers
+type = layers
+containers =
+    glowderma.professionals.api.admin
+exhaustive = true
+layers =
+    urls
+    views
+    schemas | payloads
+    serializers
+
+[importlinter:contract:professionals-api-admin-views]
+name = professionals.api.admin.views: one module per subject above the shared lookups
+type = layers
+containers =
+    glowderma.professionals.api.admin.views
+exhaustive = true
+layers =
+    specialists | specialist_photo | clinic_services | workforce | weekly_hours | overrides | blocks | clinics
+    common
+
+[importlinter:contract:professionals-api-specialist]
+name = professionals.api.specialist: views above schemas, payloads and serializers above the base view
+type = layers
+containers =
+    glowderma.professionals.api.specialist
+exhaustive = true
+layers =
+    views
+    schemas | payloads
+    serializers
+    base
+
+[importlinter:contract:professionals-services]
+name = professionals.services: the row writes and API operations above the specialist and location writes above common
+type = layers
+containers =
+    glowderma.professionals.services
+exhaustive = true
+layers =
+    editable_rows | specialist_photos | schedules | specialist_services
+    specialists | locations
+    common

@@ -502,9 +502,9 @@ class Scanner:
         return values
 
     def entity_name_actions(self) -> set[str]:
-        """``professionals.services.save_row`` / ``delete_row``: ``<ENTITY_NAMES value>.created|updated|
-        deleted``."""
-        module = self.modules["glowderma.professionals.services"]
+        """``professionals.services.editable_rows.save_row`` / ``delete_row``:
+        ``<ENTITY_NAMES value>.created|updated|deleted``."""
+        module = self.modules["glowderma.professionals.services.editable_rows"]
         names = module.constants["ENTITY_NAMES"]
         assert isinstance(names, ast.Dict)
         return {
@@ -519,8 +519,8 @@ class Scanner:
 # (module, function) → how the test enumerates what they can write. A new unresolvable site fails the scan
 # until it is listed here.
 DECLARED_SITES = {
-    ("glowderma/professionals/services.py", "save_row"): "entity_names",
-    ("glowderma/professionals/services.py", "delete_row"): "entity_names",
+    ("glowderma/professionals/services/editable_rows.py", "save_row"): "entity_names",
+    ("glowderma/professionals/services/editable_rows.py", "delete_row"): "entity_names",
 }
 
 

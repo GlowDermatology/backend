@@ -242,7 +242,7 @@ def test_the_previous_release_can_still_insert_rows() -> None:
 
 @pytest.mark.django_db
 def test_the_unique_names_the_services_translate_exist() -> None:
-    """``services._save_unique`` maps a lost race on these constraints to a 400 ``unique``: the names must be
-    PostgreSQL's (the one-to-one gets the default ``<table>_<column>_key``)."""
+    """``services.common.save_unique`` maps a lost race on these constraints to a 400 ``unique``: the names
+    must be PostgreSQL's (the one-to-one gets the default ``<table>_<column>_key``)."""
     assert STAFF_USER_CONSTRAINT in constraint_names("professionals_professional", "u")
     assert OVERRIDE_CONSTRAINT in constraint_names("professionals_workinghoursoverride", "u")

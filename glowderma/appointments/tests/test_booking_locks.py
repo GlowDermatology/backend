@@ -22,6 +22,8 @@ from glowderma.appointments.tests.factories import AppointmentFactory
 from glowderma.core.timeutils import TASHKENT
 from glowderma.professionals import services as professionals_services
 from glowderma.professionals.models import BlockedPeriod, Service
+from glowderma.professionals.services import schedules as professional_schedules
+from glowderma.professionals.services import specialist_services as professional_service_writes
 from glowderma.professionals.tests.factories import ServiceFactory, WorkingHoursFactory
 
 pytestmark = pytest.mark.django_db
@@ -252,7 +254,7 @@ def test_a_customer_booking_waits_for_a_price_change_and_snapshots_it(
     monkeypatch.setattr("glowderma.core.timeutils.now", lambda: ANCHOR)
     service = bookable()
     customer, staff = CustomerFactory.create(), StaffUserFactory.create()
-    inside, release = _held_on_second_call(monkeypatch, professionals_services, "_service_state")
+    inside, release = _held_on_second_call(monkeypatch, professional_service_writes, "_service_state")
     outcomes = _race(
         lambda: professionals_services.update_specialist_service(
             service.professional_id, service.pk, {"price": 99_000, "duration_min": 60}, actor=staff
@@ -275,7 +277,7 @@ def test_a_customer_booking_waits_for_a_service_deactivation_and_is_refused(
     monkeypatch.setattr("glowderma.core.timeutils.now", lambda: ANCHOR)
     service = bookable()
     customer, staff = CustomerFactory.create(), StaffUserFactory.create()
-    inside, release = _held_on_second_call(monkeypatch, professionals_services, "_service_state")
+    inside, release = _held_on_second_call(monkeypatch, professional_service_writes, "_service_state")
     outcomes = _race(
         lambda: professionals_services.update_specialist_service(
             service.professional_id, service.pk, {"is_active": False}, actor=staff
@@ -299,14 +301,14 @@ def test_an_admin_booking_waits_for_a_block_and_is_refused(monkeypatch: pytest.M
     service = bookable()
     customer, staff = CustomerFactory.create(), StaffUserFactory.create()
     inside, release = threading.Event(), threading.Event()
-    state = professionals_services._block_state
+    state = professional_schedules._block_state
 
     def held(block: BlockedPeriod) -> dict[str, Any]:
         inside.set()
         release.wait(10)
         return state(block)
 
-    monkeypatch.setattr(professionals_services, "_block_state", held)
+    monkeypatch.setattr(professional_schedules, "_block_state", held)
     outcomes = _race(
         lambda: professionals_services.create_block(
             service.professional_id,
@@ -338,7 +340,7 @@ def test_a_reschedule_waits_for_an_hours_change_and_is_refused(monkeypatch: pyte
     appointment = AppointmentFactory.create(
         professional=service.professional, service=service, start=at(MONDAY, 10)
     )
-    inside, release = _held_on_second_call(monkeypatch, professionals_services, "_week_state")
+    inside, release = _held_on_second_call(monkeypatch, professional_schedules, "_week_state")
     outcomes = _race(
         lambda: professionals_services.set_working_week(
             service.professional_id, [{"weekday": 0, "start": time(9), "end": time(12)}], actor=staff
