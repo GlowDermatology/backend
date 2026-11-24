@@ -56,8 +56,8 @@ def delete_account(
 ) -> DeletionResult:
     """``DELETE me/`` steps 1–6: re-authentication (``customer_reauth``), then in one transaction under the
     customer-level lock (``FOR NO KEY UPDATE``, before any order lock): 409 ``payment_in_progress`` while a
-    Click payment is in flight (nothing written), cancel unpaid orders and open future appointments, delete
-    the cart lines, ``accounts.services.delete_customer`` and audit ``customer.deleted``."""
+    Click or Uzum payment is in flight (nothing written), cancel unpaid orders and open future appointments,
+    delete the cart lines, ``accounts.services.delete_customer`` and audit ``customer.deleted``."""
     snapshot = Customer.objects.get(pk=customer_id)
     needed = reauth.reauthenticate(
         snapshot, password=password, verification_token=verification_token, sid=sid
@@ -66,9 +66,10 @@ def delete_account(
         customer = account_services.lock_signed_in_customer(customer_id, sid)
         inflight = commerce_selectors.customer_inflight_order(customer_id)
         if inflight is not None:
+            order_id, provider = inflight
             raise PaymentInProgress(
-                details={"provider": enums.PaymentProvider.CLICK.value, "order_id": inflight},
-                params={"provider": "Click"},
+                details={"provider": provider, "order_id": order_id},
+                params={"provider": commerce_selectors.provider_brand(provider)},
             )
         customer = reauth.lock_reauthenticated(customer_id, sid, snapshot, verification_token, needed)
         now = timeutils.now()

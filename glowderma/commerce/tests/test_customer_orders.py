@@ -207,7 +207,7 @@ def test_customer_inflight_order(customer: Customer, now: datetime) -> None:
     with at(now + timedelta(seconds=5)):
         prepare(order)
     with at(now + timedelta(seconds=30)):
-        assert selectors.customer_inflight_order(customer.pk) == order.pk
+        assert selectors.customer_inflight_order(customer.pk) == (order.pk, "click")
     with at(now + timedelta(seconds=200)):
         assert selectors.customer_inflight_order(customer.pk) is None
 

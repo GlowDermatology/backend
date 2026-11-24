@@ -337,12 +337,12 @@ def test_production_process_with_every_provider_fake_boots_and_warns(
     )
     assert result.returncode == 0, result.stderr
     assert (
-        "integrations running in fake mode in production: oauth, billz, fcm, click, payme, bts, devsms"
+        "integrations running in fake mode in production: oauth, billz, fcm, click, payme, uzum, bts, devsms"
         in (result.stdout + result.stderr)
     )
     assert (
-        "MODES ['ai', 'billz', 'bts', 'click', 'devsms', 'email', 'fcm', 'oauth', 'payme', 'vault', 'yandex']"
-        in result.stdout
+        "MODES ['ai', 'billz', 'bts', 'click', 'devsms', 'email', 'fcm', 'oauth', 'payme', 'uzum', 'vault', "
+        "'yandex']" in result.stdout
     )
 
 

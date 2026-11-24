@@ -122,3 +122,37 @@ def test_simulate_fail_then_success_pays_the_order(
     if provider == "click":
         paydocs = {p.provider_state["click_paydoc_id"] for p in attempts}
         assert len(paydocs) == 2
+
+
+@pytest.mark.parametrize(("outcome", "status"), [("success", "paid"), ("fail", "failed")])
+def test_simulate_uzum_plays_the_payer_on_the_fake_form(
+    dev_routes: None, customer_client: APIClient, customer: Customer, outcome: str, status: str
+) -> None:
+    import uuid
+
+    seed_policies()
+    order = place(customer, fulfilment="pickup", provider="uzum", when=timeutils.now())
+    pay = customer_client.post(
+        f"/api/v1/orders/{order.pk}/pay/",
+        {"provider": "uzum"},
+        format="json",
+        HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
+    )
+    assert pay.status_code == 200, pay.json()
+    response = customer_client.post(
+        f"/api/v1/dev/payments/{order.pk}/simulate/", {"outcome": outcome}, format="json"
+    )
+    assert response.status_code == 200, response.json()
+    assert [step["call"] for step in response.json()["steps"]] == ["callback", "sync"]
+    assert Payment.objects.get(pk=pay.json()["payment_id"]).status == status
+
+
+def test_simulate_uzum_without_a_form_says_so(
+    dev_routes: None, customer_client: APIClient, customer: Customer
+) -> None:
+    seed_policies()
+    order = place(customer, fulfilment="pickup", provider="uzum")
+    response = customer_client.post(
+        f"/api/v1/dev/payments/{order.pk}/simulate/", {"outcome": "success"}, format="json"
+    )
+    assert response.json()["steps"][0]["call"] == "register"

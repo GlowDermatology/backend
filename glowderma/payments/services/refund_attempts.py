@@ -187,6 +187,19 @@ def mark_failed(
         return results.refund_result(refund, payment, changed=True)
 
 
+def merge_refund_state(refund_id: int, patch: dict[str, Any]) -> results.RefundResult:
+    """Merge structured protocol fields into ``Refund.provider_state`` (Uzum: our ``X-Operation-Id`` and
+    when Uzum accepted it); the state does not change. Never a raw payload."""
+    with transaction.atomic():
+        payment, refund = common.locked_refund(refund_id)
+        merged = {**refund.provider_state, **patch}
+        if merged == refund.provider_state:
+            return results.refund_result(refund, payment, changed=False)
+        refund.provider_state = merged
+        refund.save(update_fields=["provider_state", "updated_at"])
+        return results.refund_result(refund, payment, changed=True)
+
+
 def mark_manual_required(refund_id: int, at: datetime | None = None, *, reason: str) -> results.RefundResult:
     """``requested → manual_required``: a Click refund that must never reach the provider (customer contract
     §2.13.0: its payment has no ``click_paydoc_id`` — ``reason`` ``no_paydoc`` —, or the Click port is fake

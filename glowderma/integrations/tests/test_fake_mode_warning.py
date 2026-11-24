@@ -22,6 +22,7 @@ ALL_FAKE = {
         "BILLZ",
         "FCM",
         "CLICK",
+        "UZUM",
         "PAYME",
         "BTS",
         "DEVSMS",
@@ -68,7 +69,7 @@ def test_production_warns_once_per_process_listing_the_fake_providers(
     assert _lines(caplog) == [
         (
             "WARNING",
-            "integrations running in fake mode in production: billz, fcm, click, payme, devsms, email, "
+            "integrations running in fake mode in production: billz, fcm, click, payme, uzum, devsms, email, "
             "yandex, ai, vault",
         )
     ]
@@ -96,8 +97,8 @@ def test_ready_emits_the_warning_and_no_system_check_reports_fake_mode(
     assert _lines(caplog) == [
         (
             "WARNING",
-            "integrations running in fake mode in production: oauth, billz, fcm, click, payme, bts, devsms, "
-            "email, yandex, ai, vault",
+            "integrations running in fake mode in production: oauth, billz, fcm, click, payme, uzum, bts, "
+            "devsms, email, yandex, ai, vault",
         )
     ]
     assert not [m for m in messages if "fake" in str(m.msg).lower()]
@@ -111,6 +112,7 @@ def test_provider_modes_cover_every_mode_setting() -> None:
             "fcm": "fake",
             "click": "fake",
             "payme": "live",
+            "uzum": "fake",
             "bts": "fake",
             "devsms": "fake",
             "email": "fake",
@@ -123,6 +125,7 @@ def test_provider_modes_cover_every_mode_setting() -> None:
             "billz",
             "fcm",
             "click",
+            "uzum",
             "bts",
             "devsms",
             "email",

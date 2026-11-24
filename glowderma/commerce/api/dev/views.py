@@ -2,8 +2,9 @@
 
 Mounted by ``config.urls`` only with ``DEV_FEATURES_ALLOWED``, ``FAKE_PAYMENTS_ENABLED`` and fake Click/Payme.
 It builds a correctly signed Click Prepare + Complete (or Payme ``CheckPerformTransaction`` +
-``CreateTransaction`` + ``PerformTransaction`` / ``CancelTransaction``) and runs it through the **real webhook
-views** in-process, so the mobile team can finish a purchase without provider accounts."""
+``CreateTransaction`` + ``PerformTransaction`` / ``CancelTransaction``, or the Uzum payer on the fake form and
+Uzum's callback) and runs it through the **real webhook views** in-process, so the mobile team can finish a
+purchase without provider accounts."""
 
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ import json
 from typing import Any, cast
 from urllib.parse import urlencode
 
+from django.conf import settings
 from django.test import RequestFactory
 from rest_framework.exceptions import NotFound
 from rest_framework.request import Request
@@ -18,7 +20,7 @@ from rest_framework.response import Response
 
 from glowderma.accounts.api.customer_base import CustomerAPIView
 from glowderma.accounts.models import Customer
-from glowderma.commerce import payment_ref, selectors, services
+from glowderma.commerce import payment_ref, selectors, services, uzum_flow
 from glowderma.commerce.api.dev.schemas.payments import SIMULATE_PAYMENT_POST
 from glowderma.commerce.api.dev.serializers import (
     SimulateResultSerializer,
@@ -26,12 +28,16 @@ from glowderma.commerce.api.dev.serializers import (
 )
 from glowderma.commerce.api.webhooks.click import ClickCompleteView, ClickPrepareView
 from glowderma.commerce.api.webhooks.payme import PaymeView, now_ms
+from glowderma.commerce.api.webhooks.uzum import UzumWebhookView
 from glowderma.commerce.models import Order
 from glowderma.core import enums
 from glowderma.integrations.click import fake as fake_click
 from glowderma.integrations.click import sandbox as click_sandbox
 from glowderma.integrations.payme import fake as fake_payme
 from glowderma.integrations.payme import sandbox as payme_sandbox
+from glowderma.integrations.uzum import fake as fake_uzum
+from glowderma.integrations.uzum import sandbox as uzum_sandbox
+from glowderma.payments import selectors as payment_selectors
 
 CLICK_DECLINED = -5017
 PAYME_REASON_EXECUTION_ERROR = 3
@@ -136,6 +142,34 @@ def _payme(order: Order, success: bool) -> list[dict[str, Any]]:
     return steps
 
 
+def _uzum(order: Order, success: bool) -> list[dict[str, Any]]:
+    """The payer on the fake Uzum form: the order's registered pending Uzum payment (``pay/`` first) is
+    completed or declined at the fake, Uzum's callback is posted through the real view, and the status sync
+    it enqueues runs inline."""
+    payment = payment_selectors.active_payment(order.pk, enums.PaymentStatus.PENDING)
+    if payment is None or payment.provider != enums.PaymentProvider.UZUM or not payment.transaction_id:
+        return [{"call": "register", "response": {"error": "no registered Uzum payment: call pay/ first"}}]
+    order_id = payment.transaction_id
+    if success:
+        fake_uzum.complete(order_id)
+    else:
+        fake_uzum.decline(order_id)
+    body = uzum_sandbox.callback(
+        order_id=order_id,
+        order_number=str(payment.provider_state.get("order_number", "")),
+        operation_type="COMPLETE" if success else "AUTHORIZE",
+        operation_state="SUCCESS" if success else "FAIL",
+    )
+    request = RequestFactory().post(
+        f"/api/v1/webhooks/uzum/?{urlencode({'token': settings.UZUM_CALLBACK_TOKEN})}",
+        json.dumps(body),
+        content_type="application/json",
+    )
+    steps = [{"call": "callback", "response": _call(UzumWebhookView, request)}]
+    steps.append({"call": "sync", "response": {"outcome": uzum_flow.sync_payment(payment.id)}})
+    return steps
+
+
 def _call(view: Any, request: Any) -> dict[str, Any]:
     response = view.as_view()(request)
     return cast(dict[str, Any], response.data)
@@ -152,7 +186,12 @@ class SimulatePaymentView(CustomerAPIView):
         body.is_valid(raise_exception=True)
         provider = body.validated_data["provider"] or order.payment_provider
         success = body.validated_data["outcome"] == "success"
-        steps = _click(order, success) if provider == enums.PaymentProvider.CLICK else _payme(order, success)
+        if provider == enums.PaymentProvider.CLICK:
+            steps = _click(order, success)
+        elif provider == enums.PaymentProvider.PAYME:
+            steps = _payme(order, success)
+        else:
+            steps = _uzum(order, success)
         return Response(
             SimulateResultSerializer({"order_id": order.pk, "provider": provider, "steps": steps}).data
         )

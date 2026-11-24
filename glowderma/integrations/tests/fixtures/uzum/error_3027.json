@@ -1,0 +1,5 @@
+{
+  "_source": "en_checkout.yaml error table: 3027 Payment with this order number already exists",
+  "errorCode": 3027,
+  "message": "Payment with this order number already exists"
+}

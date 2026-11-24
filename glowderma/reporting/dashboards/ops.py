@@ -70,6 +70,7 @@ REPORT_CRITICAL_AFTER = report_module.REPORT_CRITICAL_AFTER
 PROVIDER_LABELS: dict[str, str] = {
     "click": "Click",
     "payme": "Payme",
+    "uzum": "Uzum",
     "bts": "BTS",
     "devsms": "DevSMS SMS",
     "email": "SMTP email",
@@ -77,7 +78,7 @@ PROVIDER_LABELS: dict[str, str] = {
     "oauth": "OAuth (Google / Facebook)",
     "billz": "Billz",
 }
-PROVIDER_ORDER = ("click", "payme", "bts", "devsms", "email", "fcm", "oauth", "billz")
+PROVIDER_ORDER = ("click", "payme", "uzum", "bts", "devsms", "email", "fcm", "oauth", "billz")
 WEBHOOK_PROVIDERS: tuple[str, ...] = tuple(WebhookInbox.Provider.values)
 JOB_LABELS: dict[str, StrOrPromise] = {enums.JobKind.BILLZ_IMPORT.value: _("Billz import")}
 JOB_STATE_LABELS: dict[str, StrOrPromise] = {

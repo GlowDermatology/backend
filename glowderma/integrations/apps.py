@@ -11,7 +11,7 @@ from glowderma.core import integration_modes
 logger = logging.getLogger("glowderma.integrations")
 _fake_mode_warned = False
 
-PROVIDERS = ("billz", "bts", "click", "payme", "devsms", "fcm", "yandex")
+PROVIDERS = ("billz", "bts", "click", "payme", "devsms", "fcm", "yandex", "uzum")
 
 
 def ensure_provider_rows(sender: AppConfig, *, using: str, apps: Any = global_apps, **kwargs: Any) -> None:

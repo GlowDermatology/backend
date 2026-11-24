@@ -254,7 +254,7 @@ class _ClickCallback(WebhookAPIView):
                 request, params, protocol.TRANSACTION_CANCELLED, raw, started, order_id=order.pk
             )
         if any(
-            p.provider == enums.PaymentProvider.PAYME and selectors.is_open(p) for p in order.payments.all()
+            p.provider != PROVIDER and selectors.blocks_other_providers(p, now) for p in order.payments.all()
         ):
             return self._store(
                 request, params, protocol.TRANSACTION_CANCELLED, raw, started, order_id=order.pk

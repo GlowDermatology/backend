@@ -15,7 +15,7 @@ CONTRACT_LABELS: dict[str, dict[str, str]] = {
         "failed": "Muvaffaqiyatsiz",
         "refunded": "Qaytarilgan",
     },
-    "PROVIDER": {"click": "Click", "payme": "Payme"},
+    "PROVIDER": {"click": "Click", "payme": "Payme", "uzum": "Uzum"},
     "FULFILMENT": {"delivery": "Yetkazib berish", "pickup": "Olib ketish"},
     "CANCELLATION_REASON": {
         "reservation_expired": "Band muddati tugadi",

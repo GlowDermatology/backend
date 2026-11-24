@@ -5,7 +5,20 @@ from django.test import override_settings
 
 from glowderma.core import integration_modes
 
-ALL = ("OAUTH", "BILLZ", "FCM", "CLICK", "PAYME", "BTS", "DEVSMS", "EMAIL", "YANDEX_DELIVERY", "AI", "VAULT")
+ALL = (
+    "OAUTH",
+    "BILLZ",
+    "FCM",
+    "CLICK",
+    "PAYME",
+    "UZUM",
+    "BTS",
+    "DEVSMS",
+    "EMAIL",
+    "YANDEX_DELIVERY",
+    "AI",
+    "VAULT",
+)
 
 
 def modes(mode: str, **overrides: str) -> dict[str, str]:
@@ -27,9 +40,11 @@ def test_fake_in_production_matrix(mode: str, dev: bool, fake_in_production: boo
     with override_settings(**modes(mode), DEV_FEATURES_ALLOWED=dev):
         for provider in integration_modes.PROVIDER_MODE_SETTINGS:
             assert integration_modes.fake_in_production(provider) is fake_in_production
-        for provider in ("click", "payme", "bts", "yandex"):
+        for provider in ("click", "payme", "uzum", "bts", "yandex"):
             assert integration_modes.callbacks_refused(provider) is fake_in_production
-        assert integration_modes.payable_providers() == ([] if fake_in_production else ["click", "payme"])
+        assert integration_modes.payable_providers() == (
+            [] if fake_in_production else ["click", "payme", "uzum"]
+        )
         assert integration_modes.delivery_available() is not fake_in_production
         assert integration_modes.yandex_delivery_available() is not fake_in_production
         assert integration_modes.delivery_providers() == ([] if fake_in_production else ["yandex", "bts"])
@@ -41,11 +56,11 @@ def test_fake_in_production_matrix(mode: str, dev: bool, fake_in_production: boo
 
 def test_predicates_are_per_provider_when_modes_are_mixed() -> None:
     with override_settings(**modes("live", PAYME_MODE="fake", BILLZ_MODE="fake"), DEV_FEATURES_ALLOWED=False):
-        assert integration_modes.payable_providers() == ["click"]
+        assert integration_modes.payable_providers() == ["click", "uzum"]
         assert integration_modes.delivery_available() is True
         assert integration_modes.online_sales_enabled() is False
     with override_settings(**modes("live", CLICK_MODE="fake", BTS_MODE="fake"), DEV_FEATURES_ALLOWED=False):
-        assert integration_modes.payable_providers() == ["payme"]
+        assert integration_modes.payable_providers() == ["payme", "uzum"]
         assert integration_modes.fulfilment_methods() == ["pickup"]
         assert integration_modes.online_sales_enabled() is True
 

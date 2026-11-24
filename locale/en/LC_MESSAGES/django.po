@@ -5627,6 +5627,15 @@ msgstr "Refunds open for too long"
 msgid "Uzoq vaqt yangilanmagan BTS jo‘natmalarining holati hozir so‘raladi (odatda har 10 daqiqada avtomatik bajariladi). So‘rov allaqachon ishlayotgan bo‘lsa, ikkinchisi boshlanmaydi."
 msgstr "The status of BTS shipments that have not been updated for a long time is polled now (normally this runs automatically every 10 minutes). If a poll is already running, a second one is not started."
 
+#: glowderma.core.labels.PROVIDER
+#: model metadata
+msgid "Uzum"
+msgstr "Uzum"
+
+#: model metadata
+msgid "Uzum sinov rejimida"
+msgstr "Uzum test mode"
+
 #: admin history (professionals.Location)
 msgid "Uzunlik"
 msgstr "Longitude"

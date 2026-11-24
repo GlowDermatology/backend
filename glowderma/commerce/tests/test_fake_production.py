@@ -197,6 +197,7 @@ def test_open_money_at_worker_start_raises_one_alert_per_provider(monkeypatch: p
     held = {
         "click": selectors.OpenMoney(open_transactions=1, open_refunds=0, order_ids=[10248]),
         "payme": selectors.OpenMoney(open_transactions=0, open_refunds=2, order_ids=[10249, 10250]),
+        "uzum": selectors.OpenMoney(open_transactions=0, open_refunds=0, order_ids=[]),  # nothing held
     }
     monkeypatch.setattr(selectors, "provider_open_money", lambda provider: held[str(provider)])
     with override_settings(

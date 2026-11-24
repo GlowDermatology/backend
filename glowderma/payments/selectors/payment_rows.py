@@ -97,11 +97,19 @@ def refund_row(refund: Refund, payment: Payment | None = None) -> RefundRow:
         attempts=refund.attempts,
         submitted_at=refund.submitted_at,
         error_code=refund.error_code,
-        provider_payment_ref=click_paydoc_id(owner.provider_state)
-        if owner.provider == enums.PaymentProvider.CLICK
-        else "",
+        provider_payment_ref=provider_payment_ref(owner),
         manual_reason=refund_manual_reason_of(refund, owner),
     )
+
+
+def provider_payment_ref(payment: Payment) -> str:
+    """The id a provider's refund call is keyed by: Click's ``click_paydoc_id`` (never ``click_trans_id``),
+    Uzum's order id (the payment's provider transaction id); ``""`` for Payme (cabinet refunds)."""
+    if payment.provider == enums.PaymentProvider.CLICK:
+        return click_paydoc_id(payment.provider_state)
+    if payment.provider == enums.PaymentProvider.UZUM:
+        return str(payment.provider_txn_id or "")
+    return ""
 
 
 def refund_manual_reason_of(refund: Refund, payment: Payment) -> str | None:
@@ -115,6 +123,8 @@ def refund_manual_reason_of(refund: Refund, payment: Payment) -> str | None:
         return None
     if payment.provider == enums.PaymentProvider.PAYME:
         return enums.RefundManualReason.PAYME.value
+    if payment.provider == enums.PaymentProvider.UZUM:
+        return enums.RefundManualReason.UZUM_FAKE.value  # the only reason an Uzum refund is manual
     if not click_paydoc_id(payment.provider_state):
         return enums.RefundManualReason.NO_PAYDOC.value
     return enums.RefundManualReason.FAKE_MODE.value
@@ -125,6 +135,7 @@ __all__ = [
     "RefundRow",
     "click_paydoc_id",
     "payment_row",
+    "provider_payment_ref",
     "refund_manual_reason_of",
     "refund_row",
 ]

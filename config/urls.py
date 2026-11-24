@@ -61,6 +61,7 @@ def dev_routes_enabled() -> bool:
         and settings.FAKE_PAYMENTS_ENABLED
         and settings.CLICK_MODE == "fake"
         and settings.PAYME_MODE == "fake"
+        and settings.UZUM_MODE == "fake"
     )
 
 

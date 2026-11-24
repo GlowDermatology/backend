@@ -5707,6 +5707,15 @@ msgstr "Возвраты, открытые слишком долго"
 msgid "Uzoq vaqt yangilanmagan BTS jo‘natmalarining holati hozir so‘raladi (odatda har 10 daqiqada avtomatik bajariladi). So‘rov allaqachon ishlayotgan bo‘lsa, ikkinchisi boshlanmaydi."
 msgstr "Статусы отправлений BTS, которые давно не обновлялись, будут запрошены сейчас (обычно это выполняется автоматически каждые 10 минут). Если запрос уже выполняется, второй не запускается."
 
+#: glowderma.core.labels.PROVIDER
+#: model metadata
+msgid "Uzum"
+msgstr "Uzum"
+
+#: model metadata
+msgid "Uzum sinov rejimida"
+msgstr "Uzum в тестовом режиме"
+
 #: admin history (professionals.Location)
 msgid "Uzunlik"
 msgstr "Долгота"

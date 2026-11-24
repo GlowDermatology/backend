@@ -160,7 +160,7 @@ def test_every_project_model_in_the_console_has_an_uzbek_name() -> None:
 # Values whose Uzbek label is the same proper name as the title-cased value (``click`` → «Click»).
 SAME_IN_UZBEK = {
     "admin", "android", "apple", "billz", "bts", "click", "facebook", "fcm", "google", "payme",
-    "segment", "webhook",
+    "segment", "uzum", "webhook",
 }  # fmt: skip
 
 

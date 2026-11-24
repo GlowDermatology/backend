@@ -29,6 +29,7 @@ class PaymentStatus(TextChoices):
 class PaymentProvider(TextChoices):
     CLICK = "click", "Click"
     PAYME = "payme", "Payme"
+    UZUM = "uzum", "Uzum"
 
 
 class FulfilmentMethod(TextChoices):
@@ -115,6 +116,7 @@ class RefundManualReason(TextChoices):
         "Click paydoc yo‘q",
     )  # a Click payment without click_paydoc_id: Click cannot reverse it
     FAKE_MODE = "fake_mode", "Click sinov rejimida"  # the Click port is fake under the production settings
+    UZUM_FAKE = "uzum_fake", "Uzum sinov rejimida"  # the Uzum port is fake under the production settings
 
 
 class CashbackHoldState(TextChoices):

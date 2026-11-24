@@ -40,6 +40,9 @@ app.conf.beat_schedule = {
     # Yandex Delivery (plan §3.7): claims/bulk_info over every unsettled claim (the reliable status path;
     # single flight, a no-op while the fake runs under the production settings).
     "commerce-poll-yandex": {"task": "commerce.poll_yandex", "schedule": 60.0},
+    # Uzum Checkout (docs/integrations/uzum.md): getOrderStatus of pending and recently failed Uzum payments
+    # and of submitting Uzum refunds — the reliable path behind Uzum's unsigned callbacks (≤ 5 attempts).
+    "commerce-reconcile-uzum": {"task": "commerce.reconcile_uzum", "schedule": 120.0},
     # Yandex Delivery (plan §3.9): self-closing delivery issues (preparation deadline in working minutes,
     # courier search > 30 min, returns while the warehouse is closed, half-done cancels) and reminders of
     # urgent issues untouched for 30 minutes.

@@ -1202,7 +1202,7 @@ stable URL; it 301-redirects id URLs to the slug.
  "terms_version": "20261001-1",                       // | null while the terms are not published (registration answers 503 terms_not_published); versions terms AND privacy policy
  "terms_updated_at": "2026-10-01T10:15:00+05:00",     // | null; when that version was published (null whenever terms_version is null)
  "reservation_minutes": 15,
- "payment_providers": ["click", "payme"],             // providers that can take a payment now; [] = online payment unavailable (the app hides checkout)
+ "payment_providers": ["click", "payme", "uzum"],     // providers that can take a payment now, Uzum last; [] = online payment unavailable (the app hides checkout); clients ignore values they do not know
  "online_sales_enabled": true,                        // false while Billz is fake in production: stock unknown, nothing can be added to the cart or checked out (§2.3)
  "fulfilment_methods": ["delivery", "pickup"],        // FulfilmentMethod[] offered at checkout; no "delivery" while BTS is fake in production (§2.6)
  "min_app_version": {"ios": "1.0.0", "android": "1.0.0"},
@@ -2624,7 +2624,7 @@ gains `refresh_reused` (§2.1.6).
 |---|---|---|
 | OrderStatus | `awaiting_payment`, `processing`, `handed_to_courier`, `delivered`, `cancelled` (admin §3) | orders |
 | PaymentStatus | `pending`, `paid`, `failed`, `refunded` | order payment |
-| PaymentProvider | `click`, `payme` | checkout, pay |
+| PaymentProvider | `click`, `payme`, `uzum` (Uzum Bank Checkout: the hosted card form, `web_url` like Click and Payme; `pay_by` is the earlier of the reservation end and the form's end; a 503 `provider_unavailable` means Uzum did not register the form, retry; docs/integrations/uzum.md) | checkout, pay |
 | FulfilmentMethod | `delivery`, `pickup` | checkout, orders, delivery |
 | CancellationReason | `reservation_expired`, `admin`, `customer_request` | `cancellation.reason` |
 | LedgerKind | `credit`, `debit`, `adjustment`, `reversal` | ledger |

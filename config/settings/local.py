@@ -74,6 +74,7 @@ LOCAL_KEY_DEFAULTS = {
     "BTS_WEBHOOK_SECRET": "local-bts-webhook-secret-at-least-32-characters",
     "CLICK_SECRET_KEY": "local-click-secret-key",
     "PAYME_KEY": "local-payme-key",
+    "UZUM_CALLBACK_TOKEN": "local-uzum-callback-token-at-least-32-characters",
 }
 SMS_CODE_HMAC_KEY = env_str("SMS_CODE_HMAC_KEY", LOCAL_KEY_DEFAULTS["SMS_CODE_HMAC_KEY"])
 SECRETBOX_KEY = env_str("SECRETBOX_KEY", LOCAL_KEY_DEFAULTS["SECRETBOX_KEY"])
@@ -83,6 +84,7 @@ QR_HMAC_KEY = env_str("QR_HMAC_KEY", LOCAL_KEY_DEFAULTS["QR_HMAC_KEY"])
 BTS_WEBHOOK_SECRET = env_str("BTS_WEBHOOK_SECRET", LOCAL_KEY_DEFAULTS["BTS_WEBHOOK_SECRET"])
 CLICK_SECRET_KEY = env_str("CLICK_SECRET_KEY", LOCAL_KEY_DEFAULTS["CLICK_SECRET_KEY"])
 PAYME_KEY = env_str("PAYME_KEY", LOCAL_KEY_DEFAULTS["PAYME_KEY"])
+UZUM_CALLBACK_TOKEN = env_str("UZUM_CALLBACK_TOKEN", LOCAL_KEY_DEFAULTS["UZUM_CALLBACK_TOKEN"])
 # Fixed OTP for black-box e2e (C§2.14.1); never read by the production settings, which refuse the variable.
 OTP_FAKE_CODE = env_str("OTP_FAKE_CODE", "123456")
 if not re.fullmatch(r"\d{6}", OTP_FAKE_CODE):

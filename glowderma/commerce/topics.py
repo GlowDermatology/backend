@@ -22,6 +22,9 @@ BILLZ_STOCK_REREAD = "billz.stock_reread"
 # status callback asked for a fresh claims/info of one claim.
 YANDEX_DISPATCH = "yandex.dispatch"
 YANDEX_SYNC_CLAIM = "yandex.sync_claim"
+# Uzum Checkout (docs/integrations/uzum.md): a callback (or an accepted refund) asked for a fresh
+# getOrderStatus of one payment.
+UZUM_SYNC_ORDER = "uzum.sync_order"
 
 # Topics whose handler is ``commerce/tasks.py`` (B5).
 HANDLED_TOPICS: tuple[str, ...] = (
@@ -31,17 +34,20 @@ HANDLED_TOPICS: tuple[str, ...] = (
     BILLZ_STOCK_REREAD,
     YANDEX_DISPATCH,
     YANDEX_SYNC_CLAIM,
+    UZUM_SYNC_ORDER,
 )
 # Topics ``commerce.services`` enqueues directly (``bts.create_shipment`` goes through
 # ``delivery.services.request_bts_create``; ``refund.submit`` through ``payments.services.create_refund``);
 # ``billz.stock_reread`` is enqueued by the ``billz.push_sale`` handler; ``yandex.dispatch`` by
-# ``services.request_dispatch``, ``yandex.sync_claim`` by the Yandex callback view.
+# ``services.request_dispatch``, ``yandex.sync_claim`` by the Yandex callback view, ``uzum.sync_order`` by the
+# Uzum callback view and the Uzum refund submitter.
 PRODUCED_TOPICS: tuple[str, ...] = (
     BILLZ_PUSH_SALE,
     PUSH_ORDER_STATUS,
     BILLZ_STOCK_REREAD,
     YANDEX_DISPATCH,
     YANDEX_SYNC_CLAIM,
+    UZUM_SYNC_ORDER,
 )
 # Topics whose ``dead`` message has a business consequence recorded by ``commerce.tasks.on_outbox_dead``:
 # the shipment / refund is marked failed with ``dead_letter`` and a ``shipment_failed`` / ``refund_failed``
@@ -58,6 +64,7 @@ PAYLOAD_KEYS: dict[str, tuple[str, ...]] = {
     BILLZ_STOCK_REREAD: ("order_id", "product_ids"),
     YANDEX_DISPATCH: ("order_id", "courier_claim_id", "request_id"),
     YANDEX_SYNC_CLAIM: ("order_id", "claim_id", "updated_ts"),
+    UZUM_SYNC_ORDER: ("payment_id",),
 }
 
 
@@ -90,6 +97,11 @@ def order_status_inbox_key(order_id: int, status: str) -> str:
     return f"order_status:{order_id}:{status}"
 
 
+def uzum_sync_order_key(payment_id: int, event: str) -> str:
+    """One status read per callback event (or accepted refund) of a payment."""
+    return f"{UZUM_SYNC_ORDER}:{payment_id}:{event}"[:254]
+
+
 __all__ = [
     "BILLZ_PUSH_SALE",
     "BILLZ_STOCK_REREAD",
@@ -101,6 +113,7 @@ __all__ = [
     "PRODUCED_TOPICS",
     "PUSH_ORDER_STATUS",
     "REFUND_SUBMIT",
+    "UZUM_SYNC_ORDER",
     "YANDEX_DISPATCH",
     "YANDEX_SYNC_CLAIM",
     "billz_push_sale_key",
@@ -109,6 +122,7 @@ __all__ = [
     "order_status_inbox_key",
     "push_order_status_key",
     "refund_submit_key",
+    "uzum_sync_order_key",
     "yandex_dispatch_key",
     "yandex_sync_claim_key",
 ]

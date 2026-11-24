@@ -1,0 +1,27 @@
+{
+  "_source": "en_checkout.yaml ApiResponse[GetOrderStatusResponse]: GetOrderStatusResponse + Operation",
+  "errorCode": 0,
+  "result": {
+    "orderId": "3f2b8c1e-6d4a-4b7e-9c11-0a1b2c3d4e5f",
+    "status": "COMPLETED",
+    "merchantOrderId": "gd-41-0a1b2c3d",
+    "amount": 25000000,
+    "totalAmount": 25000000,
+    "completedAmount": 25000000,
+    "refundedAmount": 0,
+    "reversedAmount": 0,
+    "cardType": 2,
+    "ofdPan": "860031******7175",
+    "bindingId": "b-123",
+    "operations": [
+      {
+        "operationId": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+        "startAt": "2026-11-24T10:00:00+05:00",
+        "doneAt": "2026-11-24T10:01:00+05:00",
+        "operationType": "COMPLETE",
+        "state": "SUCCESS",
+        "rrn": "123456789012"
+      }
+    ]
+  }
+}

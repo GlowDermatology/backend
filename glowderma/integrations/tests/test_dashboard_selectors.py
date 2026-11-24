@@ -22,7 +22,7 @@ def _result(outcome: str) -> dict[str, Any]:
 def test_provider_states_reads_every_row_in_one_query(django_assert_num_queries: Any) -> None:
     with django_assert_num_queries(1):
         states = selectors.provider_states()
-    assert set(states) == {"billz", "bts", "click", "payme", "devsms", "fcm", "yandex"}
+    assert set(states) == {"billz", "bts", "click", "payme", "devsms", "fcm", "yandex", "uzum"}
 
 
 def test_latest_jobs_is_the_newest_of_each_kind(django_assert_num_queries: Any) -> None:

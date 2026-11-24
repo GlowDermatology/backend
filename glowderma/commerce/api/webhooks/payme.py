@@ -257,7 +257,7 @@ class PaymeView(WebhookAPIView):
         for payment in order.payments.all():
             if payment.provider == PAYME and selectors.is_open(payment):
                 raise _busy()
-            if payment.provider == enums.PaymentProvider.CLICK and selectors.in_flight(payment, now):
+            if payment.provider != PAYME and selectors.blocks_other_providers(payment, now):
                 raise _busy()
 
     @staticmethod
