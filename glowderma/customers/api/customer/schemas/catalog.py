@@ -31,6 +31,17 @@ PRODUCT_LIST_GET = extend_schema(
     responses={200: s.ProductCardSerializer(many=True), **PUBLIC_CUSTOMER_ERRORS},
 )
 
+PRODUCT_FEED_GET = extend_schema(
+    operation_id="customer_catalog_feed_list",
+    description=(
+        "The storefront's endless product feed: 24 visible products per page, newest first (`created_at`, "
+        "then `id`), paged by an opaque `cursor`; an unknown cursor is 400 `invalid`, an unknown category "
+        "400 `invalid_choice`. Public cache 30 s."
+    ),
+    parameters=[*PUBLIC_PARAMETERS, s.ProductFeedQuerySerializer],
+    responses={200: s.ProductFeedSerializer, **PUBLIC_CUSTOMER_ERRORS},
+)
+
 PRODUCT_DETAIL_GET = extend_schema(
     operation_id="customer_catalog_products_retrieve",
     parameters=[*PUBLIC_PARAMETERS, OpenApiParameter("id", OpenApiTypes.INT, OpenApiParameter.PATH)],
@@ -50,5 +61,6 @@ __all__ = [
     "CATEGORIES_GET",
     "PRODUCT_BY_SLUG_GET",
     "PRODUCT_DETAIL_GET",
+    "PRODUCT_FEED_GET",
     "PRODUCT_LIST_GET",
 ]

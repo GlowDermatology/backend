@@ -321,7 +321,7 @@ containers =
     glowderma.customers.api.customer.views
 exhaustive = true
 layers =
-    auth | social | me | me_social | contacts | addresses | sessions | catalog
+    auth | social | me | me_social | contacts | addresses | sessions | catalog | home
     common
 
 [importlinter:contract:customers-api-customer-schemas]
@@ -331,7 +331,7 @@ containers =
     glowderma.customers.api.customer.schemas
 exhaustive = true
 layers =
-    auth | social | me | me_social | contacts | addresses | sessions | catalog
+    auth | social | me | me_social | contacts | addresses | sessions | catalog | home
     common | delete_body
 
 [importlinter:contract:customers-api-customer-serializers]
@@ -341,7 +341,8 @@ containers =
     glowderma.customers.api.customer.serializers
 exhaustive = true
 layers =
-    auth | social | contacts | sessions | catalog
+    auth | social | contacts | sessions | home
+    catalog
     me
     addresses
     fields

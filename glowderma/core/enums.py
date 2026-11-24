@@ -691,6 +691,20 @@ class AppointmentRangeDetail(TextChoices):
     FULL = "full", "To‘liq"
 
 
+# ``GET home/`` (the storefront landing page): why a product is in the spotlight, and the product rails.
+class HomeSpotlightReason(TextChoices):
+    PROMO = "promo", "Aksiya"
+    NEW = "new", "Yangi"
+    BESTSELLER = "bestseller", "Ko‘p sotilgan"
+    LOW_STOCK = "low_stock", "Kam qolgan"
+
+
+class HomeRailKey(TextChoices):
+    NEW = "new", "Yangi"
+    PROMO = "promo", "Aksiya"
+    BESTSELLERS = "bestsellers", "Ko‘p sotilganlar"
+
+
 CONTRACT_ENUMS: tuple[type[TextChoices], ...] = (
     OrderStatus,
     PaymentStatus,
@@ -777,6 +791,8 @@ CONTRACT_ENUMS: tuple[type[TextChoices], ...] = (
     StaffInviteState,
     AuditViewerTier,
     AppointmentRangeDetail,
+    HomeSpotlightReason,
+    HomeRailKey,
 )
 
 

@@ -23,6 +23,12 @@ from glowderma.customers import selectors, services
 from glowderma.integrations.oauth.registry import CUSTOMER_PROVIDERS, customer_provider_available
 
 
+def customer_id(request: Request) -> int | None:
+    """The signed-in customer's id on an optional-auth (**O**) route, else ``None``."""
+    user: object = request.user
+    return user.pk if isinstance(user, Customer) else None
+
+
 def client_ip(request: Request) -> str:
     return str(getattr(request, "client_ip", "") or request.META.get("REMOTE_ADDR", ""))
 
@@ -109,6 +115,7 @@ __all__ = [
     "MeBase",
     "auth_tokens",
     "client_ip",
+    "customer_id",
     "device_context",
     "otp_invalid_response",
     "require_social_available",

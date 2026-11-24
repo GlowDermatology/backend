@@ -10,6 +10,7 @@ from rest_framework import serializers
 from glowderma.core import enums
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import AwareDateTimeField, QueryBooleanField
+from glowderma.customers import selectors
 
 SEARCH_MAX_LENGTH = 64
 
@@ -33,6 +34,29 @@ class ProductListQuerySerializer(serializers.Serializer[dict[str, Any]]):
 
     def validate_category(self, value: str) -> str:
         # An over-long slug can match no category: ``invalid_choice`` like any unknown slug (C§2.3).
+        if len(value) > CATEGORY_SLUG_MAX_LENGTH:
+            raise serializers.ValidationError([field_error("invalid_choice")])
+        return value
+
+
+class ProductFeedQuerySerializer(serializers.Serializer[dict[str, Any]]):
+    cursor = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        trim_whitespace=True,
+        help_text="Opaque: the `next_cursor` of the previous page; absent or empty = the first page.",
+    )
+    category = serializers.CharField(required=False, help_text="A category slug.")
+
+    def validate_cursor(self, value: str) -> selectors.FeedCursor | None:
+        if not value:
+            return None
+        cursor = selectors.decode_cursor(value)
+        if cursor is None:
+            raise serializers.ValidationError([field_error("invalid")])
+        return cursor
+
+    def validate_category(self, value: str) -> str:
         if len(value) > CATEGORY_SLUG_MAX_LENGTH:
             raise serializers.ValidationError([field_error("invalid_choice")])
         return value
@@ -69,6 +93,11 @@ class ProductCardSerializer(serializers.Serializer[dict[str, Any]]):
     stock_status = serializers.ChoiceField(choices=enums.StockStatus.values)
     in_cart_quantity = serializers.IntegerField()
     updated_at = AwareDateTimeField(help_text="Last change of the product page (sitemap `lastmod`).")
+
+
+class ProductFeedSerializer(serializers.Serializer[dict[str, Any]]):
+    results = ProductCardSerializer(many=True, help_text="Up to 24 cards, newest first.")
+    next_cursor = serializers.CharField(allow_null=True, help_text="Pass as `cursor`; null on the last page.")
 
 
 class CustomerProductImageSerializer(serializers.Serializer[dict[str, Any]]):
@@ -151,5 +180,7 @@ __all__ = [
     "ProductCardSerializer",
     "ProductCategorySerializer",
     "ProductDetailSerializer",
+    "ProductFeedQuerySerializer",
+    "ProductFeedSerializer",
     "ProductListQuerySerializer",
 ]

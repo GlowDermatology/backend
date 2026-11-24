@@ -43,6 +43,8 @@ from glowderma.customers.api.customer.serializers.catalog import (
     ProductCardSerializer,
     ProductCategorySerializer,
     ProductDetailSerializer,
+    ProductFeedQuerySerializer,
+    ProductFeedSerializer,
     ProductListQuerySerializer,
 )
 from glowderma.customers.api.customer.serializers.contacts import (
@@ -57,6 +59,14 @@ from glowderma.customers.api.customer.serializers.fields import (
     CustomerPhoneField,
     clean_code,
     clean_name,
+)
+from glowderma.customers.api.customer.serializers.home import (
+    HomeCashbackSerializer,
+    HomeCashbackTierSerializer,
+    HomeRailSerializer,
+    HomeSerializer,
+    HomeSpotlightSerializer,
+    HomeStatsSerializer,
 )
 from glowderma.customers.api.customer.serializers.me import (
     ConsentSerializer,
@@ -104,10 +114,16 @@ __all__ = [
     "CustomerMeSerializer",
     "CustomerPhoneField",
     "CustomerProductImageSerializer",
-    "CustomerSessionSerializer",
     "CustomerRefreshSerializer",
+    "CustomerSessionSerializer",
     "DeviceSerializer",
     "DeviceStateSerializer",
+    "HomeCashbackSerializer",
+    "HomeCashbackTierSerializer",
+    "HomeRailSerializer",
+    "HomeSerializer",
+    "HomeSpotlightSerializer",
+    "HomeStatsSerializer",
     "IdentifierSerializer",
     "ImageUrlSerializer",
     "MeEmailCodeSerializer",
@@ -123,6 +139,8 @@ __all__ = [
     "ProductCardSerializer",
     "ProductCategorySerializer",
     "ProductDetailSerializer",
+    "ProductFeedQuerySerializer",
+    "ProductFeedSerializer",
     "ProductListQuerySerializer",
     "ReauthSerializer",
     "RefreshResponseSerializer",

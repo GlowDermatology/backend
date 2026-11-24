@@ -226,6 +226,11 @@ ASSISTANT_TABLE: dict[str, list[str]] = {
     "AssistantJobOutcome": ["pending", "applied", "partial", "discarded"],
     "AssistantImproveGoal": ["professional", "clear", "natural", "seo", "shorter"],
 }
+# The storefront landing page (``GET home/``; feat/live-landing).
+HOME_TABLE: dict[str, list[str]] = {
+    "HomeSpotlightReason": ["promo", "new", "bestseller", "low_stock"],
+    "HomeRailKey": ["new", "promo", "bestsellers"],
+}
 ALL_TABLES = {
     **CONTRACT_TABLE,
     **CUSTOMER_TABLE,
@@ -233,6 +238,7 @@ ALL_TABLES = {
     **STAFF_TABLE,
     **AUDIT_RANGE_TABLE,
     **ASSISTANT_TABLE,
+    **HOME_TABLE,
 }
 
 

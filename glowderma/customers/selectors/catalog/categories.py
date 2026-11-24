@@ -22,6 +22,11 @@ def customer_categories() -> QuerySet[Category]:
     )
 
 
+def active_category_count() -> int:
+    """How many categories ``catalog/categories/`` lists (the active ones)."""
+    return Category.objects.filter(is_active=True).count()
+
+
 def active_category(slug: str) -> Category | None:
     return Category.objects.filter(slug=slug, is_active=True).first()
 
@@ -40,6 +45,7 @@ def category_payload(category: Category, lang: str) -> dict[str, Any]:
 
 __all__ = [
     "active_category",
+    "active_category_count",
     "category_payload",
     "customer_categories",
 ]

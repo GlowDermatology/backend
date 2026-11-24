@@ -31,6 +31,7 @@ from glowderma.customers.api.customer.views.catalog import (
     CategoriesView,
     ProductBySlugView,
     ProductDetailView,
+    ProductFeedView,
     ProductListView,
 )
 from glowderma.customers.api.customer.views.contacts import (
@@ -38,6 +39,9 @@ from glowderma.customers.api.customer.views.contacts import (
     EmailView,
     PhoneCodeView,
     PhoneView,
+)
+from glowderma.customers.api.customer.views.home import (
+    HomeView,
 )
 from glowderma.customers.api.customer.views.me import (
     ConsentView,
@@ -71,6 +75,7 @@ __all__ = [
     "DeviceView",
     "EmailCodeView",
     "EmailView",
+    "HomeView",
     "ImageView",
     "LoginView",
     "LogoutView",
@@ -80,6 +85,7 @@ __all__ = [
     "PhoneView",
     "ProductBySlugView",
     "ProductDetailView",
+    "ProductFeedView",
     "ProductListView",
     "RefreshView",
     "ResetPasswordView",

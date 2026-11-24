@@ -13,7 +13,6 @@ from rest_framework.response import Response
 from glowderma.accounts.api.customer_base import (
     PublicAPIView,
 )
-from glowderma.accounts.models import Customer
 from glowderma.catalog import selectors as catalog_selectors
 from glowderma.catalog.models import Product
 from glowderma.core import timeutils
@@ -26,13 +25,10 @@ from glowderma.customers.api.customer.schemas.catalog import (
     CATEGORIES_GET,
     PRODUCT_BY_SLUG_GET,
     PRODUCT_DETAIL_GET,
+    PRODUCT_FEED_GET,
     PRODUCT_LIST_GET,
 )
-
-
-def customer_id(request: Request) -> int | None:
-    user: object = request.user
-    return user.pk if isinstance(user, Customer) else None
+from glowderma.customers.api.customer.views.common import customer_id
 
 
 class BannersView(PublicAPIView):
@@ -90,6 +86,25 @@ class ProductListView(PublicAPIView):
         return paginator.get_paginated_response(selectors.product_cards(page, lang, customer_id(request)))
 
 
+class ProductFeedView(PublicAPIView):
+    """The storefront's endless feed: keyset pages over (created_at desc, id desc)."""
+
+    public_cache_seconds = 30
+
+    @PRODUCT_FEED_GET
+    def get(self, request: Request) -> Response:
+        query = s.ProductFeedQuerySerializer(data=request.query_params.dict())
+        query.is_valid(raise_exception=True)
+        category = None
+        if query.validated_data.get("category"):
+            category = selectors.active_category(query.validated_data["category"])
+            if category is None:
+                raise ValidationError({"category": [field_error("invalid_choice")]})
+        page = selectors.product_feed(category=category, after=query.validated_data.get("cursor"))
+        cards = selectors.product_cards(page.products, self.language, customer_id(request))
+        return Response({"results": cards, "next_cursor": page.next_cursor})
+
+
 class ProductDetailView(PublicAPIView):
     public_cache_seconds = 30
 
@@ -120,6 +135,6 @@ __all__ = [
     "CategoriesView",
     "ProductBySlugView",
     "ProductDetailView",
+    "ProductFeedView",
     "ProductListView",
-    "customer_id",
 ]

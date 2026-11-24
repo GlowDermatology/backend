@@ -33,9 +33,11 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("me/addresses/", views.AddressListView.as_view()),
     path("me/addresses/<int:pk>/", views.AddressDetailView.as_view()),
     path("me/addresses/<int:pk>/default/", views.AddressDefaultView.as_view()),
+    path("home/", views.HomeView.as_view()),
     path("catalog/banners/", views.BannersView.as_view()),
     path("catalog/categories/", views.CategoriesView.as_view()),
     path("catalog/products/", views.ProductListView.as_view()),
+    path("catalog/feed/", views.ProductFeedView.as_view()),
     path("catalog/products/<int:pk>/", views.ProductDetailView.as_view()),
     path("catalog/products/<slug:slug>/", views.ProductBySlugView.as_view()),
 ]
