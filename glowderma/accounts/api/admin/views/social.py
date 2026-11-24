@@ -8,7 +8,6 @@ from typing import Any, cast
 
 from django.core.cache import cache
 from django.http import HttpRequest
-from drf_spectacular.utils import extend_schema
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import NotFound
 from rest_framework.permissions import AllowAny, BasePermission
@@ -18,22 +17,20 @@ from rest_framework.throttling import BaseThrottle
 
 from glowderma.accounts import mfa, services
 from glowderma.accounts.api.admin.payloads import access_payload, me_payload, mfa_challenge_payload
+from glowderma.accounts.api.admin.schemas.social import (
+    O_AUTH_LINK_POST,
+    O_AUTH_PROVIDER_DELETE,
+    O_AUTH_PROVIDER_POST,
+)
 from glowderma.accounts.api.admin.serializers import (
-    MeSerializer,
     OAuthCallbackSerializer,
 )
-from glowderma.accounts.api.admin.views.schema import LOGIN_RESULT, PROVIDER_PARAM
 from glowderma.accounts.api.base import WorkforceAPIView
 from glowderma.accounts.api.throttles import (
     OAuthIPThrottle,
 )
 from glowderma.accounts.models import StaffUser
 from glowderma.core.api.exceptions import AuthFailed, OAuthExchangeFailed, ProviderUnavailable
-from glowderma.core.api.schema import (
-    ADMIN_ERRORS,
-    PUBLIC_ERRORS,
-    ErrorEnvelopeSerializer,
-)
 from glowderma.integrations.oauth.ports import OAuthExchangeError, SocialClaims
 from glowderma.integrations.oauth.registry import PROVIDER_NAMES, get_oauth_provider
 
@@ -95,23 +92,7 @@ class OAuthProviderView(WorkforceAPIView):
     def get_throttles(self) -> list[BaseThrottle]:
         return [OAuthIPThrottle()] if self.public else super().get_throttles()
 
-    @extend_schema(
-        operation_id="admin_auth_oauth_login",
-        description=(
-            "Staff social sign-in, allow-list only: Django exchanges the authorization code with the "
-            "provider and signs in the staff member whose identity is already linked. Same response as "
-            "auth/login/ (with the admin panel MFA on: the challenge for auth/mfa/verify/)."
-        ),
-        auth=[],
-        parameters=[PROVIDER_PARAM],
-        request=OAuthCallbackSerializer,
-        responses={
-            200: LOGIN_RESULT,
-            **PUBLIC_ERRORS,
-            404: ErrorEnvelopeSerializer,
-            503: ErrorEnvelopeSerializer,
-        },
-    )
+    @O_AUTH_PROVIDER_POST
     def post(self, request: Request, provider: str) -> Response:
         claims = _exchange(request, provider)
         try:
@@ -123,12 +104,7 @@ class OAuthProviderView(WorkforceAPIView):
         user = cast(StaffUser, session.staff)
         return Response({**access_payload(session), "refresh": refresh, "user": me_payload(user, session)})
 
-    @extend_schema(
-        operation_id="admin_auth_oauth_unlink",
-        description="Unlink the caller's identity for the provider.",
-        parameters=[PROVIDER_PARAM],
-        responses={204: None, **ADMIN_ERRORS},
-    )
+    @O_AUTH_PROVIDER_DELETE
     def delete(self, request: Request, provider: str) -> Response:
         if provider not in PROVIDER_NAMES:
             raise NotFound
@@ -137,16 +113,7 @@ class OAuthProviderView(WorkforceAPIView):
 
 
 class OAuthLinkView(WorkforceAPIView):
-    @extend_schema(
-        operation_id="admin_auth_oauth_link",
-        description=(
-            "Link the provider identity to the signed-in staff member (same body as the sign-in); returns Me "
-            "with the updated linked_providers."
-        ),
-        parameters=[PROVIDER_PARAM],
-        request=OAuthCallbackSerializer,
-        responses={200: MeSerializer, **ADMIN_ERRORS, 503: ErrorEnvelopeSerializer},
-    )
+    @O_AUTH_LINK_POST
     def post(self, request: Request, provider: str) -> Response:
         get_oauth_provider(provider)  # 404 first (unknown provider, fake OAuth under the production settings)
         sid = cast(dict[str, Any], request.auth)["sid"]

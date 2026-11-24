@@ -4,19 +4,17 @@ from __future__ import annotations
 
 from typing import cast
 
-from drf_spectacular.utils import extend_schema
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from glowderma.accounts import services
 from glowderma.accounts.api.admin.payloads import access_payload, me_payload, mfa_challenge_payload
+from glowderma.accounts.api.admin.schemas.auth_sessions import LOGIN_POST, LOGOUT_POST, REFRESH_POST
 from glowderma.accounts.api.admin.serializers import (
-    AccessSerializer,
     LoginSerializer,
     LogoutSerializer,
     RefreshSerializer,
 )
-from glowderma.accounts.api.admin.views.schema import ERRORS, LOGIN_RESULT
 from glowderma.accounts.api.base import PublicAuthAPIView
 from glowderma.accounts.api.throttles import (
     AuthClientIPThrottle,
@@ -29,15 +27,7 @@ from glowderma.accounts.models import AuthSession
 class LoginView(PublicAuthAPIView):
     throttle_classes = [LoginRateThrottle]
 
-    @extend_schema(
-        operation_id="admin_auth_login",
-        description="Email + password sign-in. With the admin panel MFA on (feat/admin-ux) a correct "
-        "password opens no session: the answer is `{mfa_required: true, challenge, challenge_expires_at}` "
-        "and `auth/mfa/verify/` opens it.",
-        auth=[],
-        request=LoginSerializer,
-        responses={200: LOGIN_RESULT, **ERRORS},
-    )
+    @LOGIN_POST
     def post(self, request: Request) -> Response:
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -58,12 +48,7 @@ class LoginView(PublicAuthAPIView):
 class RefreshView(PublicAuthAPIView):
     throttle_classes = [AuthClientIPThrottle, RefreshRateThrottle]
 
-    @extend_schema(
-        operation_id="admin_auth_refresh",
-        auth=[],
-        request=RefreshSerializer,
-        responses={200: AccessSerializer, **ERRORS},
-    )
+    @REFRESH_POST
     def post(self, request: Request) -> Response:
         serializer = RefreshSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -74,9 +59,7 @@ class RefreshView(PublicAuthAPIView):
 class LogoutView(PublicAuthAPIView):
     throttle_classes = [AuthClientIPThrottle, RefreshRateThrottle]
 
-    @extend_schema(
-        operation_id="admin_auth_logout", auth=[], request=LogoutSerializer, responses={204: None, **ERRORS}
-    )
+    @LOGOUT_POST
     def post(self, request: Request) -> Response:
         serializer = LogoutSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)

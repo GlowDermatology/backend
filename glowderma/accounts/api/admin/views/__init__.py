@@ -1,7 +1,8 @@
 """The views of the staff admin API (``auth/`` and ``staff/``, admin contract §2.1, §2.16), one subject per
-module: ``auth_sessions`` (login, refresh, logout), ``profile`` (``me/``), ``passwords``, ``two_factor``
-(the panel MFA), ``social`` (OAuth sign-in and linking) and ``staff_members``; ``schema`` holds the shared
-OpenAPI declarations. The response bodies are built by ``glowderma.accounts.api.admin.payloads``."""
+module: ``auth_sessions`` (login, refresh, logout), ``profile`` (``me/``), ``passwords``, ``two_factor`` (the
+panel MFA), ``social`` (OAuth sign-in and linking) and ``staff_members``. Their OpenAPI declarations live in
+``glowderma.accounts.api.admin.schemas``. The response bodies are built by
+``glowderma.accounts.api.admin.payloads``."""
 
 from glowderma.accounts.api.admin.views.auth_sessions import (
     LoginView,
@@ -17,11 +18,6 @@ from glowderma.accounts.api.admin.views.passwords import (
 from glowderma.accounts.api.admin.views.profile import (
     MeView,
 )
-from glowderma.accounts.api.admin.views.schema import (
-    ERRORS,
-    LOGIN_RESULT,
-    PROVIDER_PARAM,
-)
 from glowderma.accounts.api.admin.views.social import (
     VERIFIER_TTL_SECONDS,
     OAuthLinkView,
@@ -29,7 +25,6 @@ from glowderma.accounts.api.admin.views.social import (
     claim_code_verifier,
 )
 from glowderma.accounts.api.admin.views.staff_members import (
-    STAFF_ID_DESCRIPTION,
     StaffViewSet,
 )
 from glowderma.accounts.api.admin.views.two_factor import (
@@ -42,10 +37,6 @@ from glowderma.accounts.api.admin.views.two_factor import (
 )
 
 __all__ = [
-    "ERRORS",
-    "LOGIN_RESULT",
-    "PROVIDER_PARAM",
-    "STAFF_ID_DESCRIPTION",
     "VERIFIER_TTL_SECONDS",
     "ChangePasswordView",
     "LoginView",

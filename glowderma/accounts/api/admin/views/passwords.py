@@ -5,22 +5,24 @@ from __future__ import annotations
 import uuid
 from typing import Any, cast
 
-from drf_spectacular.utils import extend_schema
 from rest_framework.exceptions import ValidationError
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from glowderma.accounts import services
 from glowderma.accounts.api.admin.payloads import activation_payload
+from glowderma.accounts.api.admin.schemas.passwords import (
+    CHANGE_PASSWORD_POST,
+    OWN_PASSWORD_LINK_POST,
+    PASSWORD_TOKEN_CHECK_POST,
+    PASSWORD_TOKEN_SET_POST,
+)
 from glowderma.accounts.api.admin.serializers import (
     ChangePasswordSerializer,
-    OwnPasswordLinkSerializer,
-    PasswordTokenInfoSerializer,
     PasswordTokenSerializer,
     PasswordTokenSetSerializer,
     validated_new_password,
 )
-from glowderma.accounts.api.admin.views.schema import ERRORS
 from glowderma.accounts.api.base import PublicAuthAPIView, WorkforceAPIView
 from glowderma.accounts.api.throttles import (
     PasswordLinkThrottle,
@@ -30,9 +32,6 @@ from glowderma.accounts.api.throttles import (
 from glowderma.accounts.models import StaffUser
 from glowderma.core import timeutils
 from glowderma.core.api.parsers import JSONParser
-from glowderma.core.api.schema import (
-    ADMIN_ERRORS,
-)
 from glowderma.core.pii import mask_email
 
 
@@ -40,11 +39,7 @@ class ChangePasswordView(WorkforceAPIView):
     parser_classes = [JSONParser]
     allow_password_change_pending = True
 
-    @extend_schema(
-        operation_id="admin_auth_change_password",
-        request=ChangePasswordSerializer,
-        responses={204: None, **ERRORS},
-    )
+    @CHANGE_PASSWORD_POST
     def post(self, request: Request) -> Response:
         user = cast(StaffUser, request.user)
         services.check_password_change_lockout(user)
@@ -63,14 +58,7 @@ class ChangePasswordView(WorkforceAPIView):
 class PasswordTokenCheckView(PublicAuthAPIView):
     throttle_classes = [PasswordTokenIPThrottle]
 
-    @extend_schema(
-        operation_id="admin_auth_password_token_check",
-        description="Public (no bearer): whose password link this is, for the set-password page. An unknown, "
-        "used, revoked or expired link, or one of an inactive account → one uniform 400 `token_invalid`.",
-        auth=[],
-        request=PasswordTokenSerializer,
-        responses={200: PasswordTokenInfoSerializer, **ERRORS},
-    )
+    @PASSWORD_TOKEN_CHECK_POST
     def post(self, request: Request) -> Response:
         body = PasswordTokenSerializer(data=request.data)
         body.is_valid(raise_exception=True)
@@ -88,16 +76,7 @@ class PasswordTokenCheckView(PublicAuthAPIView):
 class PasswordTokenSetView(PublicAuthAPIView):
     throttle_classes = [PasswordTokenIPThrottle]
 
-    @extend_schema(
-        operation_id="admin_auth_password_token_set",
-        description="Public (no bearer): set the password with a link (single use). The password is "
-        "validated for the link's account (the change-password codes, `password_unchanged` for the current "
-        "one); every session of the account is revoked and no new one is opened — the person signs in next. "
-        "A bad link → 400 `token_invalid`.",
-        auth=[],
-        request=PasswordTokenSetSerializer,
-        responses={204: None, **ERRORS},
-    )
+    @PASSWORD_TOKEN_SET_POST
     def post(self, request: Request) -> Response:
         body = PasswordTokenSetSerializer(data=request.data)
         body.is_valid(raise_exception=True)
@@ -114,15 +93,7 @@ class OwnPasswordLinkView(WorkforceAPIView):
     allow_password_change_pending = True
     throttle_classes = [StaffRateThrottle, PasswordLinkThrottle]
 
-    @extend_schema(
-        operation_id="admin_auth_password_link",
-        description="E-mail the caller a single-use link to set their password, for an account that must "
-        "change it but cannot type the current one (signed in with a social identity, an e-mail-link "
-        "account). 409 `conflict` when no change is pending or e-mail links are not available "
-        "(`capabilities.staff_email_invite`); 5/hour.",
-        request=None,
-        responses={200: OwnPasswordLinkSerializer, **ADMIN_ERRORS},
-    )
+    @OWN_PASSWORD_LINK_POST
     def post(self, request: Request) -> Response:
         user = cast(StaffUser, request.user)
         token = services.request_own_password_link(user, request=request)

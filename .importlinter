@@ -189,7 +189,7 @@ layers =
 # accounts.api.admin: routes above the views, above the response bodies, above the serializers; inside each
 # package, one module per subject above the shared pieces.
 [importlinter:contract:accounts-api-admin]
-name = accounts.api.admin: urls above views above payloads above serializers
+name = accounts.api.admin: urls above views above their schemas, payloads and serializers
 type = layers
 containers =
     glowderma.accounts.api.admin
@@ -197,18 +197,30 @@ exhaustive = true
 layers =
     urls | staff_urls
     views
+    schemas
     payloads
     serializers
 
 [importlinter:contract:accounts-api-admin-views]
-name = accounts.api.admin.views: one module per subject above the shared schema
+name = accounts.api.admin.views: one independent module per subject
+type = independence
+modules =
+    glowderma.accounts.api.admin.views.auth_sessions
+    glowderma.accounts.api.admin.views.profile
+    glowderma.accounts.api.admin.views.passwords
+    glowderma.accounts.api.admin.views.two_factor
+    glowderma.accounts.api.admin.views.social
+    glowderma.accounts.api.admin.views.staff_members
+
+[importlinter:contract:accounts-api-admin-schemas]
+name = accounts.api.admin.schemas: one module per views module above the shared declarations
 type = layers
 containers =
-    glowderma.accounts.api.admin.views
+    glowderma.accounts.api.admin.schemas
 exhaustive = true
 layers =
     auth_sessions | profile | passwords | two_factor | social | staff_members
-    schema
+    common
 
 [importlinter:contract:accounts-api-admin-serializers]
 name = accounts.api.admin.serializers: subjects above the field factories
@@ -287,3 +299,4 @@ forbidden_modules =
     glowderma.accounts.seeds
     glowderma.accounts.admin
     glowderma.accounts.management
+
