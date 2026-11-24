@@ -244,6 +244,7 @@ def _complete_social(
             ) from exc
         if social.trusted:
             trusted_email.adopt_trusted_email(customer, social.email)
+        new_device = trail.is_new_device(customer.pk, device.fid)
         started = account_services.start_customer_session(
             customer.pk,
             device.fid,
@@ -259,6 +260,8 @@ def _complete_social(
                 provider=social.provider,
                 farewell_tokens=started.farewell_tokens,
             )
+            if new_device:
+                trail.alert_by_email(customer.pk, "new_sign_in")
         trail.audit_customer("customer.social_linked", customer, request, {"provider": social.provider})
         if created or reactivated:
             trail.audit_customer(

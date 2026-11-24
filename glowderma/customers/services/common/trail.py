@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from glowderma.accounts import services as account_services
 from glowderma.accounts import topics
-from glowderma.accounts.models import Customer
+from glowderma.accounts.models import Customer, Device
 from glowderma.core import audit, outbox
 
 
@@ -34,7 +35,24 @@ def notify_account_security(
     )
 
 
+def is_new_device(customer_id: int, fid: str) -> bool:
+    """No device key of this install belongs to the account yet (read **before** the sign-in issues one)."""
+    return not Device.objects.filter(customer_id=customer_id, fid=fid).exclude(key_hash="").exists()
+
+
+def alert_by_email(customer_id: int, kind: str) -> None:
+    """A security alert e-mail (``email.notice`` ``kind``: ``new_sign_in``, ``password_reset``,
+    ``password_changed``) to the account's **verified** address, in its language; nothing without one. The
+    text names no code, IP address or device id."""
+    row = Customer.objects.filter(pk=customer_id).values("email", "email_verified_at", "language").first()
+    if row is None or not row["email"] or row["email_verified_at"] is None:
+        return
+    account_services.enqueue_email_notice(str(row["email"]), lang=str(row["language"] or "uz"), kind=kind)
+
+
 __all__ = [
+    "alert_by_email",
     "audit_customer",
+    "is_new_device",
     "notify_account_security",
 ]

@@ -3,7 +3,7 @@ the device context a sign-in starts from."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from glowderma.accounts import services as account_services
 
@@ -20,9 +20,11 @@ class SignIn:
 
 @dataclass(frozen=True, slots=True)
 class DeviceStep:
-    """``NextStep`` ``verify_device`` (customer contract §2.1.4 step 6)."""
+    """``NextStep`` ``verify_device`` (customer contract §2.1.4 step 6); ``channels`` = ``(channel, phone or
+    address)`` of every place the code can be sent (``otp_channel``)."""
 
     issue: account_services.CodeIssue
+    channels: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)

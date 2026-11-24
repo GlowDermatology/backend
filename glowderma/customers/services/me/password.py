@@ -61,6 +61,7 @@ def change_password(
             customer_id, enums.AccountSecurityEvent.PASSWORD_CHANGED, farewell_tokens=farewell
         )
         trail.audit_customer("customer.password_changed", customer, request, {"first_password": first})
+        trail.alert_by_email(customer_id, "password_changed")
 
 
 __all__ = [

@@ -22431,6 +22431,16 @@ components:
           type: string
           nullable: true
           maxLength: 128
+        otp_channel:
+          nullable: true
+          description: |-
+            New device: send the code by SMS to the account's phone or to its verified e-mail instead of the identifier signed in with (`NextStep.channels` lists what the account has); a channel the account lacks → field `otp_channel` `invalid`.
+
+            * `sms` - sms
+            * `email` - email
+          oneOf:
+          - $ref: '#/components/schemas/OtpChannelEnum'
+          - $ref: '#/components/schemas/NullEnum'
       required:
       - password
     CustomerLogoutRequest:
@@ -24836,7 +24846,15 @@ components:
           nullable: true
         expires_in:
           type: integer
+        channels:
+          type: array
+          items:
+            $ref: '#/components/schemas/OtpChannel'
+          description: 'verify_device: where the code can be sent (the account''s
+            verified phone and e-mail); repeat `auth/login/` with `otp_channel` to
+            send it to the other one. Empty for verify_phone.'
       required:
+      - channels
       - email_mask
       - expires_in
       - next_step
@@ -25700,6 +25718,24 @@ components:
       - shipment
       - status
       - total
+    OtpChannel:
+      type: object
+      properties:
+        channel:
+          $ref: '#/components/schemas/OtpChannelEnum'
+        mask:
+          type: string
+      required:
+      - channel
+      - mask
+    OtpChannelEnum:
+      enum:
+      - sms
+      - email
+      type: string
+      description: |-
+        * `sms` - sms
+        * `email` - email
     OtpInfo:
       type: object
       properties:
@@ -29922,6 +29958,16 @@ components:
           type: string
           minLength: 1
           maxLength: 32
+        otp_channel:
+          nullable: true
+          description: |-
+            login_new_device only: the channel `auth/login/` sent the code to (`otp_channel`); the identifier stays the one signed in with.
+
+            * `sms` - sms
+            * `email` - email
+          oneOf:
+          - $ref: '#/components/schemas/OtpChannelEnum'
+          - $ref: '#/components/schemas/NullEnum'
       required:
       - code
       - purpose

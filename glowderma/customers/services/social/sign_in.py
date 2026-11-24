@@ -106,6 +106,7 @@ def _sign_in_by_trusted_email(
             )
         except IntegrityError:
             return None
+        new_device = trail.is_new_device(customer.pk, device.fid)
         started = account_services.start_customer_session(
             customer.pk,
             device.fid,
@@ -123,6 +124,8 @@ def _sign_in_by_trusted_email(
         trail.audit_customer(
             "customer.social_linked", customer, request, {"provider": provider, "method": "verified_email"}
         )
+        if new_device:
+            trail.alert_by_email(customer.pk, "new_sign_in")
         trail.audit_customer("customer.login_succeeded", customer, request, {"method": provider})
         return results.SignIn(started, customer.pk)
 
@@ -152,6 +155,7 @@ def _sign_in_linked(
         # a phone or password: the identity alone must not add a way to reset it (review B-W2 #1).
         if claims.trusted_email and not customer.phone and not customer.password:
             trusted_email.adopt_trusted_email(customer, claims.email)
+        new_device = trail.is_new_device(customer.pk, device.fid)
         started = account_services.start_customer_session(
             customer.pk,
             device.fid,
@@ -161,6 +165,8 @@ def _sign_in_linked(
             auth_method=provider,
         )
         trail.audit_customer("customer.login_succeeded", customer, request, {"method": provider})
+        if new_device:
+            trail.alert_by_email(customer.pk, "new_sign_in")
         return results.SignIn(started, customer.pk)
 
 

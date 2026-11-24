@@ -1233,6 +1233,64 @@ CATALOG: Final[dict[str, dict[str, str]]] = {
             "If this wasn't you, contact the seller at once."
         ),
     },
+    "email.notice.new_sign_in.subject": {
+        "uz": "Glow Derma: hisobingizga yangi qurilmadan kirildi",
+        "ru": "Glow Derma: вход в аккаунт с нового устройства",
+        "en": "Glow Derma: new sign-in to your account",
+    },
+    "email.notice.new_sign_in.body": {
+        "uz": (
+            "Glow Derma hisobingizga yangi qurilmadan kirildi. Agar bu siz bo‘lsangiz, hech narsa qilish "
+            "shart emas. Agar bu siz bo‘lmasangiz, darhol parolingizni tiklang va sotuvchi bilan "
+            "bog‘laning."
+        ),
+        "ru": (
+            "В ваш аккаунт Glow Derma вошли с нового устройства. Если это были вы, ничего делать не нужно. "
+            "Если нет, срочно восстановите пароль и свяжитесь с продавцом."
+        ),
+        "en": (
+            "Your Glow Derma account was just signed in to from a new device. If this was you, there is "
+            "nothing to do. If it wasn't, reset your password right away and contact the seller."
+        ),
+    },
+    "email.notice.password_reset.subject": {
+        "uz": "Glow Derma: parolingiz tiklandi",
+        "ru": "Glow Derma: пароль восстановлен",
+        "en": "Glow Derma: your password was reset",
+    },
+    "email.notice.password_reset.body": {
+        "uz": (
+            "Glow Derma hisobingiz paroli tiklandi va boshqa barcha qurilmalardan chiqildi. Agar bu siz "
+            "bo‘lmasangiz, darhol sotuvchi bilan bog‘laning."
+        ),
+        "ru": (
+            "Пароль вашего аккаунта Glow Derma восстановлен, на всех остальных устройствах выполнен выход. "
+            "Если это были не вы, срочно свяжитесь с продавцом."
+        ),
+        "en": (
+            "The password of your Glow Derma account was reset and every other device was signed out. If "
+            "this wasn't you, contact the seller right away."
+        ),
+    },
+    "email.notice.password_changed.subject": {
+        "uz": "Glow Derma: parolingiz o‘zgartirildi",
+        "ru": "Glow Derma: пароль изменён",
+        "en": "Glow Derma: your password was changed",
+    },
+    "email.notice.password_changed.body": {
+        "uz": (
+            "Glow Derma hisobingiz paroli o‘zgartirildi. Agar bu siz bo‘lmasangiz, darhol parolingizni "
+            "tiklang va sotuvchi bilan bog‘laning."
+        ),
+        "ru": (
+            "Пароль вашего аккаунта Glow Derma изменён. Если это были не вы, срочно восстановите пароль и "
+            "свяжитесь с продавцом."
+        ),
+        "en": (
+            "The password of your Glow Derma account was changed. If this wasn't you, reset your password "
+            "right away and contact the seller."
+        ),
+    },
     # feat/admin-ux: staff invite / password link e-mails (accounts.tasks.send_staff_password_link).
     "email.staff_link.invite.subject": {
         "uz": "Glow Derma: admin panelga taklif",
