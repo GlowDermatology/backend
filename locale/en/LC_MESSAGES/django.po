@@ -2502,7 +2502,7 @@ msgstr "Total"
 msgid "Jami xaridlar (so‘m)"
 msgstr "Total purchases (UZS)"
 
-#: glowderma/integrations/services.py
+#: glowderma/integrations/services/jobs.py
 msgid "Jarayon uzilib qoldi. Qayta urinib ko‘ring."
 msgstr "The process was interrupted. Try again."
 

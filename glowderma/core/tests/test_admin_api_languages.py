@@ -636,7 +636,8 @@ NOT_YET_MARKED = frozenset[str]()
 # provider's own protocol), command-line output, and the provider adapters (fakes mimic the provider's text).
 EXEMPT = re.compile(
     r"/(tests|migrations|management)/|/api/(customer|pos|webhooks|dev)/"
-    r"|^glowderma/integrations/[a-z_]+/(fake|live|protocol|client|ports)\.py$"
+    # a provider's adapter modules, also once they are packages (billz/client/, billz/live/)
+    r"|^glowderma/integrations/[a-z_]+/(fake|live|protocol|client|ports)(/[a-z_]+)?\.py$"
 )
 MARKERS = frozenset(
     {
@@ -834,6 +835,8 @@ def view(value):
 def test_exempt_paths() -> None:
     assert EXEMPT.search("glowderma/commerce/api/customer/views.py")
     assert EXEMPT.search("glowderma/integrations/payme/protocol.py")
+    assert EXEMPT.search("glowderma/integrations/billz/client/http_client.py")
+    assert not EXEMPT.search("glowderma/integrations/services/jobs.py")
     assert not EXEMPT.search("glowderma/integrations/services.py")
     assert not EXEMPT.search("glowderma/commerce/api/admin/views.py")
 

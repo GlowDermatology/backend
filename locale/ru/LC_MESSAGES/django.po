@@ -2572,7 +2572,7 @@ msgstr "Итого"
 msgid "Jami xaridlar (so‘m)"
 msgstr "Сумма покупок (сум)"
 
-#: glowderma/integrations/services.py
+#: glowderma/integrations/services/jobs.py
 msgid "Jarayon uzilib qoldi. Qayta urinib ko‘ring."
 msgstr "Процесс прервался. Повторите попытку."
 

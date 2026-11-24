@@ -14,6 +14,7 @@ from glowderma.core import enums, timeutils
 from glowderma.core.models import AuditEntry
 from glowderma.integrations import services, tasks
 from glowderma.integrations.models import IntegrationState, Job
+from glowderma.integrations.services import jobs as job_services
 from glowderma.integrations.tests.factories import JobFactory
 
 pytestmark = pytest.mark.django_db
@@ -118,7 +119,7 @@ def test_reap_stale_jobs_rechecks_under_the_row_lock() -> None:
         calls.append(job.pk)
         return original(job, now=now)
 
-    with patch.object(services, "is_stale", heartbeat_then_check):
+    with patch.object(job_services, "is_stale", heartbeat_then_check):
         assert services.reap_stale_jobs() == []
     stale.refresh_from_db()
     assert stale.state == "running" and calls == [stale.pk]

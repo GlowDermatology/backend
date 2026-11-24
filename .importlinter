@@ -772,3 +772,48 @@ layers =
     urls
     views
     schemas | base
+
+# integrations: the Billz client and live adapter packages, and the services package behind its facade.
+[importlinter:contract:integrations-billz-client]
+name = integrations.billz.client: the HTTP client above the limiter, the cache wrapper, the errors and the config
+type = layers
+containers =
+    glowderma.integrations.billz.client
+exhaustive = true
+layers =
+    http_client
+    rate_limiter
+    shared_cache | error_mapping
+    config
+
+[importlinter:contract:integrations-billz-live]
+name = integrations.billz.live: the adapter above the sale lock and the field readers
+type = layers
+containers =
+    glowderma.integrations.billz.live
+exhaustive = true
+layers =
+    adapter
+    sale_lock | sale_fields
+    product_fields
+
+[importlinter:contract:integrations-services]
+name = integrations.services: jobs and retention above the provider state
+type = layers
+containers =
+    glowderma.integrations.services
+exhaustive = true
+layers =
+    jobs | retention
+    provider_state
+
+[importlinter:contract:integrations-yandex-protocol]
+name = integrations.yandex_delivery.protocol: payloads and parsers above the values above the endpoints
+type = layers
+containers =
+    glowderma.integrations.yandex_delivery.protocol
+exhaustive = true
+layers =
+    request_payloads | answer_parsers
+    values
+    endpoints

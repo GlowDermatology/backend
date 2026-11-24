@@ -26,6 +26,7 @@ from glowderma.integrations import selectors
 from glowderma.integrations.billz import client as billz_client
 from glowderma.integrations.billz import live as billz_live
 from glowderma.integrations.billz.client import INTERACTIVE, BillzClient, SafeCache
+from glowderma.integrations.billz.client import http_client as billz_http_client
 from glowderma.integrations.billz.ports import (
     BillzListingIncomplete,
     BillzUnavailable,
@@ -156,8 +157,8 @@ def test_a_slow_renewal_never_lets_another_worker_present_the_same_refresh_token
     def no_deadline(self: BillzClient, seconds: float) -> Iterator[None]:
         yield
 
-    original_ttl = billz_client.LOCK_TTL_SECONDS
-    billz_client.LOCK_TTL_SECONDS = 1
+    original_ttl = billz_http_client.LOCK_TTL_SECONDS
+    billz_http_client.LOCK_TTL_SECONDS = 1
     # The renewal's own deadline (half the lock's TTL) makes this impossible; the test switches it off to
     # check the defence behind it: a renewal that outlives its lock never stores its pair.
     patch = pytest.MonkeyPatch()
@@ -172,7 +173,7 @@ def test_a_slow_renewal_never_lets_another_worker_present_the_same_refresh_token
         first.join(10)
         second.join(10)
     finally:
-        billz_client.LOCK_TTL_SECONDS = original_ttl
+        billz_http_client.LOCK_TTL_SECONDS = original_ttl
         patch.undo()
     assert not errors
     assert presented == ["refresh-from-login"]  # never twice
