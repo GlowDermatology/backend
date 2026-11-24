@@ -77,7 +77,8 @@ class UzumWebhookView(WebhookAPIView):
             return Response(REFUSED, status=403)
         length = str(request.META.get("CONTENT_LENGTH") or "0")
         if (length.isdigit() and int(length) > MAX_BODY_BYTES) or len(request.body) > MAX_BODY_BYTES:
-            logger.warning("uzum.webhook_too_large %s", {"bytes": length})
+            # the header is the caller's: only a digit string reaches the log line
+            logger.warning("uzum.webhook_too_large %s", {"bytes": length if length.isdigit() else "invalid"})
             return Response(REFUSED, status=413)
         payload = protocol.callback_fields(_body(request.body))
         token = str(request.headers.get(TOKEN_HEADER) or request.query_params.get("token") or "")
