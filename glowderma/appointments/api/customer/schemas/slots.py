@@ -8,7 +8,7 @@ from glowderma.appointments.api.customer.schemas.common import PUBLIC_HEADERS
 from glowderma.appointments.api.customer.serializers import (
     AvailabilityQuerySerializer,
     FreeSlotsSerializer,
-    SpecialistAvailabilityListSerializer,
+    SpecialistNextSlotListSerializer,
 )
 from glowderma.core.api.schema import (
     PUBLIC_CUSTOMER_ERRORS,
@@ -37,7 +37,7 @@ SPECIALIST_AVAILABILITY_GET = extend_schema(
         "`specialists/{id}/slots/` at the clinic of each day."
     ),
     parameters=[*PUBLIC_HEADERS, AvailabilityQuerySerializer],
-    responses={200: SpecialistAvailabilityListSerializer, **PUBLIC_CUSTOMER_ERRORS},
+    responses={200: SpecialistNextSlotListSerializer, **PUBLIC_CUSTOMER_ERRORS},
 )
 
 

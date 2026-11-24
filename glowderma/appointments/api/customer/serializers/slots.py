@@ -55,23 +55,23 @@ class NextSlotSerializer(serializers.Serializer[Any]):
     service_id = serializers.IntegerField(help_text="The specialist's shortest active service.")
 
 
-class SpecialistAvailabilitySerializer(serializers.Serializer[Any]):
+class SpecialistNextSlotSerializer(serializers.Serializer[Any]):
     specialist_id = serializers.IntegerField()
     next_slot = NextSlotSerializer(allow_null=True)
     slots_today = serializers.IntegerField(help_text="Free slots today for the shortest active service.")
 
 
-class SpecialistAvailabilityListSerializer(serializers.Serializer[Any]):
+class SpecialistNextSlotListSerializer(serializers.Serializer[Any]):
     generated_at = AwareDateTimeField()
-    results = SpecialistAvailabilitySerializer(many=True)
+    results = SpecialistNextSlotSerializer(many=True)
 
 
 __all__ = [
     "AvailabilityQuerySerializer",
     "FreeSlotsSerializer",
     "NextSlotSerializer",
-    "SpecialistAvailabilityListSerializer",
-    "SpecialistAvailabilitySerializer",
+    "SpecialistNextSlotListSerializer",
+    "SpecialistNextSlotSerializer",
     "SlotSerializer",
     "SlotWorkingHoursSerializer",
     "SlotsQuerySerializer",

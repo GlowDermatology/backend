@@ -13979,6 +13979,99 @@ paths:
               schema:
                 $ref: '#/components/schemas/CustomerErrorEnvelope'
           description: ''
+  /api/v1/catalog/feed/:
+    get:
+      operationId: customer_catalog_feed_list
+      description: 'The storefront''s endless product feed: 24 visible products per
+        page, newest first (`created_at`, then `id`), paged by an opaque `cursor`;
+        an unknown cursor is 400 `invalid`, an unknown category 400 `invalid_choice`.
+        Public cache 30 s.'
+      parameters:
+      - in: header
+        name: Accept-Language
+        schema:
+          type: string
+        description: First supported tag among uz, ru, en in q-order; else the customer's
+          language, else uz.
+      - in: header
+        name: X-GD-App-Version
+        schema:
+          type: string
+          pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
+      - in: header
+        name: X-GD-Device-Id
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{8,128}$
+        description: Firebase installation id of this app install (an identifier,
+          not a secret).
+      - in: header
+        name: X-GD-Platform
+        schema:
+          type: string
+          enum:
+          - android
+          - ios
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
+      - in: query
+        name: category
+        schema:
+          type: string
+          minLength: 1
+        description: A category slug.
+      - in: query
+        name: cursor
+        schema:
+          type: string
+        description: 'Opaque: the `next_cursor` of the previous page; absent or empty
+          = the first page.'
+      tags:
+      - catalog
+      security:
+      - CustomerJWT: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductFeed'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '426':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
   /api/v1/catalog/products/:
     get:
       operationId: customer_catalog_products_list
@@ -14275,6 +14368,86 @@ paths:
               schema:
                 $ref: '#/components/schemas/CustomerErrorEnvelope'
           description: ''
+  /api/v1/clinics/:
+    get:
+      operationId: customer_clinics_list
+      description: Active clinics by position with their listed specialists, today's
+        opening (the union of the specialists' working hours there today) and whether
+        they are open now (Tashkent).
+      parameters:
+      - in: header
+        name: Accept-Language
+        schema:
+          type: string
+        description: First supported tag among uz, ru, en in q-order; else the customer's
+          language, else uz.
+      - in: header
+        name: X-GD-App-Version
+        schema:
+          type: string
+          pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
+      - in: header
+        name: X-GD-Device-Id
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{8,128}$
+        description: Firebase installation id of this app install (an identifier,
+          not a secret).
+      - in: header
+        name: X-GD-Platform
+        schema:
+          type: string
+          enum:
+          - android
+          - ios
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
+      tags:
+      - clinics
+      security:
+      - CustomerJWT: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '426':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
   /api/v1/delivery/calculate/:
     post:
       operationId: customer_delivery_calculate
@@ -14482,6 +14655,86 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Health'
+          description: ''
+  /api/v1/home/:
+    get:
+      operationId: customer_home_retrieve
+      description: 'The storefront landing page: the shop numbers, the spotlight,
+        the product rails (`ProductCard`) and the active cashback tiers. Public cache
+        60 s.'
+      parameters:
+      - in: header
+        name: Accept-Language
+        schema:
+          type: string
+        description: First supported tag among uz, ru, en in q-order; else the customer's
+          language, else uz.
+      - in: header
+        name: X-GD-App-Version
+        schema:
+          type: string
+          pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
+      - in: header
+        name: X-GD-Device-Id
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{8,128}$
+        description: Firebase installation id of this app install (an identifier,
+          not a secret).
+      - in: header
+        name: X-GD-Platform
+        schema:
+          type: string
+          enum:
+          - android
+          - ios
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
+      tags:
+      - home
+      security:
+      - CustomerJWT: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Home'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '426':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
           description: ''
   /api/v1/me/:
     get:
@@ -19138,6 +19391,96 @@ paths:
               schema:
                 $ref: '#/components/schemas/CustomerErrorEnvelope'
           description: ''
+  /api/v1/specialists/availability/:
+    get:
+      operationId: customer_specialists_availability_list
+      description: Every listed specialist's next free slot within `days` days (never
+        past the booking horizon) and the number of free slots today, both for the
+        specialist's shortest active service, by the rules of `specialists/{id}/slots/`
+        at the clinic of each day.
+      parameters:
+      - in: header
+        name: Accept-Language
+        schema:
+          type: string
+        description: First supported tag among uz, ru, en in q-order; else the customer's
+          language, else uz.
+      - in: header
+        name: X-GD-App-Version
+        schema:
+          type: string
+          pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
+      - in: header
+        name: X-GD-Device-Id
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{8,128}$
+        description: Firebase installation id of this app install (an identifier,
+          not a secret).
+      - in: header
+        name: X-GD-Platform
+        schema:
+          type: string
+          enum:
+          - android
+          - ios
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
+      - in: query
+        name: days
+        schema:
+          type: integer
+          maximum: 14
+          minimum: 1
+          default: 7
+        description: Tashkent days from today to search for the next slot (never past
+          the booking horizon).
+      tags:
+      - specialists
+      security:
+      - CustomerJWT: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecialistNextSlotList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '426':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
   /api/v1/webhooks/bts/:
     post:
       operationId: webhook_bts_status
@@ -21129,6 +21472,78 @@ components:
       required:
       - code
       - name
+    Clinic:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+          readOnly: true
+        address:
+          type: string
+          readOnly: true
+        directions:
+          type: string
+          readOnly: true
+        phone:
+          type: string
+          nullable: true
+          readOnly: true
+        latitude:
+          type: number
+          format: double
+          nullable: true
+          readOnly: true
+        longitude:
+          type: number
+          format: double
+          nullable: true
+          readOnly: true
+        specialist_count:
+          type: integer
+          description: Listed specialists working at this clinic.
+        today_hours:
+          allOf:
+          - $ref: '#/components/schemas/ClinicHours'
+          nullable: true
+          description: 'Today''s opening: the earliest start and latest end of the
+            listed specialists working here today; null = nobody works here today.'
+        open_now:
+          type: boolean
+          description: Tashkent now is within `today_hours`.
+      required:
+      - address
+      - directions
+      - id
+      - latitude
+      - longitude
+      - name
+      - open_now
+      - phone
+      - specialist_count
+      - today_hours
+    ClinicHours:
+      type: object
+      properties:
+        start:
+          type: string
+          description: '"HH:MM" Tashkent.'
+        end:
+          type: string
+          description: '"HH:MM" Tashkent.'
+      required:
+      - end
+      - start
+    ClinicList:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Clinic'
+      required:
+      - results
     ClinicLocation:
       type: object
       description: An admin-managed clinic branch.
@@ -23627,6 +24042,153 @@ components:
       description: |-
         * `ok` - ok
         * `error` - error
+    Home:
+      type: object
+      properties:
+        content_language:
+          allOf:
+          - $ref: '#/components/schemas/ContentLanguageEnum'
+          description: |-
+            The response language (Accept-Language).
+
+            * `uz` - uz
+            * `ru` - ru
+            * `en` - en
+        online_sales_enabled:
+          type: boolean
+        stats:
+          $ref: '#/components/schemas/HomeStats'
+        spotlight:
+          type: array
+          items:
+            $ref: '#/components/schemas/HomeSpotlight'
+          description: Up to 6 products with an image, each once with its first reason
+            (promo, bestseller, low_stock, new), rotated by the Tashkent hour.
+        rails:
+          type: array
+          items:
+            $ref: '#/components/schemas/HomeRail'
+          description: '`new`, `promo`, `bestsellers` (at least 4 items) in that order;
+            empty rails are left out.'
+        cashback:
+          allOf:
+          - $ref: '#/components/schemas/HomeCashback'
+          nullable: true
+          description: The active cashback policy; null = none.
+      required:
+      - cashback
+      - content_language
+      - online_sales_enabled
+      - rails
+      - spotlight
+      - stats
+    HomeCashback:
+      type: object
+      properties:
+        min_percent:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+        max_percent:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+        tiers:
+          type: array
+          items:
+            $ref: '#/components/schemas/HomeCashbackTier'
+      required:
+      - max_percent
+      - min_percent
+      - tiers
+    HomeCashbackTier:
+      type: object
+      properties:
+        from_amount:
+          type: integer
+          description: Lifetime purchases from (so'm, inclusive).
+        to_amount:
+          type: integer
+          nullable: true
+          description: Up to (exclusive); null = no upper bound.
+        percent:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+      required:
+      - from_amount
+      - percent
+      - to_amount
+    HomeRail:
+      type: object
+      properties:
+        key:
+          $ref: '#/components/schemas/HomeRailKeyEnum'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductCard'
+      required:
+      - items
+      - key
+    HomeRailKeyEnum:
+      enum:
+      - new
+      - promo
+      - bestsellers
+      type: string
+      description: |-
+        * `new` - new
+        * `promo` - promo
+        * `bestsellers` - bestsellers
+    HomeSpotlight:
+      type: object
+      properties:
+        reason:
+          $ref: '#/components/schemas/HomeSpotlightReasonEnum'
+        product:
+          $ref: '#/components/schemas/ProductCard'
+      required:
+      - product
+      - reason
+    HomeSpotlightReasonEnum:
+      enum:
+      - promo
+      - new
+      - bestseller
+      - low_stock
+      type: string
+      description: |-
+        * `promo` - promo
+        * `new` - new
+        * `bestseller` - bestseller
+        * `low_stock` - low_stock
+    HomeStats:
+      type: object
+      properties:
+        products:
+          type: integer
+          description: Visible products.
+        products_in_stock:
+          type: integer
+          nullable: true
+          description: Visible products a customer can buy now; null while online
+            selling is off.
+        categories:
+          type: integer
+          description: Active categories (as `catalog/categories/` lists).
+        specialists:
+          type: integer
+          description: Listed specialists (as `specialists/` lists).
+        clinics:
+          type: integer
+          description: Active clinics (as `clinics/` lists).
+      required:
+      - categories
+      - clinics
+      - products
+      - products_in_stock
+      - specialists
     HoursOverride:
       type: object
       description: One date's own hours; ``day_off`` = no hours that day (``start``
@@ -24811,6 +25373,21 @@ components:
       - appointments_pending
       - delivery_issues_open
       - orders_processing
+    NextSlot:
+      type: object
+      properties:
+        start:
+          type: string
+          format: date-time
+        location_id:
+          type: integer
+        service_id:
+          type: integer
+          description: The specialist's shortest active service.
+      required:
+      - location_id
+      - service_id
+      - start
     NextStep:
       type: object
       properties:
@@ -27197,6 +27774,21 @@ components:
       - updated_at
       - usage
       - volume
+    ProductFeed:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductCard'
+          description: Up to 24 cards, newest first.
+        next_cursor:
+          type: string
+          nullable: true
+          description: Pass as `cursor`; null on the last page.
+      required:
+      - next_cursor
+      - results
     ProductImage:
       type: object
       description: Contract §2.3 ``ProductImage = {id, url, thumbnail_url, medium_url,
@@ -29074,6 +29666,35 @@ components:
           items:
             $ref: '#/components/schemas/Specialist'
       required:
+      - results
+    SpecialistNextSlot:
+      type: object
+      properties:
+        specialist_id:
+          type: integer
+        next_slot:
+          allOf:
+          - $ref: '#/components/schemas/NextSlot'
+          nullable: true
+        slots_today:
+          type: integer
+          description: Free slots today for the shortest active service.
+      required:
+      - next_slot
+      - slots_today
+      - specialist_id
+    SpecialistNextSlotList:
+      type: object
+      properties:
+        generated_at:
+          type: string
+          format: date-time
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpecialistNextSlot'
+      required:
+      - generated_at
       - results
     SpecialistOwnProfile:
       type: object

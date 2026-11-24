@@ -21,7 +21,7 @@ from glowderma.appointments.api.customer.serializers import (
     AvailabilityQuerySerializer,
     FreeSlotsSerializer,
     SlotsQuerySerializer,
-    SpecialistAvailabilityListSerializer,
+    SpecialistNextSlotListSerializer,
 )
 from glowderma.core import timeutils
 from glowderma.core.api.exceptions import field_error
@@ -125,7 +125,7 @@ class SpecialistAvailabilityView(PublicAPIView):
                 for row in rows
             ],
         }
-        return Response(SpecialistAvailabilityListSerializer(payload).data)
+        return Response(SpecialistNextSlotListSerializer(payload).data)
 
 
 __all__ = [

@@ -39,8 +39,8 @@ from glowderma.appointments.api.customer.serializers.slots import (
     SlotSerializer,
     SlotsQuerySerializer,
     SlotWorkingHoursSerializer,
-    SpecialistAvailabilityListSerializer,
-    SpecialistAvailabilitySerializer,
+    SpecialistNextSlotListSerializer,
+    SpecialistNextSlotSerializer,
 )
 
 __all__ = [
@@ -62,8 +62,8 @@ __all__ = [
     "SlotSerializer",
     "SlotWorkingHoursSerializer",
     "SlotsQuerySerializer",
-    "SpecialistAvailabilityListSerializer",
-    "SpecialistAvailabilitySerializer",
+    "SpecialistNextSlotListSerializer",
+    "SpecialistNextSlotSerializer",
     "SpecialistListSerializer",
     "SpecialistSerializer",
     "SpecialistServiceSerializer",
