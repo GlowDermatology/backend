@@ -535,3 +535,38 @@ layers =
     drafts | lifecycle | test_pushes | batch_sending
     images | test_devices
     common
+
+# payments.services is a package (services/__init__.py is the facade callers import).
+[importlinter:contract:payments-services]
+name = payments.services: payment and refund writes above the locks above the results
+type = layers
+containers =
+    glowderma.payments.services
+exhaustive = true
+layers =
+    payments | refund_requests | refund_attempts
+    common
+    results
+
+[importlinter:contract:payments-api-admin]
+name = payments.api.admin: urls above views above schemas above serializers
+type = layers
+containers =
+    glowderma.payments.api.admin
+exhaustive = true
+layers =
+    urls
+    views
+    schemas
+    serializers
+
+[importlinter:contract:payments-selectors]
+name = payments.selectors: the reads above the refund reads above the frozen rows
+type = layers
+containers =
+    glowderma.payments.selectors
+exhaustive = true
+layers =
+    display | listing | revenue | consistency
+    refund_reads
+    payment_rows

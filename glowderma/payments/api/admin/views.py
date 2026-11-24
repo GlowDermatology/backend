@@ -6,17 +6,16 @@ from collections.abc import Iterable, Sequence
 from typing import Any, cast
 
 from django.db.models import QuerySet
-from drf_spectacular.utils import extend_schema
 from rest_framework import mixins
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from glowderma.accounts.api.base import AdminGenericViewSet
 from glowderma.core import labels
-from glowderma.core.api.schema import ADMIN_ERRORS, EXPORT_PARAM
 from glowderma.core.exports import ExportMixin, format_export_datetime
 from glowderma.core.uzsource import N_
 from glowderma.payments import selectors
+from glowderma.payments.api.admin.schemas import PAYMENT_LIST
 from glowderma.payments.api.admin.serializers import PaymentListQuerySerializer, PaymentSerializer
 from glowderma.payments.models import Payment
 
@@ -62,10 +61,6 @@ class PaymentViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
                 else "",
             )
 
-    @extend_schema(
-        operation_id="admin_payments_list",
-        parameters=[PaymentListQuerySerializer, EXPORT_PARAM],
-        responses={200: PaymentSerializer(many=True), **ADMIN_ERRORS},
-    )
+    @PAYMENT_LIST
     def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         return super().list(request, *args, **kwargs)
