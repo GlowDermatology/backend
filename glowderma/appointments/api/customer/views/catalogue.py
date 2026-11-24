@@ -16,7 +16,6 @@ from glowderma.appointments.api.customer.schemas.catalogue import (
     SPECIALIST_LIST_GET,
 )
 from glowderma.appointments.api.customer.serializers import (
-    ClinicListSerializer,
     LocationSerializer,
     ServiceListSerializer,
     SpecialistListSerializer,
@@ -79,7 +78,7 @@ class ClinicListView(PublicAPIView):
             }
             for row in selectors.clinics_today()
         ]
-        return Response(ClinicListSerializer({"results": results}, context=context).data)
+        return Response({"results": results})
 
 
 __all__ = [
