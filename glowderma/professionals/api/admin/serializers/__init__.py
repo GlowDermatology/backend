@@ -26,10 +26,6 @@ from glowderma.professionals.api.admin.serializers.fields import (
     MAX_POSITION,
     SLOT_STEPS,
     ClockField,
-    field_refusal,
-    id_field,
-    price_field,
-    validate_duration,
 )
 from glowderma.professionals.api.admin.serializers.locations import (
     ClinicLocationCreateSerializer,
@@ -118,8 +114,4 @@ __all__ = [
     "WorkingDayInputSerializer",
     "WorkingDaySerializer",
     "WorkingWeekSerializer",
-    "field_refusal",
-    "id_field",
-    "price_field",
-    "validate_duration",
 ]

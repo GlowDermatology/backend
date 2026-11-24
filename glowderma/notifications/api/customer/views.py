@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from drf_spectacular.utils import extend_schema
 from rest_framework import mixins
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -15,25 +14,21 @@ from rest_framework.response import Response
 from glowderma.accounts.api.customer_base import CustomerAPIView, CustomerGenericViewSet
 from glowderma.accounts.models import Customer
 from glowderma.core.api.pagination import EnvelopePagination
-from glowderma.core.api.schema import (
-    ACCEPT_LANGUAGE_HEADER,
-    CUSTOMER_ERRORS,
-    DEVICE_HEADERS,
-    OPTIONAL_IDEMPOTENCY_KEY_HEADER,
-)
 from glowderma.core.idempotency import idempotent
 from glowderma.notifications import selectors, services
+from glowderma.notifications.api.customer.schemas import (
+    ACK_POST,
+    INBOX_LIST,
+    READ_ALL_POST,
+    READ_POST,
+    UNREAD_COUNT_GET,
+)
 from glowderma.notifications.api.customer.serializers import (
     AckRequestSerializer,
-    AckSerializer,
     InboxItemSerializer,
     ReadAllSerializer,
     ReadSerializer,
-    UnreadCountSerializer,
 )
-
-HEADERS = [*DEVICE_HEADERS, ACCEPT_LANGUAGE_HEADER]
-WRITE_HEADERS = [*HEADERS, OPTIONAL_IDEMPOTENCY_KEY_HEADER]
 
 
 def _customer(request: Request) -> Customer:
@@ -72,39 +67,20 @@ class InboxViewSet(mixins.ListModelMixin, CustomerGenericViewSet):
         customer = _customer(self.request)
         return selectors.inbox_page(customer.pk, customer.history_from)
 
-    @extend_schema(
-        operation_id="customer_notifications_list",
-        description=(
-            "The inbox, newest first, inside the history horizon; also the rows whose push could not be "
-            "sent. `unread_count` is the badge."
-        ),
-        parameters=HEADERS,
-        responses={200: InboxItemSerializer(many=True), **CUSTOMER_ERRORS},
-    )
+    @INBOX_LIST
     def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         return super().list(request, *args, **kwargs)
 
 
 class UnreadCountView(CustomerAPIView):
-    @extend_schema(
-        operation_id="customer_notifications_unread_count",
-        description="The unread badge (polling).",
-        parameters=HEADERS,
-        responses={200: UnreadCountSerializer, **CUSTOMER_ERRORS},
-    )
+    @UNREAD_COUNT_GET
     def get(self, request: Request) -> Response:
         customer = _customer(request)
         return Response({"unread_count": selectors.unread_count(customer.pk, customer.history_from)})
 
 
 class ReadView(CustomerAPIView):
-    @extend_schema(
-        operation_id="customer_notifications_read",
-        description="Mark one row read (idempotent); reading implies delivery (counted like an ack).",
-        parameters=WRITE_HEADERS,
-        request=None,
-        responses={200: ReadSerializer, **CUSTOMER_ERRORS},
-    )
+    @READ_POST
     @idempotent(required=False)
     def post(self, request: Request, pk: int) -> Response:
         customer = _customer(request)
@@ -113,13 +89,7 @@ class ReadView(CustomerAPIView):
 
 
 class ReadAllView(CustomerAPIView):
-    @extend_schema(
-        operation_id="customer_notifications_read_all",
-        description="Mark every unread row read (each acknowledged first).",
-        parameters=WRITE_HEADERS,
-        request=None,
-        responses={200: ReadAllSerializer, **CUSTOMER_ERRORS},
-    )
+    @READ_ALL_POST
     @idempotent(required=False)
     def post(self, request: Request) -> Response:
         customer = _customer(request)
@@ -128,16 +98,7 @@ class ReadAllView(CustomerAPIView):
 
 
 class AckView(CustomerAPIView):
-    @extend_schema(
-        operation_id="customer_notifications_ack",
-        description=(
-            "Delivery acknowledgement from the push handler (1..50 ids). Unknown ids and ids of other "
-            "customers are ignored silently; a retry never counts twice."
-        ),
-        parameters=WRITE_HEADERS,
-        request=AckRequestSerializer,
-        responses={200: AckSerializer, **CUSTOMER_ERRORS},
-    )
+    @ACK_POST
     @idempotent(required=False)
     def post(self, request: Request) -> Response:
         customer = _customer(request)

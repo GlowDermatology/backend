@@ -425,7 +425,7 @@ msgstr "пересчитывается раз в 10 минут"
 msgid "1000 belgidan oshmasin."
 msgstr "Не более 1000 символов."
 
-#: glowderma/notifications/api/admin/serializers.py
+#: glowderma/notifications/api/admin/serializers/messages.py
 msgid "180 belgidan oshmasin."
 msgstr "Не более 180 символов."
 
@@ -471,7 +471,7 @@ msgstr "Введите количество минут от 5 до 60."
 msgid "500 belgidan oshmasin."
 msgstr "Не более 500 символов."
 
-#: glowderma/notifications/api/admin/serializers.py
+#: glowderma/notifications/api/admin/serializers/messages.py
 msgid "60 belgidan oshmasin."
 msgstr "Не более 60 символов."
 
@@ -872,7 +872,7 @@ msgstr "Все версии"
 msgid "Barcha yangi mijozlar"
 msgstr "Все новые клиенты"
 
-#: glowderma/notifications/api/admin/views.py
+#: glowderma/notifications/api/admin/views/common.py
 msgid "Barcha · %(count)s"
 msgstr "Все · %(count)s"
 
@@ -1122,7 +1122,7 @@ msgstr "Вес одного товара (г)"
 msgid "Bitta mijoz"
 msgstr "Один клиент"
 
-#: glowderma/notifications/api/admin/views.py
+#: glowderma/notifications/api/admin/views/common.py
 msgid "Bitta mijoz · %(phone)s"
 msgstr "Один клиент · %(phone)s"
 
@@ -1297,7 +1297,7 @@ msgstr "AI не может заполнить это поле."
 msgid "Bu maydonni o‘zgartirib bo‘lmaydi."
 msgstr "Это поле нельзя изменить."
 
-#: glowderma/notifications/services.py
+#: glowderma/notifications/services/campaigns/test_devices.py
 msgid "Bu mijozning push qabul qiladigan qurilmasi yo‘q."
 msgstr "У этого клиента нет устройства, принимающего push-уведомления."
 
@@ -1326,13 +1326,13 @@ msgstr "Этот возврат нельзя завершить."
 msgid "Bu qiymat band."
 msgstr "Это значение уже занято."
 
-#: glowderma/notifications/services.py
+#: glowderma/notifications/services/campaigns/test_devices.py
 msgid "Bu qurilma allaqachon ro‘yxatda."
 msgstr "Это устройство уже в списке."
 
 #: glowderma/appointments/api/admin/serializers.py
-#: glowderma/notifications/api/admin/serializers.py
-#: glowderma/notifications/services.py
+#: glowderma/notifications/api/admin/serializers/messages.py
+#: glowderma/notifications/services/campaigns/test_devices.py
 msgid "Bu raqam bilan mijoz topilmadi."
 msgstr "Клиент с таким номером не найден."
 
@@ -1365,11 +1365,11 @@ msgstr "Этот slug уже занят."
 msgid "Bu takliflar hali tayyor emas yoki allaqachon ko‘rib chiqilgan."
 msgstr "Эти предложения ещё не готовы или уже рассмотрены."
 
-#: glowderma/notifications/services.py
+#: glowderma/notifications/services/campaigns/common.py
 msgid "Bu test eski matn uchun yuborilgan: qayta test yuboring."
 msgstr "Этот тест отправлен для старого текста: отправьте тест заново."
 
-#: glowderma/notifications/services.py
+#: glowderma/notifications/services/campaigns/common.py
 msgid "Bu test qurilmaga yetib bormagan: tasdiqlab bo‘lmaydi."
 msgstr "Этот тест не дошёл до устройства: подтвердить его нельзя."
 
@@ -2053,8 +2053,8 @@ msgstr "Утвердить к отправке можно только сооб�
 msgid "Faqat tunda"
 msgstr "Только ночью"
 
-#: glowderma/notifications/api/admin/serializers.py
-#: glowderma/notifications/services.py
+#: glowderma/notifications/api/admin/serializers/messages.py
+#: glowderma/notifications/services/push_messages.py
 msgid "Faqat {raqam} o‘rinbosari ishlatiladi."
 msgstr "Можно использовать только подстановку {raqam}."
 
@@ -2861,7 +2861,7 @@ msgstr "Выберите дату в будущем."
 
 #: glowderma/appointments/services.py
 #: glowderma/commerce/api/admin/serializers.py
-#: glowderma/notifications/api/admin/serializers.py
+#: glowderma/notifications/api/admin/serializers/messages.py
 msgid "Kelajakdagi vaqtni tanlang."
 msgstr "Выберите время в будущем."
 
@@ -3188,7 +3188,7 @@ msgstr "AI-помощник для текстов товаров: включен
 msgid "Mahsulot ma’lumotlarida yo‘q raqam yoki da’vo bor: matnni tekshiring."
 msgstr "В тексте есть число или утверждение, которого нет в данных товара: проверьте его."
 
-#: glowderma/notifications/api/admin/serializers.py
+#: glowderma/notifications/api/admin/serializers/messages.py
 msgid "Mahsulot topilmadi yoki yashirin."
 msgstr "Товар не найден или скрыт."
 
@@ -3286,7 +3286,7 @@ msgstr "Тексты сохранены"
 msgid "Matnlar yoki versiya siz sahifani ochganingizdan keyin o‘zgargan. Sahifani yangilang, matnlarni tekshiring va qayta e’lon qiling."
 msgstr "Тексты или версия изменились после того, как вы открыли страницу. Обновите страницу, проверьте тексты и опубликуйте снова."
 
-#: glowderma/notifications/api/admin/serializers.py
+#: glowderma/notifications/api/admin/serializers/messages.py
 msgid "Matnni kiriting."
 msgstr "Введите текст."
 
@@ -3379,7 +3379,7 @@ msgstr "Клиент будет выведен из системы на всех
 msgid "Mijoz bekor qildi"
 msgstr "Отменено клиентом"
 
-#: glowderma/notifications/services.py
+#: glowderma/notifications/services/push_messages.py
 msgid "Mijoz guruhga qoida orqali kiradi."
 msgstr "Клиент входит в группу по правилу."
 
@@ -4228,7 +4228,7 @@ msgstr "Сверка денег"
 msgid "Push"
 msgstr "Push"
 
-#: glowderma/notifications/services.py
+#: glowderma/notifications/services/campaigns/common.py
 msgid "Push qabul qila oladigan test qurilmasi tanlanmadi."
 msgstr "Не выбрано ни одного тестового устройства, способного принимать push-уведомления."
 
@@ -4236,7 +4236,7 @@ msgstr "Не выбрано ни одного тестового устройс�
 msgid "Push qurilmalar"
 msgstr "Push-устройства"
 
-#: glowderma/notifications/services.py
+#: glowderma/notifications/services/campaigns/common.py
 msgid "Push xizmati javob bermadi: birozdan so‘ng qayta urinib ko‘ring."
 msgstr "Push-сервис не ответил: попробуйте ещё раз чуть позже."
 
@@ -4487,7 +4487,7 @@ msgstr "Применённые фильтры:"
 msgid "Qo‘llash"
 msgstr "Применить"
 
-#: glowderma/notifications/api/admin/serializers.py
+#: glowderma/notifications/api/admin/serializers/messages.py
 msgid "Qurilma nomini kiriting."
 msgstr "Введите название устройства."
 
@@ -4558,7 +4558,7 @@ msgstr "По фотографиям"
 msgid "Rejalashtirilgan"
 msgstr "Запланировано"
 
-#: glowderma/notifications/services.py
+#: glowderma/notifications/services/push_messages.py
 msgid "Rejalashtirilgan xabar bu guruhga yuboriladi."
 msgstr "Этой группе будет отправлено запланированное сообщение."
 
@@ -4768,7 +4768,7 @@ msgstr "Потрачено (USD)"
 msgid "Sarlavha"
 msgstr "Заголовок"
 
-#: glowderma/notifications/api/admin/serializers.py
+#: glowderma/notifications/api/admin/serializers/messages.py
 msgid "Sarlavhani kiriting."
 msgstr "Введите заголовок."
 
@@ -5202,7 +5202,7 @@ msgstr "«Мёртвые» сообщения выбранной темы (до 
 msgid "Tanlangan maydonlarga AI yoza olmaydi: maydon tanlangan tilda bo‘lsin; bo‘sh nom, tarkib va qo‘llash usuli faqat boshqa tildagi matndan tarjima qilinadi."
 msgstr "ИИ не может заполнить выбранные поля: поле должно быть на выбранном языке; пустые название, состав и способ применения только переводятся с другого языка."
 
-#: glowderma/notifications/services.py
+#: glowderma/notifications/services/campaigns/common.py
 msgid "Tanlangan segment o‘chirilgan: auditoriyani qayta tanlang."
 msgstr "Выбранный сегмент удалён: выберите аудиторию заново."
 
@@ -5370,7 +5370,7 @@ msgstr "Ссылка на Telegram"
 msgid "Telegram havolasi https://t.me/… ko‘rinishida bo‘lsin."
 msgstr "Используйте формат https://t.me/… для ссылки на Telegram."
 
-#: glowderma/notifications/services.py
+#: glowderma/notifications/services/campaigns/test_devices.py
 msgid "Test qurilmasi topilmadi."
 msgstr "Тестовое устройство не найдено."
 
@@ -5764,7 +5764,7 @@ msgstr "Сообщение сейчас не отправляется: оста�
 msgid "Xabar navbatda va muddati o‘tmagan: dispetcher uni o‘zi yetkazadi."
 msgstr "Сообщение в очереди и не просрочено: диспетчер доставит его сам."
 
-#: glowderma/notifications/services.py
+#: glowderma/notifications/services/campaigns/common.py
 msgid "Xabar o‘zgartirilgan: sahifani yangilab, qayta urinib ko‘ring."
 msgstr "Сообщение изменено: обновите страницу и попробуйте ещё раз."
 
@@ -6444,7 +6444,7 @@ msgstr "запись отмены"
 msgid "bekor qilish yuborilgan"
 msgstr "отмена отправлена"
 
-#: glowderma/notifications/api/admin/views.py
+#: glowderma/notifications/api/admin/views/campaigns.py
 msgid "bildirishnomalar"
 msgstr "уведомления"
 
@@ -6782,11 +6782,11 @@ msgstr "условия использования (ru)"
 msgid "foydalanish shartlari (uz)"
 msgstr "условия использования (uz)"
 
-#: glowderma/notifications/api/admin/views.py
+#: glowderma/notifications/api/admin/views/segment_members.py
 msgid "guruh-azolari"
 msgstr "участники-группы"
 
-#: glowderma/notifications/api/admin/views.py
+#: glowderma/notifications/api/admin/views/segments.py
 msgid "guruhlar"
 msgstr "группы"
 
@@ -7251,7 +7251,7 @@ msgstr[2] "товаров"
 msgstr[3] "товаров"
 
 #: glowderma/catalog/api/admin/views.py
-#: glowderma/notifications/api/admin/views.py
+#: glowderma/notifications/api/admin/views/common.py
 msgid "mahsulot #%(id)s"
 msgstr "товар #%(id)s"
 

@@ -33,7 +33,6 @@ from glowderma.customers.services.auth.recovery import (
     reset_password,
 )
 from glowderma.customers.services.auth.registration import (
-    reactivate_account,
     register,
 )
 from glowderma.customers.services.cashback import (
@@ -51,29 +50,16 @@ from glowderma.customers.services.common.identifiers import (
     phone_guard_key,
     target_kwargs,
 )
-from glowderma.customers.services.common.identities import (
-    unlink_all_identities,
-    unlink_identity,
-)
 from glowderma.customers.services.common.passwords import (
     PASSWORD_CODE_KEYS,
     check_login_password,
-    field_refusal,
     validate_customer_password,
-)
-from glowderma.customers.services.common.published_terms import (
-    check_terms_version,
-    require_published_terms,
 )
 from glowderma.customers.services.common.results import (
     DeviceContext,
     DeviceStep,
     PhoneStep,
     SignIn,
-)
-from glowderma.customers.services.common.trail import (
-    audit_customer,
-    notify_account_security,
 )
 from glowderma.customers.services.me.addresses import (
     add_address,
@@ -103,7 +89,6 @@ from glowderma.customers.services.me.profile import (
     update_profile,
 )
 from glowderma.customers.services.me.reauth import (
-    lock_reauthenticated,
     reauthenticate,
     session_is_fresh,
 )
@@ -113,7 +98,6 @@ from glowderma.customers.services.me.social_links import (
 )
 from glowderma.customers.services.social.apple_revocation import (
     RefusedAppleToken,
-    revoke_refused_apple_token,
     revoke_refused_apple_tokens,
 )
 from glowderma.customers.services.social.completion import (
@@ -134,7 +118,6 @@ from glowderma.customers.services.social.tokens import (
     NONCE_WILDCARD,
     PROVIDER_LABELS,
     TOKEN_PAIRS,
-    exchange_apple_code,
     verify_social_token,
 )
 
@@ -165,33 +148,24 @@ __all__ = [
     "adjust_cashback",
     "attach_email",
     "attach_phone",
-    "audit_customer",
     "change_password",
     "check_login_password",
-    "check_terms_version",
     "complete_social",
     "customer_guard_key",
     "customer_identifier",
     "delete_account",
     "delete_image",
     "dormant_reset",
-    "exchange_apple_code",
-    "field_refusal",
     "is_email",
     "link_social",
-    "lock_reauthenticated",
     "login",
-    "notify_account_security",
     "password_signs_in",
     "phone_guard_key",
-    "reactivate_account",
     "read_social_ticket",
     "reauthenticate",
     "register",
     "remove_address",
-    "require_published_terms",
     "reset_password",
-    "revoke_refused_apple_token",
     "revoke_refused_apple_tokens",
     "send_attach_phone_code",
     "send_verify_email_code",
@@ -200,8 +174,6 @@ __all__ = [
     "set_image",
     "social_sign_in",
     "target_kwargs",
-    "unlink_all_identities",
-    "unlink_identity",
     "unlink_social",
     "update_address",
     "update_profile",

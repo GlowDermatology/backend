@@ -57,9 +57,6 @@ from glowderma.customers.api.customer.serializers.fields import (
     CustomerPhoneField,
     clean_code,
     clean_name,
-    code_field,
-    name_field,
-    password_field,
 )
 from glowderma.customers.api.customer.serializers.me import (
     ConsentSerializer,
@@ -139,7 +136,4 @@ __all__ = [
     "VerifyCodeSerializer",
     "clean_code",
     "clean_name",
-    "code_field",
-    "name_field",
-    "password_field",
 ]

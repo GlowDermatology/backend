@@ -478,3 +478,60 @@ layers =
     editable_rows | specialist_photos | schedules | specialist_services
     specialists | locations
     common
+
+# notifications: the admin API (routes above views, above their schemas, above serializers) and the services
+# package behind its facade (campaigns and the status pushes above the push message).
+[importlinter:contract:notifications-api-admin]
+name = notifications.api.admin: urls above views above schemas above serializers
+type = layers
+containers =
+    glowderma.notifications.api.admin
+exhaustive = true
+layers =
+    urls
+    views
+    schemas
+    serializers
+
+[importlinter:contract:notifications-api-admin-views]
+name = notifications.api.admin.views: one module per subject above the form helpers and the shared pieces
+type = layers
+containers =
+    glowderma.notifications.api.admin.views
+exhaustive = true
+layers =
+    campaigns | workflow | device_registry | meta | status_templates | segments | segment_members
+    forms | common
+
+[importlinter:contract:notifications-api-customer]
+name = notifications.api.customer: urls above views above schemas above serializers
+type = layers
+containers =
+    glowderma.notifications.api.customer
+exhaustive = true
+layers =
+    urls
+    views
+    schemas
+    serializers
+
+[importlinter:contract:notifications-services]
+name = notifications.services: campaigns, status pushes, inbox, templates and segments above the push message
+type = layers
+containers =
+    glowderma.notifications.services
+exhaustive = true
+layers =
+    campaigns | status_pushes | inbox | templates | segments
+    push_messages
+
+[importlinter:contract:notifications-services-campaigns]
+name = notifications.services.campaigns: the writes above images and test devices above the shared pieces
+type = layers
+containers =
+    glowderma.notifications.services.campaigns
+exhaustive = true
+layers =
+    drafts | lifecycle | test_pushes | batch_sending
+    images | test_devices
+    common
