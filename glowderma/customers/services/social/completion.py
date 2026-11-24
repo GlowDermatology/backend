@@ -25,7 +25,7 @@ from glowderma.core.api.exceptions import (
 from glowderma.customers import selectors
 from glowderma.customers.services.auth import dormancy, registration
 from glowderma.customers.services.common import identifiers, passwords, published_terms, results, trail
-from glowderma.customers.services.social import apple_revocation, tickets, tokens
+from glowderma.customers.services.social import apple_revocation, sign_in, tickets, tokens
 
 logger = logging.getLogger("glowderma.customers.services")
 
@@ -242,6 +242,8 @@ def _complete_social(
             raise SocialIdentityLinked(
                 details={"provider": social.provider}, params={"provider": label}
             ) from exc
+        if social.trusted:
+            sign_in.adopt_trusted_email(customer, social.email)
         started = account_services.start_customer_session(
             customer.pk,
             device.fid,

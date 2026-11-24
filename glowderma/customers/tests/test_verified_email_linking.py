@@ -23,6 +23,7 @@ from glowderma.customers.tests.test_m2_journeys import (  # noqa: F401 - fixture
     commit,
     fcm,
     sign_up,
+    verify,
     world,
 )
 
@@ -154,3 +155,64 @@ def test_an_untrusted_sign_up_keeps_no_address(world: World) -> None:
     )
     assert done.status_code == 201, done.content
     assert done.json()["customer"]["email"] is None
+
+
+def complete_with_phone(app: App, ticket: str, phone: str, **extra: Any) -> Any:
+    sent = app.post(
+        "auth/send-code/", {"phone": phone, "purpose": "link_social", "social_ticket": ticket}, auth=False
+    )
+    assert sent.status_code == 200, sent.content
+    body = {"social_ticket": ticket, "verification_token": verify(app, phone, "link_social"), **extra}
+    return app.post("auth/social/complete/", body, auth=False)
+
+
+def test_a_trusted_sign_up_with_a_verified_phone_keeps_the_address_too(world: World) -> None:
+    app = world.app("fid-trusted-phone-new")
+    step = social(app, "fake:sub-new-phone:Malika@gmail.com")
+    assert step.json()["next_step"] == "verify_phone", step.content
+    done = complete_with_phone(
+        app, step.json()["social_ticket"], "+998901240081", name="Malika", terms_version=TERMS_V1
+    )
+    assert done.status_code == 201, done.content
+    customer = done.json()["customer"]
+    assert (customer["phone"], customer["email"]) == ("+998901240081", "malika@gmail.com")
+
+
+def test_linking_google_to_a_phone_account_without_an_address_adds_it(world: World) -> None:
+    app = world.app("fid-trusted-phone-old")
+    sign_up(app, "+998901240082")
+    step = social(app, "fake:sub-old-phone:Sardor@gmail.com")
+    assert step.json()["next_step"] == "verify_phone", step.content
+    done = complete_with_phone(app, step.json()["social_ticket"], "+998901240082", password=PASSWORD)
+    assert done.status_code == 200, done.content
+    assert done.json()["customer"]["email"] == "sardor@gmail.com"
+
+
+def test_an_untrusted_link_to_a_phone_account_adds_no_address(world: World) -> None:
+    app = world.app("fid-untrusted-phone-old")
+    sign_up(app, "+998901240083")
+    step = social(app, "fake-unverified:sub-unv-phone:sardor@gmail.com")
+    done = complete_with_phone(app, step.json()["social_ticket"], "+998901240083", password=PASSWORD)
+    assert done.status_code == 200, done.content
+    assert done.json()["customer"]["email"] is None
+
+
+def test_a_linked_google_account_without_an_address_gets_it_at_the_next_sign_in(world: World) -> None:
+    # An account created before the address was kept (here: an unverified first sign-in) is repaired.
+    app = world.app("fid-repair")
+    step = social(app, "fake-unverified:sub-repair:Dilnoza@gmail.com")
+    done = app.post(
+        "auth/social/complete/",
+        {
+            "social_ticket": step.json()["social_ticket"],
+            "verification_token": None,
+            "name": "Dilnoza",
+            "terms_version": TERMS_V1,
+        },
+        auth=False,
+    )
+    assert done.status_code == 201 and done.json()["customer"]["email"] is None, done.content
+    again = social(app, "fake:sub-repair:dilnoza@gmail.com")
+    assert again.status_code == 200, again.content
+    assert again.json()["customer"]["email"] == "dilnoza@gmail.com"
+    assert again.json()["customer"]["id"] == done.json()["customer"]["id"]

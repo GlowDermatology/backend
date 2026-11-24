@@ -739,6 +739,12 @@ read as "phone or e-mail"; the dormant rule applies to phones only), or (b) **sk
 (§2.1.8) and no account holds it, else `null` and the provider's e-mail stays on the identity only). Nothing is
 merged: (b) never links to an existing account (a trusted address of an existing account signed in at §2.1.8). The phone is asked at the
 first checkout, payment, booking or QR (§2.2.10).
+With a **trusted** ticket (§2.1.8), (a) also keeps the address: an account completed by a verified phone — new,
+reactivated or existing — that has no e-mail takes the ticket's address (`email_verified_at` = now) unless
+another account holds it. A signer of Google never ends up without the Gmail address it signed in with.
+A signed-in **linked** Google identity with a trusted address also gives it to its account when the account has
+no e-mail, no phone and no password (repairs social-only accounts created before; never an account with another
+way in, so the identity alone cannot add a way to reset it).
 The phone is the one the verification token is bound to. Checks: ticket valid and its `fid` = `X-GD-Device-Id` (400
 `social_ticket_invalid`); the token's `SmsCode` row was requested with **this** ticket (`gd:social:otp:{sms_code_id}`
 = ticket `jti`; missing or different → 400 `verification_invalid`).
