@@ -10,7 +10,6 @@ from dataclasses import asdict
 from typing import Any, cast
 
 from django.conf import settings
-from drf_spectacular.utils import extend_schema
 from rest_framework import mixins
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -20,16 +19,14 @@ from glowderma.accounts.api.customer_base import CustomerAPIView, CustomerGeneri
 from glowderma.accounts.api.throttles import CustomerRateThrottle
 from glowderma.accounts.models import Customer
 from glowderma.core import timeutils
-from glowderma.core.api.schema import ACCEPT_LANGUAGE_HEADER, CUSTOMER_ERRORS, DEVICE_HEADERS
 from glowderma.loyalty import qr, selectors
+from glowderma.loyalty.api.customer.schemas import CASHBACK_GET, CASHBACK_LEDGER_LIST, QR_GET
 from glowderma.loyalty.api.customer.serializers import (
     CashbackSummarySerializer,
     LedgerItemSerializer,
     QrTokenSerializer,
 )
 from glowderma.loyalty.api.throttles import QrThrottle
-
-HEADERS = [*DEVICE_HEADERS, ACCEPT_LANGUAGE_HEADER]
 
 
 def request_customer(request: Request) -> Customer:
@@ -38,15 +35,7 @@ def request_customer(request: Request) -> Customer:
 
 
 class CashbackView(CustomerAPIView):
-    @extend_schema(
-        operation_id="customer_cashback_retrieve",
-        description=(
-            "Balance, active holds (with their effective expiry), lifetime total, tier and next tier under "
-            "the active policy, the policy bands and the QR token lifetime."
-        ),
-        parameters=HEADERS,
-        responses={200: CashbackSummarySerializer, **CUSTOMER_ERRORS},
-    )
+    @CASHBACK_GET
     def get(self, request: Request) -> Response:
         summary = selectors.cashback_summary(request_customer(request).pk, timeutils.now())
         payload: dict[str, Any] = {**asdict(summary), "qr_ttl_seconds": int(settings.QR_TOKEN_TTL_SECONDS)}
@@ -58,16 +47,7 @@ class CashbackLedgerViewSet(mixins.ListModelMixin, CustomerGenericViewSet):
     page_size_options = (20, 50)
     default_page_size = 20
 
-    @extend_schema(
-        operation_id="customer_cashback_ledger_list",
-        description=(
-            "The customer's own ledger, newest first. Entries before the history horizon keep their amounts "
-            "but show `order_id: null` and the subtitle of the previous account; the staff reason of an "
-            "adjustment is never shown."
-        ),
-        parameters=HEADERS,
-        responses={200: LedgerItemSerializer(many=True), **CUSTOMER_ERRORS},
-    )
+    @CASHBACK_LEDGER_LIST
     def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         customer = request_customer(request)
         page = self.paginate_queryset(selectors.customer_ledger_page(customer.pk))
@@ -80,16 +60,7 @@ class CashbackLedgerViewSet(mixins.ListModelMixin, CustomerGenericViewSet):
 class QrView(CustomerAPIView):
     throttle_classes = [CustomerRateThrottle, QrThrottle]
 
-    @extend_schema(
-        operation_id="customer_qr_retrieve",
-        description=(
-            "A fresh single-use personal QR token (60 s; at most two live tokens per customer). Request a "
-            "new one every `refresh_in_seconds` and whenever the screen regains focus. 409 `phone_required` "
-            "while the account has no verified phone (`me/phone/`)."
-        ),
-        parameters=HEADERS,
-        responses={200: QrTokenSerializer, **CUSTOMER_ERRORS},
-    )
+    @QR_GET
     def get(self, request: Request) -> Response:
         claims = request.auth if isinstance(request.auth, dict) else {}
         customer = request_customer(request)

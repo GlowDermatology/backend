@@ -7,18 +7,22 @@ from collections.abc import Iterable, Sequence
 from typing import Any, cast
 
 from django.db.models import QuerySet
-from drf_spectacular.utils import extend_schema
 from rest_framework import mixins
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from glowderma.accounts.api.base import AdminAPIView, AdminGenericViewSet
 from glowderma.core import labels, timeutils
-from glowderma.core.api.schema import ADMIN_ERRORS, EXPORT_PARAM
 from glowderma.core.exports import ExportMixin, format_export_datetime
 from glowderma.core.models import AuditEntry
 from glowderma.core.uzsource import N_
 from glowderma.reporting import selectors
+from glowderma.reporting.api.admin.schemas import (
+    AUDIT_FACETS_GET,
+    AUDIT_LOG_LIST,
+    DASHBOARD_GET,
+    NAV_COUNTS_GET,
+)
 from glowderma.reporting.api.admin.serializers import (
     AuditEntrySerializer,
     AuditFacetsSerializer,
@@ -58,42 +62,25 @@ class AuditLogViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
                 entry.request_id,
             )
 
-    @extend_schema(
-        operation_id="admin_audit_log_list",
-        parameters=[AuditLogQuerySerializer, EXPORT_PARAM],
-        responses={200: AuditEntrySerializer(many=True), **ADMIN_ERRORS},
-    )
+    @AUDIT_LOG_LIST
     def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         return super().list(request, *args, **kwargs)
 
 
 class AuditFacetsView(AdminAPIView):
-    @extend_schema(
-        operation_id="admin_audit_log_facets",
-        description=(
-            "What the audit log shows the signed-in staff member: ordinary staff see business entries and "
-            "their own sign-ins and exports, without IP addresses; managers add staff management and every "
-            "staff sign-in, with IPs; superusers see everything. Entries outside the tier are simply absent "
-            "from `audit-log/` and its export (a filter on them answers an empty list, never 403)."
-        ),
-        responses={200: AuditFacetsSerializer, **ADMIN_ERRORS},
-    )
+    @AUDIT_FACETS_GET
     def get(self, request: Request) -> Response:
         return Response(AuditFacetsSerializer(selectors.audit_facets(request.user)).data)
 
 
 class NavCountsView(AdminAPIView):
-    @extend_schema(operation_id="admin_nav_counts", responses={200: NavCountsSerializer, **ADMIN_ERRORS})
+    @NAV_COUNTS_GET
     def get(self, request: Request) -> Response:
         return Response(NavCountsSerializer(selectors.nav_counts()).data)
 
 
 class DashboardView(AdminAPIView):
-    @extend_schema(
-        operation_id="admin_dashboard",
-        parameters=[DashboardQuerySerializer],
-        responses={200: DashboardSerializer, **ADMIN_ERRORS},
-    )
+    @DASHBOARD_GET
     def get(self, request: Request) -> Response:
         query = DashboardQuerySerializer(data=request.query_params.dict())
         query.is_valid(raise_exception=True)

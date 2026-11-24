@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from drf_spectacular.utils import extend_schema
 from rest_framework.request import Request
 from rest_framework.response import Response
 
@@ -18,14 +17,12 @@ from glowderma.accounts import selectors as account_selectors
 from glowderma.accounts.models import Customer
 from glowderma.core import audit, enums, timeutils
 from glowderma.core.api.exceptions import QrInvalid
-from glowderma.core.api.schema import ACCEPT_LANGUAGE_HEADER, CustomerErrorEnvelopeSerializer
 from glowderma.core.pii import mask_phone
 from glowderma.loyalty import qr, selectors
 from glowderma.loyalty.api.customer.serializers import ResolvedQrSerializer, ResolveQrSerializer
 from glowderma.loyalty.api.pos.base import PosAPIView
+from glowderma.loyalty.api.pos.schemas import RESOLVE_QR_POST
 from glowderma.loyalty.models import PosDevice
-
-POS_ERRORS = dict.fromkeys((400, 401, 409, 429), CustomerErrorEnvelopeSerializer)
 
 
 def _reject(device: PosDevice, reason: str, request: Request) -> QrInvalid:
@@ -41,16 +38,7 @@ def _reject(device: PosDevice, reason: str, request: Request) -> QrInvalid:
 
 
 class ResolveQrView(PosAPIView):
-    @extend_schema(
-        operation_id="pos_cashback_resolve_qr",
-        description=(
-            "Resolve a scanned personal QR token (single use). Every failure answers 409 `qr_invalid` with "
-            "the same body. `customer_ref` is opaque and stable per (POS device, customer)."
-        ),
-        parameters=[ACCEPT_LANGUAGE_HEADER],
-        request=ResolveQrSerializer,
-        responses={200: ResolvedQrSerializer, **POS_ERRORS},
-    )
+    @RESOLVE_QR_POST
     def post(self, request: Request) -> Response:
         device = cast(PosDevice, request.user)
         body = ResolveQrSerializer(data=request.data)

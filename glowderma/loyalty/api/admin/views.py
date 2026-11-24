@@ -9,16 +9,15 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from drf_spectacular.utils import extend_schema
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from glowderma.accounts.api.base import AdminAPIView
 from glowderma.core import enums, timeutils
 from glowderma.core.api.exceptions import ContractValidationError
-from glowderma.core.api.schema import ADMIN_ERRORS, IDEMPOTENCY_KEY_HEADER
 from glowderma.core.idempotency import idempotent
 from glowderma.loyalty import selectors, services
+from glowderma.loyalty.api.admin.schemas import CASHBACK_POLICY_GET, POLICY_VERSION_CREATE_POST
 from glowderma.loyalty.api.admin.serializers import (
     CashbackPolicySerializer,
     PolicyVersionCreatedSerializer,
@@ -27,15 +26,7 @@ from glowderma.loyalty.api.admin.serializers import (
 
 
 class CashbackPolicyView(AdminAPIView):
-    @extend_schema(
-        operation_id="admin_cashback_policy_retrieve",
-        description=(
-            "The active and the scheduled version (at most one each), every version newest first by "
-            "`version` (superseded ones included) and `next_effective_from`, the start of the next Tashkent "
-            "calendar month."
-        ),
-        responses={200: CashbackPolicySerializer, **ADMIN_ERRORS},
-    )
+    @CASHBACK_POLICY_GET
     def get(self, request: Request) -> Response:
         now = timeutils.now()
         versions = selectors.policy_versions()
@@ -52,17 +43,7 @@ class CashbackPolicyView(AdminAPIView):
 
 
 class PolicyVersionCreateView(AdminAPIView):
-    @extend_schema(
-        operation_id="admin_cashback_policy_versions_create",
-        description=(
-            "Appends a scheduled version. Tier errors use the submitted index (`tiers.{i}.from|to|percent`); "
-            "gaps and an upper-bounded last tier are returned as `warnings`. A previously scheduled version "
-            "becomes superseded (`superseded_version`)."
-        ),
-        parameters=[IDEMPOTENCY_KEY_HEADER],
-        request=PolicyVersionCreateSerializer,
-        responses={201: PolicyVersionCreatedSerializer, **ADMIN_ERRORS},
-    )
+    @POLICY_VERSION_CREATE_POST
     @idempotent()
     def post(self, request: Request) -> Response:
         serializer = PolicyVersionCreateSerializer(data=cast(dict[str, Any], request.data))

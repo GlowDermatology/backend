@@ -570,3 +570,205 @@ layers =
     display | listing | revenue | consistency
     refund_reads
     payment_rows
+
+[importlinter:contract:catalog-api-admin]
+name = catalog.api.admin: urls above views above schemas above serializers
+type = layers
+containers =
+    glowderma.catalog.api.admin
+exhaustive = true
+layers =
+    urls
+    views
+    schemas
+    serializers
+
+[importlinter:contract:catalog-api-admin-views]
+name = catalog.api.admin.views: one module per subject above the form helpers and the shared base
+type = layers
+containers =
+    glowderma.catalog.api.admin.views
+exhaustive = true
+layers =
+    products | product_images | categories | banners | billz_jobs
+    forms | common
+
+[importlinter:contract:catalog-api-admin-serializers]
+name = catalog.api.admin.serializers: products, categories and banners above their texts above the fields
+type = layers
+containers =
+    glowderma.catalog.api.admin.serializers
+exhaustive = true
+layers =
+    products | categories | banners
+    product_texts | product_images | seo_texts
+    fields
+
+# commerce.api: per audience, routes above the views, above their schemas, above the serializers.
+[importlinter:contract:commerce-api-customer]
+name = commerce.api.customer: urls above views above schemas above serializers and throttles
+type = layers
+containers =
+    glowderma.commerce.api.customer
+exhaustive = true
+layers =
+    urls
+    views
+    schemas
+    serializers | throttles
+
+[importlinter:contract:commerce-api-customer-views]
+name = commerce.api.customer.views: one module per subject above the destinations and quote answers above common
+type = layers
+containers =
+    glowderma.commerce.api.customer.views
+exhaustive = true
+layers =
+    cart | delivery_quote | checkout | payment | order_actions | my_orders
+    destinations | quote_answers
+    common
+
+[importlinter:contract:commerce-api-admin]
+name = commerce.api.admin: urls above views above schemas above serializers
+type = layers
+containers =
+    glowderma.commerce.api.admin
+exhaustive = true
+layers =
+    urls
+    views
+    schemas
+    serializers
+
+[importlinter:contract:commerce-api-admin-views]
+name = commerce.api.admin.views: one module per subject above the shared lookups
+type = layers
+containers =
+    glowderma.commerce.api.admin.views
+exhaustive = true
+layers =
+    orders | order_actions | courier | refunds | delivery_issues | suspension
+    common
+
+# appointments.api: per audience, routes above the views, above their schemas, above the serializers; the
+# specialist board builds on the admin serializers and schemas.
+[importlinter:contract:appointments-api-admin]
+name = appointments.api.admin: urls above views above schemas above serializers
+type = layers
+containers =
+    glowderma.appointments.api.admin
+exhaustive = true
+layers =
+    urls
+    views
+    schemas
+    serializers
+
+[importlinter:contract:appointments-api-customer]
+name = appointments.api.customer: urls above views above schemas above serializers
+type = layers
+containers =
+    glowderma.appointments.api.customer
+exhaustive = true
+layers =
+    urls
+    views
+    schemas
+    serializers
+
+[importlinter:contract:appointments-api-specialist]
+name = appointments.api.specialist: views above schemas above the base view above serializers
+type = layers
+containers =
+    glowderma.appointments.api.specialist
+exhaustive = true
+layers =
+    views
+    schemas
+    base
+    serializers
+
+# The single-module API packages: routes above the views, above their schemas, above the serializers.
+
+[importlinter:contract:reporting-api-admin]
+name = reporting.api.admin: urls above views above schemas above serializers
+type = layers
+containers =
+    glowderma.reporting.api.admin
+exhaustive = true
+layers =
+    urls
+    views
+    schemas
+    serializers
+
+[importlinter:contract:loyalty-api-customer]
+name = loyalty.api.customer: urls above views above schemas above serializers
+type = layers
+containers =
+    glowderma.loyalty.api.customer
+exhaustive = true
+layers =
+    urls
+    views
+    schemas
+    serializers
+
+[importlinter:contract:loyalty-api-admin]
+name = loyalty.api.admin: urls above views above schemas above serializers
+type = layers
+containers =
+    glowderma.loyalty.api.admin
+exhaustive = true
+layers =
+    urls
+    views
+    schemas
+    serializers
+
+[importlinter:contract:assistant-api-admin]
+name = assistant.api.admin: urls above views above schemas above serializers
+type = layers
+containers =
+    glowderma.assistant.api.admin
+exhaustive = true
+layers =
+    urls
+    views
+    schemas
+    serializers
+
+[importlinter:contract:site_config-api-customer]
+name = site_config.api.customer: urls above views above schemas above serializers
+type = layers
+containers =
+    glowderma.site_config.api.customer
+exhaustive = true
+layers =
+    urls
+    views
+    schemas
+    serializers
+
+[importlinter:contract:delivery-api-customer]
+name = delivery.api.customer: urls above views above schemas above serializers
+type = layers
+containers =
+    glowderma.delivery.api.customer
+exhaustive = true
+layers =
+    urls
+    views
+    schemas
+    serializers
+
+[importlinter:contract:loyalty-api-pos]
+name = loyalty.api.pos: urls above views above schemas and the base view
+type = layers
+containers =
+    glowderma.loyalty.api.pos
+exhaustive = true
+layers =
+    urls
+    views
+    schemas | base

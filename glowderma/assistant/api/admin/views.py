@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from drf_spectacular.utils import extend_schema
 from rest_framework.exceptions import NotFound
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -17,19 +16,22 @@ from rest_framework.response import Response
 from glowderma.accounts.api.base import AdminAPIView
 from glowderma.accounts.api.throttles import StaffRateThrottle
 from glowderma.assistant import selectors, services
+from glowderma.assistant.api.admin.schemas import (
+    ASSISTANT_JOB_ACCEPT_POST,
+    ASSISTANT_JOB_APPLY_POST,
+    ASSISTANT_JOB_DETAIL_GET,
+    ASSISTANT_JOB_DISCARD_POST,
+    ASSISTANT_JOB_START_POST,
+    ASSISTANT_STATUS_GET,
+)
 from glowderma.assistant.api.admin.serializers import (
-    AssistantAcceptResultSerializer,
     AssistantAcceptSerializer,
-    AssistantApplyResultSerializer,
     AssistantApplySerializer,
     AssistantJobCreateSerializer,
     AssistantJobSerializer,
-    AssistantStartSerializer,
-    AssistantStatusSerializer,
 )
 from glowderma.catalog.api.admin.serializers import ProductSerializer
 from glowderma.core import enums
-from glowderma.core.api.schema import ADMIN_ERRORS
 from glowderma.core.idempotency import idempotent
 
 
@@ -40,11 +42,7 @@ class AssistantGenerateThrottle(StaffRateThrottle):
 
 
 class AssistantStatusView(AdminAPIView):
-    @extend_schema(
-        operation_id="admin_assistant_status_retrieve",
-        description="Whether the product editor shows the AI assistant (switched on and its provider ready).",
-        responses={200: AssistantStatusSerializer, **ADMIN_ERRORS},
-    )
+    @ASSISTANT_STATUS_GET
     def get(self, request: Request) -> Response:
         assistant = services.get_settings()
         return Response({"enabled": services.is_available(), "max_images": assistant.max_images})
@@ -53,16 +51,7 @@ class AssistantStatusView(AdminAPIView):
 class AssistantJobStartView(AdminAPIView):
     throttle_classes = [StaffRateThrottle, AssistantGenerateThrottle]
 
-    @extend_schema(
-        operation_id="admin_assistant_jobs_create",
-        description=(
-            "Queue an AI generation for the product (202), or return its queued/running job (200), or "
-            "`nothing_to_fill: true` with `job: null` (200) when the mode finds no key to suggest. Poll "
-            "`assistant/jobs/{id}/`."
-        ),
-        request=AssistantJobCreateSerializer,
-        responses={200: AssistantStartSerializer, 202: AssistantStartSerializer, **ADMIN_ERRORS},
-    )
+    @ASSISTANT_JOB_START_POST
     @idempotent(required=False)
     def post(self, request: Request, product_id: int) -> Response:
         serializer = AssistantJobCreateSerializer(data=request.data)
@@ -88,10 +77,7 @@ class AssistantJobStartView(AdminAPIView):
 
 
 class AssistantJobDetailView(AdminAPIView):
-    @extend_schema(
-        operation_id="admin_assistant_jobs_retrieve",
-        responses={200: AssistantJobSerializer, **ADMIN_ERRORS},
-    )
+    @ASSISTANT_JOB_DETAIL_GET
     def get(self, request: Request, pk: int) -> Response:
         job = selectors.get_job(pk)
         if job is None:
@@ -100,17 +86,7 @@ class AssistantJobDetailView(AdminAPIView):
 
 
 class AssistantJobAcceptView(AdminAPIView):
-    @extend_schema(
-        operation_id="admin_assistant_jobs_accept_create",
-        description=(
-            "Record which suggestions the person took into the (unsaved) product form. The product is not "
-            "written — the person saves the form. `outcome` becomes `applied` (every suggestion), `partial` "
-            "(some) or `discarded` (none); each key must be one of the job's suggestions. A job that is not "
-            "a pending, succeeded one is a 409."
-        ),
-        request=AssistantAcceptSerializer,
-        responses={200: AssistantAcceptResultSerializer, **ADMIN_ERRORS},
-    )
+    @ASSISTANT_JOB_ACCEPT_POST
     @idempotent(required=False)
     def post(self, request: Request, pk: int) -> Response:
         serializer = AssistantAcceptSerializer(data=request.data)
@@ -121,15 +97,7 @@ class AssistantJobAcceptView(AdminAPIView):
 
 
 class AssistantJobApplyView(AdminAPIView):
-    @extend_schema(
-        operation_id="admin_assistant_jobs_apply_create",
-        description=(
-            "Apply the selected suggestions (values may be edited; they are checked again). A key whose "
-            "product value changed since the generation is returned in `conflicts` and not written."
-        ),
-        request=AssistantApplySerializer,
-        responses={200: AssistantApplyResultSerializer, **ADMIN_ERRORS},
-    )
+    @ASSISTANT_JOB_APPLY_POST
     @idempotent(required=False)
     def post(self, request: Request, pk: int) -> Response:
         serializer = AssistantApplySerializer(data=request.data)
@@ -150,11 +118,7 @@ class AssistantJobApplyView(AdminAPIView):
 
 
 class AssistantJobDiscardView(AdminAPIView):
-    @extend_schema(
-        operation_id="admin_assistant_jobs_discard_create",
-        request=None,
-        responses={200: AssistantJobSerializer, **ADMIN_ERRORS},
-    )
+    @ASSISTANT_JOB_DISCARD_POST
     @idempotent(required=False)
     def post(self, request: Request, pk: int) -> Response:
         job = services.discard_job(pk, actor=request.user, request=request)
