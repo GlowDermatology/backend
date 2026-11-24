@@ -7,7 +7,7 @@
 | Source of truth | `docs/specs/2026-10-24-backend-foundation-design.md` (Auth and request security → Customer (M2); Financial integrity; Milestones → M2; Provisional business rules). If this file and the spec disagree, the spec wins and this file gets fixed. |
 | Shared rules | `docs/api/admin-api-v1.md` §1 (envelope, pagination, idempotency, values), §3 (enums), §4 (OrderEvent types), §5.8 (Uzbek labels). This file **references** them and lists only what is different for the customer audience. |
 | Open business rules | `docs/decisions/open-questions.md` (A1–A8, O1–O8, L1–L8, P1–P4, C1–C4, T1–T19) plus the new M2 points in §7 (`M2-*`) |
-| Out of scope (Phase 2) | The AI features of Backend PDF §12 (`POST /ai/analyze`, `POST /ai/chat`), their biometric consent and error codes are **not** part of v1; no route is mounted. Live Eskiz/Click/Payme/BTS/FCM adapters and reconciliation are M3; the Billz live adapter (M3) is built from docs.billz.io (`openapi.yaml` is the source of truth), and what it does not cover stays an explicit stub (§2.10). Fake adapters may run under the production settings (product-owner decision 2026-10-26); what that posture allows is §6.14. |
+| Out of scope (Phase 2) | The AI features of Backend PDF §12 (`POST /ai/analyze`, `POST /ai/chat`), their biometric consent and error codes are **not** part of v1; no route is mounted. Live DevSMS/Click/Payme/BTS/FCM adapters and reconciliation are M3; the Billz live adapter (M3) is built from docs.billz.io (`openapi.yaml` is the source of truth), and what it does not cover stays an explicit stub (§2.10). Fake adapters may run under the production settings (product-owner decision 2026-10-26); what that posture allows is §6.14. |
 | Enforced by | drf-spectacular (`openapi/schema.yaml`, `--validate --fail-on-warn`), the URL-walk auth matrix, contract tests per endpoint, the offline Click/Payme sandbox suites (plan §5) |
 
 Examples use `jsonc`: `//` comments give types and nullability and are not part of the payload. Example values are
@@ -65,7 +65,7 @@ Everything in admin §1 applies unless a row below says otherwise.
 | `Content-Type` | on bodies | `application/json`; `multipart/form-data` only on `PUT me/image/`; Click webhooks `application/x-www-form-urlencoded` only (§2.13.1). Anything else → 415 (Click: error `-8`). |
 | `X-Request-ID` | ignored from the app | Accepted only with the internal secret (admin §1.2), which the app never has. The server always generates one; the app shows it on error screens ("Xato kodi"). |
 | `X-GD-Client-UA` | website BFF only (B-W1) | The browser's `User-Agent`, honoured only with a valid `X-GD-Internal-Secret` (like `X-GD-Client-IP`); printable characters, ≤512. Names the session in the session list (§2.2.10); never used for any decision. |
-| `X-GD-Fake-Scenario` | local/test settings only | JSON object copied into `Order.metadata["fake"]` at checkout (BTS/Click/Payme switches of plan §6). Honoured only when `DEV_FEATURES_ALLOWED` (local/test settings), `FAKE_SCENARIO_HEADER_ENABLED=true` **and** every provider mode (`ESKIZ_MODE`, `CLICK_MODE`, `PAYME_MODE`, `BTS_MODE`, `FCM_MODE`, `YANDEX_DELIVERY_MODE`) is `fake` (Yandex switches go under the key `yandex`, `docs/integrations/yandex-delivery.md` §5); settings validation refuses the flag otherwise and the production settings refuse it outright (fake providers in production never read a scenario, §6.14). |
+| `X-GD-Fake-Scenario` | local/test settings only | JSON object copied into `Order.metadata["fake"]` at checkout (BTS/Click/Payme switches of plan §6). Honoured only when `DEV_FEATURES_ALLOWED` (local/test settings), `FAKE_SCENARIO_HEADER_ENABLED=true` **and** every provider mode (`DEVSMS_MODE`, `CLICK_MODE`, `PAYME_MODE`, `BTS_MODE`, `FCM_MODE`, `YANDEX_DELIVERY_MODE`) is `fake` (Yandex switches go under the key `yandex`, `docs/integrations/yandex-delivery.md` §5); settings validation refuses the flag otherwise and the production settings refuse it outright (fake providers in production never read a scenario, §6.14). |
 
 **401 codes and the app's reaction** (customer refresh tokens rotate, so a refresh failure always ends the session):
 
@@ -443,7 +443,7 @@ incremented. The **plain code is never written to the database**: it is encrypte
 `SECRETBOX_KEY` (`core.secretbox.seal`, random 96-bit nonce, associated data = `sms_code_id`) and stored in Redis as
 `gd:otp:payload:{sms_code_id}` with the code TTL (120 s). The outbox message is `sms.send {sms_code_id, lang,
 platform}` (dedupe `sms.send:{id}`) — no phone, no text, no code; the handler reads the phone from the row, opens the
-ciphertext, renders `sms.otp` (§2.14.1), sends, and deletes the Redis key. For `link_social` the ticket's `jti` is
+ciphertext, sends it through the universal OTP template of its purpose (§2.14.1), and deletes the Redis key. For `link_social` the ticket's `jti` is
 remembered as `gd:social:otp:{sms_code_id}` (15 min) so `auth/social/complete/` can require that the verification
 token came from a code requested **with this ticket**. No audit (volume); structured log `otp.issued {purpose,
 phone_ref}` (`pii_ref`, §6.4).
@@ -2428,43 +2428,40 @@ Payme id is `Payment.provider_txn_id`.
 
 ### 2.14 Outbound provider protocols (what the adapters send)
 
-#### 2.14.1 Eskiz SMS (`integrations/eskiz/`, P1)
-- **Auth (verify M3):** `POST {ESKIZ_BASE_URL}/auth/login` (form `email`, `password`) → bearer token, cached in Redis
-  `gd:eskiz:token` for 29 days; a 401 on send → one re-login and retry; `PATCH /auth/refresh` when supported.
-- **Send:** `POST {ESKIZ_BASE_URL}/message/sms/send` form `mobile_phone` (digits without `+`, `998901234567`),
-  `message`, `from` = `ESKIZ_SENDER`, `callback_url` = `ESKIZ_CALLBACK_URL` (empty → omitted) → `{"id": "…",
-  "status": "waiting", …}`; the id is stored in `SmsCode.provider_message_id`.
-- **Texts** must match Eskiz-approved templates character for character: catalog `sms.otp` (uz) "Glow Derma: tasdiqlash
-  kodingiz {code}. Kodni hech kimga bermang." · (ru) "Glow Derma: ваш код подтверждения {code}. Никому его не
-  сообщайте." · (en) "Glow Derma: your verification code is {code}. Do not share it with anyone." Language = resolved
-  request language. For `platform = android` and a non-empty `ANDROID_SMS_APP_HASH`, a second line with the 11-character
-  app hash is appended (Android SMS Retriever autofill; the template with the hash line needs its own Eskiz approval);
-  iOS reads the code from the text (`textContentType = .oneTimeCode`). The Eskiz test account only delivers its own
-  test text (use fake mode until production).
+#### 2.14.1 DevSMS SMS (`integrations/devsms/`; replaced Eskiz 2026-11)
+- **Send:** `POST {DEVSMS_BASE_URL}/sms` (`https://devsms.uz/api/v1/sms`), `Authorization: Bearer <DEVSMS_API_TOKEN>`,
+  `Idempotency-Key: <uuid of the code>`, JSON `{"phone": "998901234567", "otp": {"template_type": N, "service_name":
+  "GlowDerma", "code": "482913"}}` → `{"success": true, "data": {"id": …, "status": "sent", …}}`; the id is stored in
+  `SmsCode.provider_message_id`. Details, outcomes and the activation checklist: `docs/integrations/devsms.md`.
+- **Texts** are DevSMS's four pre-approved **universal OTP templates** (Uzbek), from its shared sender 4546 (no Alpha
+  Sender ID): the stored purpose picks the template (`accounts/tasks/otp_delivery.SMS_PURPOSES`: `signup` → 3
+  registration, `new_device` → 4 login, `reset` → 2 password reset, `social_link` and `attach_phone` → 1 action
+  confirmation). The request language and the platform change nothing in the SMS (the former catalog OTP text and
+  the Android SMS Retriever hash line are gone, see `docs/sms-template-audit.md`); iOS and Android read the code
+  through the OS one-time-code autofill (`AutofillHints.oneTimeCode`).
 - **Handler** `sms.send` (`accounts/tasks/otp_delivery.py`): claim `sent_at` in its own transaction **before** the call; read and
   decrypt `gd:otp:payload:{sms_code_id}` (missing — expired or flushed — → nothing is sent, INFO log, done: the user
-  resends after 60 s); a connection error raised before the request left (connect failure) un-claims and re-raises
-  (outbox retry; the ciphertext is kept); a timeout or 5xx after sending keeps the claim and is never resent; 4xx
-  (invalid number, no balance) is logged with `IntegrationState(eskiz)` error and not retried. After a definitive
-  outcome the Redis key is deleted. `accounts.cleanup_auth` deletes `done`/`dead` `sms.send` outbox rows older than
-  24 h together with the `SmsCode` rows.
-- **Delivery callback:** optional; M2 sets no `callback_url` and exposes no endpoint (M3 may add
-  `webhooks/eskiz/` to record `DELIVRD`/`UNDELIV`).
-- **Fake (`ESKIZ_MODE=fake`):** phone ending `0000` → rejected (definitive); ending `9999` → transport down; otherwise
-  accepted with id `fake-<sms_code_id>`. Under the local/test settings every rendered message is kept in
-  `FakeEskiz.sent` (tests read the code there); under the production settings the fake keeps nothing and logs one INFO
-  line `sms.fake_accepted {sms_code_id}` per message (ids only, never the text or code), so no plain code stays in a
-  worker's memory (§6.4). The fixed code `ESKIZ_FAKE_CODE` (default `123456`, so black-box e2e can sign in) exists
-  **only** under `config.settings.local` and `config.settings.test` (`DEV_FEATURES_ALLOWED`);
-  `config.settings.production` — which staging also runs — refuses the variable at boot, so no internet-facing
-  deployment accepts a known code.
-- **Fake Eskiz in production (demo/staging posture, product-owner decision 2026-10-26).** The production settings
-  accept `ESKIZ_MODE=fake` (startup WARNING, mode reported by `health/?ready=1` and the ops console settings page, §6.14), but
+  resends after 60 s). Every request carries the code's idempotency key, so an outcome that is safe to repeat (no
+  answer, a timeout, 5xx, 429, an authentication refusal) un-claims and re-raises (outbox retry with the same code and
+  key; DevSMS sends and charges at most once); DevSMS's own `provider_outcome_unknown` keeps the claim and is never
+  resent; a refusal (invalid number, no balance, the service name rejected by moderation, universal OTP suspended) is
+  logged with `IntegrationState(devsms)` error and not retried. After a definitive outcome the Redis key is deleted.
+  `accounts.cleanup_auth` deletes `done`/`dead` `sms.send` outbox rows older than 24 h together with the `SmsCode` rows.
+- **Delivery callback:** not used (no `callback_url`, no endpoint).
+- **Fake (`DEVSMS_MODE=fake`):** phone ending `0000` → rejected (definitive); ending `9999` → transport down; otherwise
+  accepted with id `fake-<sms_code_id>`. Under the local/test settings every message (phone, code, purpose) is kept in
+  `FakeSms.sent` (tests read the code there); under the production settings the fake keeps nothing and logs one INFO
+  line `sms.fake_accepted {sms_code_id}` per message (ids only, never the code), so no plain code stays in a worker's
+  memory (§6.4). The fixed code `OTP_FAKE_CODE` (default `123456`, so black-box e2e can sign in) exists **only** under
+  `config.settings.local` and `config.settings.test` (`DEV_FEATURES_ALLOWED`); `config.settings.production` — which
+  staging also runs — refuses the variable at boot, so no internet-facing deployment accepts a known code.
+- **Fake SMS in production (demo/staging posture, product-owner decision 2026-10-26).** The production settings
+  accept `DEVSMS_MODE=fake` (startup WARNING, mode reported by `health/?ready=1` and the ops console settings page, §6.14), but
   **no SMS is delivered**: `send-code` and the `verify_device` step answer as usual and the code never arrives. Nobody
   can register, sign in with a password on a device without a device key, reset a password, complete a social link,
   set a first password on a social-only account or delete a social-only account; signed-in sessions, known-device
   password sign-ins and linked social sign-ins (when OAuth is live) keep working. This posture is for demos and staging
-  only; a public launch needs `ESKIZ_MODE=live`.
+  only; a public launch needs `DEVSMS_MODE=live`.
 
 #### 2.14.2 FCM push (`integrations/fcm/`; live adapter M3, payload contract now)
 HTTP v1 `POST https://fcm.googleapis.com/v1/projects/{FCM_PROJECT_ID}/messages:send`, one request per message over
@@ -2574,7 +2571,7 @@ returns at once without polling.
 #### 2.14.4 E-mail codes (`integrations/email/`, hybrid identity)
 `EMAIL_MODE=fake` (default; nothing delivered — under the production settings it is allowed with the startup WARNING
 and the `email: fake` flag of `health/?ready=1` and admin settings, like every fake provider, §6.14; local/test keep
-the messages and use the fixed `ESKIZ_FAKE_CODE`) or `smtp` (any relay: `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`,
+the messages and use the fixed `OTP_FAKE_CODE`) or `smtp` (any relay: `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`,
 `EMAIL_HOST_PASSWORD`, `EMAIL_USE_TLS` (STARTTLS) / `EMAIL_USE_SSL` (implicit TLS), `EMAIL_TIMEOUT`, `EMAIL_FROM`;
 production requires a host, a real sender and TLS). The outbox message `email.send {sms_code_id, lang, purpose}`
 (dedupe `email.send:{id}`) carries no address and no code; its handler follows `sms.send` exactly (payload and row read
@@ -2968,7 +2965,6 @@ code a customer view can raise to an existing key.
 | `push.account_security.social_unlinked.title` / `.body` | Kirish usuli o‘chirildi / {provider} profili hisobingizdan uzildi. | Способ входа удалён / Профиль {provider} отвязан от аккаунта. | A sign-in method was removed / The {provider} profile was unlinked from your account. |
 | `push.account_security.password_reset.title` / `.body` | Parol o‘zgartirildi / Hisobingiz paroli yangilandi. Agar bu siz bo‘lmasangiz, sotuvchi bilan bog‘laning. | Пароль изменён / Пароль аккаунта обновлён. Если это были не вы, свяжитесь с продавцом. | Password changed / Your account password was changed. If this wasn't you, contact the seller. |
 | `push.account_security.password_changed.title` / `.body` | Parol o‘rnatildi / Hisobingiz uchun yangi parol o‘rnatildi. Agar bu siz bo‘lmasangiz, sotuvchi bilan bog‘laning. | Пароль задан / Для аккаунта задан новый пароль. Если это были не вы, свяжитесь с продавцом. | Password set / A new password was set for your account. If this wasn't you, contact the seller. |
-| `sms.otp` | Glow Derma: tasdiqlash kodingiz {code}. Kodni hech kimga bermang. | Glow Derma: ваш код подтверждения {code}. Никому его не сообщайте. | Glow Derma: your verification code is {code}. Do not share it with anyone. |
 
 ---
 
@@ -3068,11 +3064,11 @@ code a customer view can raise to an existing key.
     single-use QR via `GETDEL` with at most two live tokens per customer, one error for every failure, no name, history
     or internal id in the response, every resolve audited.
 14. **Fake providers and dev switches** (product-owner decision 2026-10-26). Two different things:
-    - **Fake provider adapters** (`CLICK_MODE`, `PAYME_MODE`, `BTS_MODE`, `ESKIZ_MODE`, `FCM_MODE`, `BILLZ_MODE`,
+    - **Fake provider adapters** (`CLICK_MODE`, `PAYME_MODE`, `BTS_MODE`, `DEVSMS_MODE`, `FCM_MODE`, `BILLZ_MODE`,
       `OAUTH_MODE` = `fake`) are **allowed** under `config.settings.production`, which every internet-facing deployment
       (staging included) runs. Each process logs one startup WARNING listing every fake provider (logger
       `glowderma.integrations`, built in M1), and the effective mode of every provider (`billz`, `click`, `payme`, `bts`,
-      `eskiz`, `fcm`, `oauth`) is reported by `GET /api/v1/health/?ready=1` (`integrations`, shown only to callers that
+      `devsms`, `fcm`, `oauth`) is reported by `GET /api/v1/health/?ready=1` (`integrations`, shown only to callers that
       pass the admin network gate) and on the ops console settings page (`/django-admin/settings/`, admin §2.11, §2.15). Fake and live providers may be **mixed** (live adapters arrive one at a time in M3), so the
       rule is per provider: in that posture a fake adapter never reports a real-money or real-world effect that did not
       happen and never accepts a made-up credential. Fake Click/Payme/BTS start no transaction and honour no capture
@@ -3094,7 +3090,7 @@ code a customer view can raise to an existing key.
       auth/oauth/{provider}/` and `POST auth/oauth/{provider}/link/` (admin §2.1; unlinking keeps working, email +
       password sign-in is unaffected) — because a fake verifier accepts any `fake:<subject>:<email>` code with a
       caller-chosen nonce and would sign anyone in as any linked identity, and with `STAFF_GOOGLE_AUTOLINK` even as any
-      staff email; fake Eskiz delivers no SMS (demo/staging posture, §2.14.1); fake FCM delivers no push; fakes keep no
+      staff email; fake SMS delivers nothing (demo/staging posture, §2.14.1); fake FCM delivers no push; fakes keep no
       message history (§2.14.1, §2.14.2).
     - **Switching a payment provider from `live` to `fake`** is an operator procedure, not something the backend makes
       safe. A provider holds **open money** while it has a `pending` payment with an open transaction (Click: prepared,
@@ -3113,7 +3109,7 @@ code a customer view can raise to an existing key.
       `providers.fake_with_open_money {provider, open_transactions, open_refunds, order_ids}` (at most 20 order ids),
       which pages the on-call.
     - **Dev switches** — `FAKE_PAYMENTS_ENABLED` (dev simulate, §2.15), `FAKE_SCENARIO_HEADER_ENABLED` (§1.2),
-      `ESKIZ_FAKE_CODE` (fixed OTP), `POS_API_KEYS` (seeded POS keys, §2.10), `FAKE_NOW` and the `*` nonce wildcard of
+      `OTP_FAKE_CODE` (fixed OTP), `POS_API_KEYS` (seeded POS keys, §2.10), `FAKE_NOW` and the `*` nonce wildcard of
       the OAuth fakes — work only under the local/test settings (`DEV_FEATURES_ALLOWED`, a settings-module constant,
       not an env variable) and are **refused at boot** by the production settings whatever the provider modes;
       `FAKE_PAYMENTS_ENABLED` and the scenario header additionally require every relevant provider mode to be `fake`.
@@ -3211,7 +3207,7 @@ the client may still revise it later through a setting or a data field:
 | M2-N1 | Show the admin's adjustment reason to the customer? | No (generic "Bonus qo‘shildi" / "Balans tuzatildi") |
 | M2-N2 | Push for a customer's own order cancellation | Yes (state machine row 5 pushes `cancelled`) |
 | M2-N3 | Security notices (social link/unlink, password reset and change) | Push + inbox row (`account_security`) to every signed-in device (B-W1), and for a reset or a password change a visible push to the devices it signed out plus a 401 message there; no SMS (re-evaluated in revision 2: a reset needs the SMS code, so an SMS notice would reach whoever did it; an SMS template would also need Eskiz approval) |
-| M2-F1 | May production run fake provider adapters? | **Decided by the product owner (2026-10-26):** yes, warned at startup and reported per provider in `health/?ready=1` and admin settings; fake callbacks are refused (a Click Complete of a transaction attached while Click was live is accepted and reversed), fake payment providers are not offered, the dev simulate endpoint and the fixed OTP exist only under local/test settings, and fake Eskiz delivers no SMS (demo/staging posture, §6.14). Mixed with live providers, a fake never reports an effect that did not happen: fake BTS turns home delivery off (pickup only) and makes up no parcel; online selling requires live Billz — with fake Billz the stock is unknown, every product is unavailable online (`online_sales_enabled: false`), the admin import is refused and no sale is recorded (an earlier order's sale is entered by hand). Switching a payment provider from live to fake is an operator procedure: not while it holds open money (open transactions, unsettled refunds; the worker logs an ERROR at start listing them), and money a provider switched to fake still holds is reconciled by hand in its cabinet (§2.3, §2.6, §2.14.3, §6.14) |
+| M2-F1 | May production run fake provider adapters? | **Decided by the product owner (2026-10-26):** yes, warned at startup and reported per provider in `health/?ready=1` and admin settings; fake callbacks are refused (a Click Complete of a transaction attached while Click was live is accepted and reversed), fake payment providers are not offered, the dev simulate endpoint and the fixed OTP exist only under local/test settings, and fake SMS delivers nothing (demo/staging posture, §6.14). Mixed with live providers, a fake never reports an effect that did not happen: fake BTS turns home delivery off (pickup only) and makes up no parcel; online selling requires live Billz — with fake Billz the stock is unknown, every product is unavailable online (`online_sales_enabled: false`), the admin import is refused and no sale is recorded (an earlier order's sale is entered by hand). Switching a payment provider from live to fake is an operator procedure: not while it holds open money (open transactions, unsettled refunds; the worker logs an ERROR at start listing them), and money a provider switched to fake still holds is reconciled by hand in its cabinet (§2.3, §2.6, §2.14.3, §6.14) |
 | H-1…H-6 | Hybrid identity (B-W2): phone optional until checkout/pay/booking/QR; no merge; reauth waiver window; e-mail login and reset; phoneless social sign-up; dormant rule for phones only | see `docs/decisions/open-questions.md` "Hybrid identity" |
 | M2-T1 | Terms not yet versioned in settings | Registration answers 503 `terms_not_published` until staff publish `terms_version` with the uz terms and privacy texts |
 

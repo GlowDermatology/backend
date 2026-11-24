@@ -42,7 +42,7 @@ class SmsCode(models.Model):
     max_attempts = models.PositiveSmallIntegerField(default=5, verbose_name="maks. urinishlar")
     created_at = models.DateTimeField(default=timestamp_default, verbose_name="yaratilgan")
     expires_at = models.DateTimeField(verbose_name="amal qilish muddati")  # created_at + 120 s
-    # claimed by the sms.send handler before the Eskiz call
+    # claimed by the sms.send handler before the provider call
     sent_at = models.DateTimeField(null=True, verbose_name="yuborilgan")
     consumed_at = models.DateTimeField(null=True, verbose_name="ishlatilgan")  # verified successfully
     # attempts reached max_attempts
@@ -57,7 +57,7 @@ class SmsCode(models.Model):
     request_ip = models.GenericIPAddressField(null=True, verbose_name="so‘rov IP manzili")
     provider_message_id = models.CharField(
         max_length=64, blank=True, verbose_name="provayder xabar ID"
-    )  # Eskiz message id (fake: "fake-<id>")
+    )  # provider message id: DevSMS (earlier rows: Eskiz), "fake-<id>" for the fake
 
     class Meta:
         verbose_name = "SMS kod"

@@ -36,11 +36,10 @@ from .base import (
     CLICK_MERCHANT_API_URL,
     CLICK_MODE,
     CLICK_PAY_URL,
+    DEVSMS_BASE_URL,
+    DEVSMS_MODE,
     EMAIL_FROM,
     EMAIL_MODE,
-    ESKIZ_BASE_URL,
-    ESKIZ_CALLBACK_URL,
-    ESKIZ_MODE,
     FCM_MODE,
     OAUTH_MODE,
     OPS_REQUIRE_2FA,
@@ -72,12 +71,12 @@ DEV_FEATURES_ALLOWED = False
 E2E_CONSOLE_ENABLED = False
 FAKE_PAYMENTS_ENABLED = False
 FAKE_SCENARIO_HEADER_ENABLED = False
-ESKIZ_FAKE_CODE = ""
+OTP_FAKE_CODE = ""
 POS_API_KEYS = []
 DEV_ONLY_VARIABLES = (
     "FAKE_PAYMENTS_ENABLED",
     "FAKE_SCENARIO_HEADER_ENABLED",
-    "ESKIZ_FAKE_CODE",
+    "OTP_FAKE_CODE",
     "POS_API_KEYS",
 )
 for _name in DEV_ONLY_VARIABLES:
@@ -306,8 +305,8 @@ def _required(name: str) -> str:
     return value.strip()
 
 
-# Values of .env.example (and Eskiz's test sender) that would reach the provider as if they were ours.
-COMMITTED_EXAMPLES = {"ESKIZ_SENDER": {"4546"}, "BTS_SENDER_PHONE": {"+998901234567"}}
+# Values of .env.example that would reach the provider as if they were ours.
+COMMITTED_EXAMPLES = {"BTS_SENDER_PHONE": {"+998901234567"}}
 
 
 def _not_an_example(name: str, value: str) -> str:
@@ -355,12 +354,10 @@ if VAULT_MODE == "live":
     _required("VAULT_PROXY_URL")
     if VAULT_AI_PREFIX.startswith("local"):
         raise ImproperlyConfigured("VAULT_AI_PREFIX must name the environment (e.g. production/ai)")
-if ESKIZ_MODE == "live":
-    for _name in ("ESKIZ_EMAIL", "ESKIZ_PASSWORD", "ESKIZ_SENDER"):
-        _not_an_example(_name, _required(_name))
-    _https_url("ESKIZ_BASE_URL", ESKIZ_BASE_URL)
-    if ESKIZ_CALLBACK_URL:
-        _https_url("ESKIZ_CALLBACK_URL", ESKIZ_CALLBACK_URL)
+# DevSMS: a live adapter needs its API token (a secret) and an https base URL.
+if DEVSMS_MODE == "live":
+    _required("DEVSMS_API_TOKEN")
+    _https_url("DEVSMS_BASE_URL", DEVSMS_BASE_URL)
 # Campaign approval workflow (admin contract §2.8): the cancel window after an approval is at least 5 minutes
 # in production; 0 exists for local e2e runs only.
 if CAMPAIGN_APPROVAL_DELAY_MINUTES < 5:

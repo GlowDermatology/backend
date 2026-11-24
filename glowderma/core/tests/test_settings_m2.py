@@ -59,13 +59,13 @@ def load_fresh_local() -> Iterator[Callable[[], ModuleType]]:
 
 def test_local_and_test_settings_allow_dev_features_with_valid_keys() -> None:
     assert settings.DEV_FEATURES_ALLOWED is True
-    assert settings.ESKIZ_FAKE_CODE == "123456"
+    assert settings.OTP_FAKE_CODE == "123456"
     assert len(base64.urlsafe_b64decode(settings.SECRETBOX_KEY + "=")) == 32
     assert all(len(getattr(settings, name)) >= 32 for name in KEY_NAMES)
     assert settings.CUSTOMER_ACCESS_TTL == 900 and settings.CUSTOMER_REFRESH_TTL_DAYS == 60
     assert settings.MIN_APP_VERSION_IOS == settings.MIN_APP_VERSION_ANDROID == "0.0.0"
     assert settings.CLICK_INFLIGHT_SECONDS <= settings.PAYMENT_IN_FLIGHT_GRACE_SECONDS
-    assert settings.ESKIZ_MODE == settings.INTEGRATIONS_MODE == "fake"
+    assert settings.DEVSMS_MODE == settings.INTEGRATIONS_MODE == "fake"
 
 
 def test_fake_payments_require_fake_click_and_payme(
@@ -80,7 +80,7 @@ def test_fake_payments_require_fake_click_and_payme(
         monkeypatch.delenv(live)
 
 
-@pytest.mark.parametrize("live", ["ESKIZ_MODE", "CLICK_MODE", "PAYME_MODE", "BTS_MODE", "FCM_MODE"])
+@pytest.mark.parametrize("live", ["DEVSMS_MODE", "CLICK_MODE", "PAYME_MODE", "BTS_MODE", "FCM_MODE"])
 def test_scenario_header_requires_every_provider_fake(
     monkeypatch: pytest.MonkeyPatch, load_fresh_local: Callable[[], ModuleType], live: str
 ) -> None:
@@ -98,13 +98,12 @@ def test_scenario_header_requires_every_provider_fake(
         ("CART_MAX_LINES", "0", "CART_MAX_LINES"),
         ("CUSTOMER_OTP_TTL_SECONDS", "-5", "CUSTOMER_OTP_TTL_SECONDS"),
         ("BOOKING_CANCEL_MIN_LEAD_MINUTES", "-1", "BOOKING_CANCEL_MIN_LEAD_MINUTES"),
-        ("ESKIZ_MODE", "sandbox", "ESKIZ_MODE"),
+        ("DEVSMS_MODE", "sandbox", "DEVSMS_MODE"),
         ("MIN_APP_VERSION_IOS", "1.0", "MIN_APP_VERSION_IOS"),
         ("MIN_APP_VERSION_ANDROID", "\u0661.\u0660.\u0660", "MIN_APP_VERSION_ANDROID"),  # ASCII digits only
         ("QR_MAX_LIVE_TOKENS", "3", "QR_MAX_LIVE_TOKENS"),  # C§6.13: at most two live tokens
-        ("ANDROID_SMS_APP_HASH", "short", "ANDROID_SMS_APP_HASH"),
         ("PAYME_ACCOUNT_FIELD", "Order-Id", "PAYME_ACCOUNT_FIELD"),
-        ("ESKIZ_FAKE_CODE", "12ab56", "ESKIZ_FAKE_CODE"),
+        ("OTP_FAKE_CODE", "12ab56", "OTP_FAKE_CODE"),
         ("POS_API_KEYS", "Kassa:not-a-key", "POS_API_KEYS"),
         ("THROTTLE_RATES", '{"publik": "10/min"}', "THROTTLE_RATES"),
     ],
@@ -140,9 +139,9 @@ def test_production_boots_with_every_provider_fake(
 ) -> None:
     production = load_fresh_production()
     assert production.DEV_FEATURES_ALLOWED is False
-    assert production.INTEGRATIONS_MODE == production.ESKIZ_MODE == production.CLICK_MODE == "fake"
+    assert production.INTEGRATIONS_MODE == production.DEVSMS_MODE == production.CLICK_MODE == "fake"
     assert production.FAKE_PAYMENTS_ENABLED is False and production.FAKE_SCENARIO_HEADER_ENABLED is False
-    assert production.ESKIZ_FAKE_CODE == "" and production.POS_API_KEYS == []
+    assert production.OTP_FAKE_CODE == "" and production.POS_API_KEYS == []
     assert set(LOCAL_DEFAULTS.values()) <= production.KNOWN_PLACEHOLDER_SECRETS
 
 
@@ -152,7 +151,7 @@ def test_production_boots_with_every_provider_fake(
         ("FAKE_PAYMENTS_ENABLED", "true"),
         ("FAKE_PAYMENTS_ENABLED", "false"),
         ("FAKE_SCENARIO_HEADER_ENABLED", "true"),
-        ("ESKIZ_FAKE_CODE", "123456"),
+        ("OTP_FAKE_CODE", "123456"),
         ("POS_API_KEYS", "Kassa 1:gdpos_demo0001_local-dev-only-pos-key-000000000"),
     ],
 )
@@ -325,7 +324,7 @@ def test_production_process_with_every_provider_fake_boots_and_warns(
     """Boot test in a subprocess: ``django.setup()`` under the production settings with ``INTEGRATIONS_MODE=
     fake`` succeeds and ``IntegrationsConfig.ready()`` logs the one WARNING naming every fake provider."""
     env = {**os.environ, "DJANGO_SETTINGS_MODULE": "config.settings.production", "INTEGRATIONS_MODE": "fake"}
-    for name in ("FAKE_NOW", "ESKIZ_FAKE_CODE", "POS_API_KEYS", "FAKE_PAYMENTS_ENABLED"):
+    for name in ("FAKE_NOW", "OTP_FAKE_CODE", "POS_API_KEYS", "FAKE_PAYMENTS_ENABLED"):
         env.pop(name, None)
     result = subprocess.run(  # noqa: S603 - fixed interpreter and script
         [sys.executable, "-c", BOOT_SCRIPT],
@@ -337,11 +336,12 @@ def test_production_process_with_every_provider_fake_boots_and_warns(
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert "integrations running in fake mode in production: oauth, billz, fcm, click, payme, bts, eskiz" in (
-        result.stdout + result.stderr
+    assert (
+        "integrations running in fake mode in production: oauth, billz, fcm, click, payme, bts, devsms"
+        in (result.stdout + result.stderr)
     )
     assert (
-        "MODES ['ai', 'billz', 'bts', 'click', 'email', 'eskiz', 'fcm', 'oauth', 'payme', 'vault', 'yandex']"
+        "MODES ['ai', 'billz', 'bts', 'click', 'devsms', 'email', 'fcm', 'oauth', 'payme', 'vault', 'yandex']"
         in result.stdout
     )
 

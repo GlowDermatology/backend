@@ -63,7 +63,7 @@ def test_integrations_mode_live_makes_billz_live_and_demands_its_values(
         "CLICK_MODE",
         "PAYME_MODE",
         "BTS_MODE",
-        "ESKIZ_MODE",
+        "DEVSMS_MODE",
         "FCM_MODE",
         "YANDEX_DELIVERY_MODE",
     ):

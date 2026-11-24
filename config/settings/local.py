@@ -84,9 +84,9 @@ BTS_WEBHOOK_SECRET = env_str("BTS_WEBHOOK_SECRET", LOCAL_KEY_DEFAULTS["BTS_WEBHO
 CLICK_SECRET_KEY = env_str("CLICK_SECRET_KEY", LOCAL_KEY_DEFAULTS["CLICK_SECRET_KEY"])
 PAYME_KEY = env_str("PAYME_KEY", LOCAL_KEY_DEFAULTS["PAYME_KEY"])
 # Fixed OTP for black-box e2e (C§2.14.1); never read by the production settings, which refuse the variable.
-ESKIZ_FAKE_CODE = env_str("ESKIZ_FAKE_CODE", "123456")
-if not re.fullmatch(r"\d{6}", ESKIZ_FAKE_CODE):
-    raise ImproperlyConfigured("ESKIZ_FAKE_CODE must be six digits")
+OTP_FAKE_CODE = env_str("OTP_FAKE_CODE", "123456")
+if not re.fullmatch(r"\d{6}", OTP_FAKE_CODE):
+    raise ImproperlyConfigured("OTP_FAKE_CODE must be six digits")
 # Seeded POS devices "name:key,…" (C§2.10); key format gdpos_<8-char prefix>_<32 base64url chars>.
 POS_API_KEY_PATTERN = re.compile(r"^gdpos_[A-Za-z0-9]{8}_[A-Za-z0-9_-]{32}$")
 POS_API_KEYS = []

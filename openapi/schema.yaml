@@ -23563,8 +23563,8 @@ components:
           items:
             type: string
           description: 'With `integrations`: the live providers configured against
-            a sandbox (BTS test host, Payme sandbox checkout / `PAYME_TEST_MODE`,
-            Eskiz test sender); empty in a real deployment.'
+            a sandbox (BTS test host, Payme sandbox checkout / `PAYME_TEST_MODE`);
+            empty in a real deployment.'
         providers:
           type: object
           additionalProperties:
@@ -27452,7 +27452,7 @@ components:
           $ref: '#/components/schemas/IntegrationModeEnum'
         bts:
           $ref: '#/components/schemas/IntegrationModeEnum'
-        eskiz:
+        devsms:
           $ref: '#/components/schemas/IntegrationModeEnum'
         email:
           $ref: '#/components/schemas/IntegrationModeEnum'
@@ -27467,8 +27467,8 @@ components:
       - billz
       - bts
       - click
+      - devsms
       - email
-      - eskiz
       - fcm
       - oauth
       - payme

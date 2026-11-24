@@ -265,12 +265,12 @@ secret) also get:
 - `providers`: one entry per **live** provider, `{"configured": bool, "last_sync_at": datetime | null,
   "last_sync_age_seconds": int | null}`. `configured` means the live adapter can be built and its
   `is_configured()` says yes (settings only: Billz key, shop, cash box and payment type; Payme merchant id and
-  key; Click numeric ids and secret key; BTS login, password and sender city/branch code; Eskiz email, password
-  and sender; FCM project id and key file; Yandex Delivery token, an https base URL, a three-letter currency and
+  key; Click numeric ids and secret key; BTS login, password and sender city/branch code; DevSMS API token and a
+  valid service name; FCM project id and key file; Yandex Delivery token, an https base URL, a three-letter currency and
   `ru`/`en`); a live adapter that refuses its settings when built is `false`. `last_sync_at` is the last successful
   Billz catalog sync, BTS polling run or Yandex `claims/bulk_info` poll (null for the other providers).
 - `sandbox`: the live providers configured against a sandbox (`bts` test host, `payme` test mode or sandbox
-  checkout, `eskiz` test sender 4546); informational, never fails readiness, and must be `[]` in production.
+  checkout); informational, never fails readiness, and must be `[]` in production.
 
 A live provider that is not configured makes `?ready=1` answer **503 for every caller**; outside the gate the body
 has no reason (`status: error` with every check `ok`). To see which provider, ask from inside:

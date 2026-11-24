@@ -41,11 +41,11 @@ from glowderma.customers.tests.test_m2_journeys import (  # noqa: F401 - fixture
     stocked,
     world,
 )
+from glowderma.integrations.devsms.registry import fake_sms
 from glowderma.integrations.email.registry import fake_email
-from glowderma.integrations.eskiz.registry import fake_eskiz
 
 pytestmark = pytest.mark.django_db
-CODE = "123456"  # ESKIZ_FAKE_CODE of the test settings: the fake SMS and the fake e-mail
+CODE = "123456"  # OTP_FAKE_CODE of the test settings: the fake SMS and the fake e-mail
 
 
 @pytest.fixture(autouse=True)
@@ -58,7 +58,7 @@ def clean_email() -> Iterator[None]:
 def verify_email(app: App, email: str, purpose: str) -> str:
     response = app.post(
         "auth/verify-code/",
-        {"email": email, "purpose": purpose, "code": settings.ESKIZ_FAKE_CODE},
+        {"email": email, "purpose": purpose, "code": settings.OTP_FAKE_CODE},
         auth=False,
     )
     assert response.status_code == 200, response.content
@@ -99,7 +99,7 @@ def attach_phone(app: App, phone: str, **reauth: Any) -> Any:
     sent = app.post("me/phone/code/", {"phone": phone})
     assert sent.status_code == 200, sent.content
     assert sent.json()["phone_mask"] == mask(phone) and sent.json()["purpose"] == "attach_phone"
-    assert any(CODE in m.text for m in fake_eskiz().sent if m.phone == phone)
+    assert any(m.code == CODE for m in fake_sms().sent if m.phone == phone)
     return app.post("me/phone/", {"phone": phone, "code": CODE, **reauth})
 
 

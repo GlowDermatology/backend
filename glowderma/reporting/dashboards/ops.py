@@ -71,13 +71,13 @@ PROVIDER_LABELS: dict[str, str] = {
     "click": "Click",
     "payme": "Payme",
     "bts": "BTS",
-    "eskiz": "Eskiz SMS",
+    "devsms": "DevSMS SMS",
     "email": "SMTP email",
     "fcm": "FCM push",
     "oauth": "OAuth (Google / Facebook)",
     "billz": "Billz",
 }
-PROVIDER_ORDER = ("click", "payme", "bts", "eskiz", "email", "fcm", "oauth", "billz")
+PROVIDER_ORDER = ("click", "payme", "bts", "devsms", "email", "fcm", "oauth", "billz")
 WEBHOOK_PROVIDERS: tuple[str, ...] = tuple(WebhookInbox.Provider.values)
 JOB_LABELS: dict[str, StrOrPromise] = {enums.JobKind.BILLZ_IMPORT.value: _("Billz import")}
 JOB_STATE_LABELS: dict[str, StrOrPromise] = {

@@ -26,7 +26,8 @@ from glowderma.customers.tests.p1_support import (
     reset_fakes,
     sent_codes,
 )
-from glowderma.integrations.eskiz.registry import fake_eskiz
+from glowderma.integrations.devsms.ports import OtpPurpose
+from glowderma.integrations.devsms.registry import fake_sms
 
 pytestmark = pytest.mark.django_db
 SEND = "/api/v1/auth/send-code/"
@@ -70,7 +71,7 @@ def test_send_code_issues_a_sealed_code_and_the_sms(django_capture_on_commit_cal
     row = SmsCode.objects.get()
     assert row.purpose == "signup" and row.sent_at is not None and row.provider_message_id == f"fake-{row.pk}"
     assert sent_codes() == ["123456"]
-    assert fake_eskiz().sent[0].text == "Glow Derma: tasdiqlash kodingiz 123456. Kodni hech kimga bermang."
+    assert fake_sms().sent[0].purpose == OtpPurpose.REGISTRATION  # DevSMS's sign-up template
     # the handler deleted the sealed payload after the definitive outcome
     assert cache.get(account_services.otp_payload_key(row.pk)) is None
 
@@ -90,14 +91,16 @@ def test_no_plain_code_at_rest(caplog: pytest.LogCaptureFixture) -> None:
     assert isinstance(sealed, str) and "123456" not in sealed
 
 
-def test_language_and_android_hash_line(django_capture_on_commit_callbacks: object) -> None:
+def test_the_sms_is_the_template_whatever_the_language_and_platform(
+    django_capture_on_commit_callbacks: object,
+) -> None:
+    """The SMS text is DevSMS's approved universal OTP template (Uzbek): the request language and the
+    platform change nothing in what is sent (docs/sms-template-audit.md)."""
     client = app_client(platform="android", HTTP_ACCEPT_LANGUAGE="ru")
-    with override_settings(ANDROID_SMS_APP_HASH="AbCdEfGhIjK"):
-        with django_capture_on_commit_callbacks(execute=True):  # type: ignore[operator]
-            assert send(client).status_code == 200
-    assert fake_eskiz().sent[0].text == (
-        "Glow Derma: ваш код подтверждения 123456. Никому его не сообщайте.\nAbCdEfGhIjK"
-    )
+    with django_capture_on_commit_callbacks(execute=True):  # type: ignore[operator]
+        assert send(client).status_code == 200
+    [sms] = fake_sms().sent
+    assert (sms.phone, sms.code, sms.purpose) == (PHONE, "123456", OtpPurpose.REGISTRATION)
 
 
 @pytest.mark.parametrize(
@@ -331,7 +334,7 @@ def test_consume_verification_rules(clock: list[Any]) -> None:
         account_services.consume_verification(token, purpose="register")
 
 
-def test_send_code_with_eskiz_rejected_and_down(django_capture_on_commit_callbacks: object) -> None:
+def test_send_code_with_sms_rejected_and_down(django_capture_on_commit_callbacks: object) -> None:
     with django_capture_on_commit_callbacks(execute=True):  # type: ignore[operator]
         assert send(app_client(), phone="+998907770000").status_code == 200
     rejected = SmsCode.objects.get(phone="+998907770000")

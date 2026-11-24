@@ -52,7 +52,7 @@ def test_health_ready_lists_every_provider_mode() -> None:
 
     modes = {
         f"{name}_MODE": "fake"
-        for name in ("OAUTH", "BILLZ", "FCM", "PAYME", "BTS", "ESKIZ", "EMAIL", "YANDEX_DELIVERY")
+        for name in ("OAUTH", "BILLZ", "FCM", "PAYME", "BTS", "DEVSMS", "EMAIL", "YANDEX_DELIVERY")
     }
     with override_settings(**modes, CLICK_MODE="live"):
         response = Client().get("/api/v1/health/?ready=1")
@@ -64,7 +64,7 @@ def test_health_ready_lists_every_provider_mode() -> None:
         "click": "live",
         "payme": "fake",
         "bts": "fake",
-        "eskiz": "fake",
+        "devsms": "fake",
         "email": "fake",
         "yandex": "fake",
         "ai": "fake",
@@ -92,7 +92,8 @@ def test_health_ready_lists_every_provider_mode() -> None:
 
 @pytest.mark.django_db
 def test_health_ready_flags_live_providers_on_a_sandbox() -> None:
-    """R9 / nit: BTS's test host, PAYME_TEST_MODE and Eskiz's test sender are visible to operators."""
+    """R9 / nit: BTS's test host and PAYME_TEST_MODE are visible to operators (DevSMS has no sandbox: its
+    shared sender 4546 is the production default)."""
     from django.test import override_settings
 
     with override_settings(
@@ -100,18 +101,16 @@ def test_health_ready_flags_live_providers_on_a_sandbox() -> None:
         BTS_BASE_URL="https://apitest.bts.uz:28345",
         PAYME_MODE="live",
         PAYME_TEST_MODE=True,
-        ESKIZ_MODE="live",
-        ESKIZ_SENDER="4546",
+        DEVSMS_MODE="live",
     ):
-        assert Client().get("/api/v1/health/?ready=1").json()["sandbox"] == ["bts", "payme", "eskiz"]
+        assert Client().get("/api/v1/health/?ready=1").json()["sandbox"] == ["bts", "payme"]
     with override_settings(
         BTS_MODE="live",
         BTS_BASE_URL="https://api.bts.uz",
         PAYME_MODE="live",
         PAYME_TEST_MODE=False,
         PAYME_CHECKOUT_URL="https://checkout.paycom.uz",
-        ESKIZ_MODE="live",
-        ESKIZ_SENDER="GlowDerma",
+        DEVSMS_MODE="live",
     ):
         assert Client().get("/api/v1/health/?ready=1").json()["sandbox"] == []
 
@@ -161,7 +160,7 @@ def test_provider_modes_serializer_follows_the_settings_map(monkeypatch: pytest.
         "click",
         "payme",
         "bts",
-        "eskiz",
+        "devsms",
         "email",
         "yandex",
         "ai",
@@ -174,7 +173,7 @@ def test_provider_modes_serializer_follows_the_settings_map(monkeypatch: pytest.
 
 ALL_FAKE = {
     f"{name}_MODE": "fake"
-    for name in ("OAUTH", "BILLZ", "FCM", "CLICK", "PAYME", "BTS", "ESKIZ", "EMAIL", "YANDEX_DELIVERY")
+    for name in ("OAUTH", "BILLZ", "FCM", "CLICK", "PAYME", "BTS", "DEVSMS", "EMAIL", "YANDEX_DELIVERY")
 }
 LIVE_BILLZ = {
     "BILLZ_MODE": "live",

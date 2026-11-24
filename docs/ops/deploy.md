@@ -68,14 +68,14 @@ fake never pretends an effect happened:
 | Click / Payme | **No money moves**: not offered at checkout (`payment_providers` without them), callbacks refused (`401`, inbox row `fake_mode`); a Click Complete of a transaction prepared while Click was live is accepted and reversed by hand. Never switch live → fake while the provider holds open money (the worker logs ERROR `providers.fake_with_open_money` at start) |
 | BTS | **Pickup only** (no home delivery), callbacks refused, no parcel invented |
 | Yandex Delivery | **No courier**: no Yandex option at checkout (`settings/public` `delivery.providers` without `yandex`), the callback refused (`403`, inbox row `fake_mode`), the poll does nothing, the fake invents no price or claim. Do not switch live → fake while claims are open (§13) |
-| Eskiz | **No SMS delivered**: nobody can register, reset a password or sign in on a new device (the code is never sent) |
+| DevSMS | **No SMS delivered**: nobody can register, reset a password or sign in on a new device (the code is never sent) |
 | FCM | **No push reaches a device**: the fake logs ids only and reports the pushes sent; inbox rows are written as usual |
 | OAuth | Social sign-in off for staff and customers (password sign-in works) |
 | AI (`AI_MODE`) / Vault (`VAULT_MODE`) | **No AI assistant**: generation and key rotation answer `ai_not_configured`; product editing works as usual ([ai-assistant.md](ai-assistant.md)) |
 
-So a fake deployment is a demo/staging posture: real customers need live Billz (selling), live Eskiz (sign-up),
+So a fake deployment is a demo/staging posture: real customers need live Billz (selling), live DevSMS (sign-up),
 live Click and/or Payme (payment), live BTS and/or live Yandex Delivery (delivery) and live FCM (pushes). The local/test development switches
-(`FAKE_NOW`, `FAKE_PAYMENTS_ENABLED`, `FAKE_SCENARIO_HEADER_ENABLED`, `ESKIZ_FAKE_CODE`, `POS_API_KEYS`) are refused by
+(`FAKE_NOW`, `FAKE_PAYMENTS_ENABLED`, `FAKE_SCENARIO_HEADER_ENABLED`, `OTP_FAKE_CODE`, `POS_API_KEYS`) are refused by
 the production settings whatever the modes.
 
 **Staging: `config.settings.staging`.** Staging runs its own settings module, which imports
@@ -139,11 +139,12 @@ writes no query string to any log — the access logs and the error line of a re
 while it restarts) alike — and gunicorn logs no query string either, so the secret stays out of the logs; the inbox
 stores no query string either. Pay a delivery order: the parcel appears in the BTS cabinet with our `clientId`.
 
-**Eskiz** ([eskiz.md](../integrations/eskiz.md) sandbox checklist): approved **sender nickname** (production refuses
-`4546`, the shared test sender) and approved **templates** of the OTP text in uz/ru/en exactly as rendered (with the
-Android hash variant when `ANDROID_SMS_APP_HASH` is set); set `ESKIZ_MODE=live`, `ESKIZ_EMAIL`, `ESKIZ_PASSWORD`,
-`ESKIZ_SENDER`; leave `ESKIZ_CALLBACK_URL` empty. Register a test phone through the app: the SMS arrives with the
-catalog text. Watch the Eskiz balance.
+**DevSMS** ([devsms.md](../integrations/devsms.md) activation checklist): a DevSMS account with a balance and a
+personal API key (`sms:send`, `sms:read`); no sender nickname and no template approval (the four universal OTP
+templates from the shared sender 4546). Set `DEVSMS_API_TOKEN` (secret) and `DEVSMS_MODE=live`; the other
+`DEVSMS_*` keys have defaults (`DEVSMS_SERVICE_NAME=GlowDerma`). Register a test phone through the app: the SMS
+arrives from 4546 with "GlowDerma" in the template text. Watch the DevSMS balance and the ERROR lines
+`devsms.service_name_rejected`, `devsms.otp_suspended`, `devsms.insufficient_balance`.
 
 **FCM** ([fcm.md](../integrations/fcm.md) sandbox checklist): service account with the "Firebase Cloud Messaging API
 Admin" role, FCM HTTP v1 API enabled; **mount the key** as `/srv/glowderma/secrets/fcm-service-account.json` (§3.3),

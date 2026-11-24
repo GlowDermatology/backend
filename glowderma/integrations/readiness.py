@@ -4,9 +4,9 @@
 that refuses its settings raises ``ImproperlyConfigured`` / ``ValueError`` → not configured) and
 ``is_configured()`` must say yes (Billz: the key and the shop, cash box and payment-type ids; Payme: the
 merchant id and key; Click: the three numeric ids, not ``00000``, and the secret key; BTS: login, password,
-sender city code and, for a branch pickup, the branch code; Eskiz: email, password and sender; e-mail
-(``EMAIL_MODE=smtp``): host and sender; FCM: the project id and an existing key file; Yandex Delivery: the
-token, an https base URL, the currency and the language; AI: the provider adapter exists (its key is read
+sender city code and, for a branch pickup, the branch code; DevSMS: the API token and a valid service name;
+e-mail (``EMAIL_MODE=smtp``): host and sender; FCM: the project id and an existing key file; Yandex Delivery:
+the token, an https base URL, the currency and the language; AI: the provider adapter exists (its key is read
 from Vault per job); Vault: the agent proxy URL is set). Building an adapter reads settings only and sends
 nothing. ``last_syncs()`` reads ``IntegrationState.last_sync_at`` of the live providers that sync (Billz
 catalog sync, BTS and Yandex polling).
@@ -22,8 +22,8 @@ from glowderma.core import integration_modes
 from glowderma.integrations.billz.registry import get_billz
 from glowderma.integrations.bts.registry import get_bts
 from glowderma.integrations.click.registry import get_click
+from glowderma.integrations.devsms.registry import get_sms_port
 from glowderma.integrations.email.registry import get_email_port
-from glowderma.integrations.eskiz.registry import get_eskiz_port
 from glowderma.integrations.fcm.registry import get_fcm_port
 from glowderma.integrations.llm.registry import get_content_model
 from glowderma.integrations.models import IntegrationState
@@ -45,7 +45,7 @@ BUILDERS: dict[str, Callable[[], Iterable[object]]] = {
     "click": lambda: [get_click()],
     "payme": lambda: [get_payme()],
     "bts": lambda: [get_bts()],
-    "eskiz": lambda: [get_eskiz_port()],
+    "devsms": lambda: [get_sms_port()],
     "email": lambda: [get_email_port()],
     "yandex": lambda: [get_yandex_delivery()],
     "ai": lambda: [get_content_model()],

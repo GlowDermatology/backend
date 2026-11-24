@@ -23,7 +23,7 @@ from glowderma.accounts.tests.factories import start_test_session
 from glowderma.core import outbox
 from glowderma.core.api.exceptions import AuthFailed
 from glowderma.core.models import OutboxMessage
-from glowderma.integrations.eskiz import registry as eskiz_registry
+from glowderma.integrations.devsms import registry as sms_registry
 from glowderma.integrations.oauth.fake import FakeApple
 from glowderma.integrations.oauth.registry import fake_apple
 
@@ -33,10 +33,10 @@ FID = "fid-fix-accounts-01"
 
 @pytest.fixture(autouse=True)
 def clean_fakes() -> Any:
-    eskiz_registry.fake_eskiz().sent.clear()
+    sms_registry.fake_sms().sent.clear()
     fake_apple().revoked.clear()
     yield
-    eskiz_registry.fake_eskiz().sent.clear()
+    sms_registry.fake_sms().sent.clear()
     fake_apple().revoked.clear()
 
 
@@ -63,7 +63,7 @@ def test_sms_send_reads_the_payload_before_claiming(monkeypatch: pytest.MonkeyPa
     assert SmsCode.objects.get(phone=PHONE).sent_at is None  # nothing claimed
     monkeypatch.setattr(otp_delivery, "cache", cache)
     tasks.send_sms(message)  # the outbox retry sends
-    assert len(eskiz_registry.fake_eskiz().sent) == 1
+    assert len(sms_registry.fake_sms().sent) == 1
     assert SmsCode.objects.get(phone=PHONE).sent_at is not None
 
 
@@ -80,7 +80,7 @@ def test_sms_send_survives_a_payload_delete_failure_after_sending(monkeypatch: p
 
     monkeypatch.setattr(otp_delivery, "cache", DeleteFails())
     tasks.send_sms(message)  # no exception: the SMS went out, the outbox must not retry
-    assert len(eskiz_registry.fake_eskiz().sent) == 1
+    assert len(sms_registry.fake_sms().sent) == 1
 
 
 def revoke_message(identity_id: int, token: str, client_id: str = "uz.glowderma.app") -> OutboxMessage:

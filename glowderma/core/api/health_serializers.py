@@ -39,7 +39,7 @@ class HealthSerializer(serializers.Serializer[dict[str, Any]]):
         child=serializers.CharField(),
         required=False,
         help_text="With `integrations`: the live providers configured against a sandbox (BTS test host, "
-        "Payme sandbox checkout / `PAYME_TEST_MODE`, Eskiz test sender); empty in a real deployment.",
+        "Payme sandbox checkout / `PAYME_TEST_MODE`); empty in a real deployment.",
     )
     providers = serializers.DictField(
         child=ProviderReadinessSerializer(),

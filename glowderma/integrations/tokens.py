@@ -1,4 +1,4 @@
-"""Provider bearer tokens shared by every worker process (Eskiz, BTS): kept **only** in the Django cache
+"""Provider bearer tokens shared by every worker process (BTS): kept **only** in the Django cache
 (Redis DB 0 in production) and fetched single-flight across processes through a ``cache.add`` lock.
 
 * :meth:`SharedToken.get` returns the cached token, or fetches one under the lock (the first caller logs in,

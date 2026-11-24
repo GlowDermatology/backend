@@ -24,7 +24,6 @@ from glowderma.accounts.tasks.email_notices import (
 )
 from glowderma.accounts.tasks.message_rendering import (
     email_parts,
-    sms_text,
     staff_link_parts,
 )
 from glowderma.accounts.tasks.otp_delivery import (
@@ -61,6 +60,5 @@ __all__ = [
     "send_email_notice",
     "send_sms",
     "send_staff_password_link",
-    "sms_text",
     "staff_link_parts",
 ]

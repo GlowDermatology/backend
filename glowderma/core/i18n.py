@@ -1167,11 +1167,6 @@ CATALOG: Final[dict[str, dict[str, str]]] = {
         "ru": "К аккаунту привязан новый email. Если это были не вы, свяжитесь с продавцом.",
         "en": "A new e-mail was linked to your account. If this wasn't you, contact the seller.",
     },
-    "sms.otp": {
-        "uz": "Glow Derma: tasdiqlash kodingiz {code}. Kodni hech kimga bermang.",
-        "ru": "Glow Derma: ваш код подтверждения {code}. Никому его не сообщайте.",
-        "en": "Glow Derma: your verification code is {code}. Do not share it with anyone.",
-    },
     # E-mail OTP texts (hybrid identity, C§2.14.4), rendered into accounts/email/otp.{txt,html}; the code is a
     # template variable, never a catalog placeholder.
     "email.otp.subject": {

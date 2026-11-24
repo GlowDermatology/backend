@@ -25,7 +25,7 @@ PROVIDER_MODE_SETTINGS: dict[str, str] = {
     "click": "CLICK_MODE",
     "payme": "PAYME_MODE",
     "bts": "BTS_MODE",
-    "eskiz": "ESKIZ_MODE",
+    "devsms": "DEVSMS_MODE",
     "email": "EMAIL_MODE",
     "yandex": "YANDEX_DELIVERY_MODE",
     "ai": "AI_MODE",  # the AI assistant's content model (integrations.llm)
@@ -131,11 +131,10 @@ def online_sales_enabled() -> bool:
     return not fake_in_production("billz")
 
 
-# Live providers pointed at a sandbox: BTS's documented test host, Payme's sandbox checkout, Eskiz's test
-# sender (the production settings refuse it; other settings only warn).
+# Live providers pointed at a sandbox: BTS's documented test host and Payme's sandbox checkout (other settings
+# only warn).
 BTS_SANDBOX_HOSTS = frozenset({"apitest.bts.uz"})
 PAYME_SANDBOX_HOSTS = frozenset({"test.paycom.uz"})
-ESKIZ_TEST_SENDER = "4546"
 
 
 def sandbox_providers() -> list[str]:
@@ -149,7 +148,4 @@ def sandbox_providers() -> list[str]:
         host = urlsplit(str(getattr(settings, "PAYME_CHECKOUT_URL", ""))).hostname or ""
         if bool(getattr(settings, "PAYME_TEST_MODE", False)) or host in PAYME_SANDBOX_HOSTS:
             found.append("payme")
-    if provider_mode("eskiz") == enums.IntegrationMode.LIVE:
-        if str(getattr(settings, "ESKIZ_SENDER", "")) == ESKIZ_TEST_SENDER:
-            found.append("eskiz")
     return found

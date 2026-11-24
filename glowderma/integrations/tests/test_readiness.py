@@ -21,7 +21,7 @@ LIVE_BILLZ = {
 }
 ALL_LIVE = {
     f"{name}_MODE": "live"
-    for name in ("OAUTH", "BILLZ", "FCM", "CLICK", "PAYME", "BTS", "ESKIZ", "EMAIL", "YANDEX_DELIVERY")
+    for name in ("OAUTH", "BILLZ", "FCM", "CLICK", "PAYME", "BTS", "DEVSMS", "EMAIL", "YANDEX_DELIVERY")
 }
 
 
@@ -51,7 +51,7 @@ def test_live_adapters_without_their_credentials_are_not_configured() -> None:
             "click": False,
             "payme": False,
             "bts": False,
-            "eskiz": False,
+            "devsms": False,
             "email": False,
             "yandex": False,
         }
@@ -68,9 +68,8 @@ LIVE_CREDENTIALS = {
     "BTS_PASSWORD": "bts-password",
     "BTS_SENDER_CITY_CODE": "1",
     "BTS_PICKUP_TYPE": "courier",
-    "ESKIZ_EMAIL": "ops@example.uz",
-    "ESKIZ_PASSWORD": "eskiz-password",
-    "ESKIZ_SENDER": "GlowDerma",
+    "DEVSMS_API_TOKEN": "devsms-token",
+    "DEVSMS_SERVICE_NAME": "GlowDerma",
     "FCM_PROJECT_ID": "glowderma-prod",
     "SMTP_HOST": "smtp.example.uz",
     "YANDEX_DELIVERY_TOKEN": "yandex-oauth-token",
@@ -95,7 +94,8 @@ def test_live_adapters_with_their_credentials_are_configured(tmp_path: Path) -> 
         ("bts", {"BTS_PASSWORD": ""}),
         ("bts", {"BTS_SENDER_CITY_CODE": ""}),
         ("bts", {"BTS_PICKUP_TYPE": "branch", "BTS_SENDER_BRANCH_CODE": ""}),
-        ("eskiz", {"ESKIZ_SENDER": ""}),
+        ("devsms", {"DEVSMS_API_TOKEN": " "}),
+        ("devsms", {"DEVSMS_SERVICE_NAME": "Glow_Derma"}),
         ("email", {"SMTP_HOST": ""}),
         ("email", {"EMAIL_FROM": "no-address"}),
         ("fcm", {"FCM_CREDENTIALS_FILE": "/nonexistent/fcm.json"}),

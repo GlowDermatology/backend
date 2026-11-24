@@ -5,18 +5,18 @@ from django.test import override_settings
 
 from glowderma.core import integration_modes
 
-ALL = ("OAUTH", "BILLZ", "FCM", "CLICK", "PAYME", "BTS", "ESKIZ", "EMAIL", "YANDEX_DELIVERY", "AI", "VAULT")
+ALL = ("OAUTH", "BILLZ", "FCM", "CLICK", "PAYME", "BTS", "DEVSMS", "EMAIL", "YANDEX_DELIVERY", "AI", "VAULT")
 
 
 def modes(mode: str, **overrides: str) -> dict[str, str]:
     return {**{f"{name}_MODE": mode for name in ALL}, **overrides}
 
 
-def test_eskiz_is_reported_with_the_other_providers() -> None:
-    assert integration_modes.PROVIDER_MODE_SETTINGS["eskiz"] == "ESKIZ_MODE"
-    with override_settings(**modes("fake", ESKIZ_MODE="live")):
-        assert integration_modes.provider_modes()["eskiz"] == "live"
-        assert "eskiz" not in integration_modes.fake_providers()
+def test_devsms_is_reported_with_the_other_providers() -> None:
+    assert integration_modes.PROVIDER_MODE_SETTINGS["devsms"] == "DEVSMS_MODE"
+    with override_settings(**modes("fake", DEVSMS_MODE="live")):
+        assert integration_modes.provider_modes()["devsms"] == "live"
+        assert "devsms" not in integration_modes.fake_providers()
 
 
 @pytest.mark.parametrize(
