@@ -35,9 +35,13 @@ def job_url(job_id: int, action: str = "") -> str:
 
 
 def make_product(**fields: Any) -> Product:
+    """A product whose data holds no number but 30: the factory's sequence-numbered POS label
+    (``TEST PRODUCT 5 30ML``) would otherwise make a suggested "5%" a supported number in one test order and
+    not in another."""
     return ProductFactory.create(
         name_uz="Gialuron serum",
         description_uz="Namlovchi serum, 30 ml.",
+        billz_name="GIALURON SERUM 30ML",
         status=enums.ProductStatus.HIDDEN,
         **fields,
     )
