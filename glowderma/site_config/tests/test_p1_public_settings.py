@@ -52,7 +52,7 @@ def test_shape_and_languages() -> None:
     assert data["pickup_address"] == "Ташкент, Юнусабад"
     assert data["terms"] == "Shartlar"  # ru empty → uz
     assert data["terms_version"] == "2026-10-01"
-    assert data["payment_providers"] == ["click", "payme"]
+    assert data["payment_providers"] == ["click", "payme", "uzum"]
     assert data["fulfilment_methods"] == ["delivery", "pickup"]
     assert data["delivery"] == {"providers": ["yandex", "bts"], "default_provider": "yandex"}
     assert data["online_sales_enabled"] is True

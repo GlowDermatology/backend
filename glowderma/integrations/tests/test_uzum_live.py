@@ -27,7 +27,11 @@ def fast_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def uzum(script: Script, hosts: list[str] | None = None) -> LiveUzum:
     return LiveUzum(
-        base_url=f"{BASE}/", terminal_id=TERMINAL, api_key=API_KEY, redirect_hosts=hosts, transport=script.transport
+        base_url=f"{BASE}/",
+        terminal_id=TERMINAL,
+        api_key=API_KEY,
+        redirect_hosts=hosts,
+        transport=script.transport,
     )
 
 
@@ -88,7 +92,13 @@ def test_only_https_payment_pages_on_the_allowed_hosts_are_trusted() -> None:
 
 def test_callback_fields_keep_the_allow_list_only() -> None:
     fields = protocol.callback_fields(
-        {"orderId": ORDER_ID, "orderNumber": "gd-1-0a1b2c3d", "rrn": "123", "cardType": 2, "operationState": 1}
+        {
+            "orderId": ORDER_ID,
+            "orderNumber": "gd-1-0a1b2c3d",
+            "rrn": "123",
+            "cardType": 2,
+            "operationState": 1,
+        }
     )
     assert fields == {"orderId": ORDER_ID, "orderNumber": "gd-1-0a1b2c3d"}
 

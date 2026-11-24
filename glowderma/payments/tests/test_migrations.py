@@ -48,6 +48,7 @@ def test_no_further_payments_migrations() -> None:
         "0005_uz_verbose_names.py",  # state only: verbose names of the ops console
         "0006_uz_choice_labels.py",  # state only: Uzbek choice labels
         "0007_uz_field_labels.py",  # state only: Uzbek field labels
+        "0008_uzum_provider.py",  # state only: the Uzum provider and refund manual reason choices
     ]
 
 
@@ -83,6 +84,7 @@ def test_migrate_zero_and_forward_again() -> None:
         "0005_uz_verbose_names",
         "0006_uz_choice_labels",
         "0007_uz_field_labels",
+        "0008_uzum_provider",
     }
     call_command("migrate", verbosity=0)  # re-apply what depends on payments (commerce.0008, the backfill)
     refund = RefundFactory.create(payment=PaymentFactory.create())

@@ -17,7 +17,7 @@ from glowderma.commerce import selectors, services, tasks, uzum_flow
 from glowderma.commerce.models import Order, OrderEvent
 from glowderma.commerce.tests.support import admin, place, seed_policies
 from glowderma.commerce.tests.webhook_support import at, payme, prepare, real_now, ref, tiyin
-from glowderma.core import enums, integration_modes, labels
+from glowderma.core import enums, integration_modes, labels, timeutils
 from glowderma.core.models import OutboxMessage
 from glowderma.integrations.models import IntegrationState, WebhookInbox
 from glowderma.integrations.payme import sandbox as payme_sandbox
@@ -46,6 +46,11 @@ def pay(client: APIClient, order: Order, **extra: Any) -> Any:
         HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
         **extra,
     )
+
+
+def expires(order: Order) -> datetime:
+    assert order.reservation_expires_at is not None
+    return order.reservation_expires_at
 
 
 def uzum_order(customer: Customer, now: datetime, **kwargs: Any) -> Order:
@@ -100,7 +105,9 @@ def test_pay_registers_one_form_and_hands_it_out_again(
         second = pay(customer_client, order).json()
     assert first["provider"] == "uzum" and first["web_url"] == second["web_url"]
     assert first["payment_id"] == second["payment_id"] and first["app_url"] is None
-    assert fake_uzum.calls == [("register", Payment.objects.get(pk=first["payment_id"]).provider_state["order_number"])]
+    assert fake_uzum.calls == [
+        ("register", Payment.objects.get(pk=first["payment_id"]).provider_state["order_number"])
+    ]
     payment = Payment.objects.get(pk=first["payment_id"])
     assert protocol.payment_id_of(payment.provider_state["order_number"], "gd") == payment.pk
     status = fake_uzum.FakeUzum().order_status(payment.provider_txn_id)
@@ -129,7 +136,7 @@ def test_no_form_is_registered_that_could_outlive_the_reservation_grace(
     customer_client: APIClient, customer: Customer, now: datetime
 ) -> None:
     order = uzum_order(customer, now)
-    late = order.reservation_expires_at - timedelta(seconds=60)
+    late = expires(order) - timedelta(seconds=60)
     with at(late):
         answer = pay(customer_client, order)
     assert answer.status_code == 409 and answer.json()["code"] == "order_expired"
@@ -142,7 +149,7 @@ def test_a_spent_form_is_replaced_by_a_new_payment(
     order = uzum_order(customer, now)
     first = registered(customer_client, order, now + timedelta(seconds=5))
     spent = datetime.fromisoformat(first.provider_state["session_expires_at"]) + timedelta(minutes=3)
-    if spent + timedelta(seconds=720) > order.reservation_expires_at + timedelta(seconds=300):
+    if spent + timedelta(seconds=720) > expires(order) + timedelta(seconds=300):
         Order.objects.filter(pk=order.pk).update(reservation_expires_at=spent + timedelta(minutes=20))
     second = registered(customer_client, order, spent)
     first.refresh_from_db()
@@ -152,16 +159,20 @@ def test_a_spent_form_is_replaced_by_a_new_payment(
 # --- the callback is a hint ------------------------------------------------------------------------------
 
 
-def test_a_callback_without_the_token_is_refused(customer_client: APIClient, customer: Customer, now: datetime) -> None:
+def test_a_callback_without_the_token_is_refused(
+    customer_client: APIClient, customer: Customer, now: datetime
+) -> None:
     payment = registered(customer_client, uzum_order(customer, now), now + timedelta(seconds=5))
-    answer = callback(payment, token="wrong")
+    answer = callback(payment, token="wrong")  # noqa: S106 - a wrong test token
     assert answer.status_code == 401
     assert OutboxMessage.objects.filter(topic="uzum.sync_order").count() == 0
     (row,) = WebhookInbox.objects.filter(provider="uzum")
     assert row.event_key.startswith("rejected:") and "token" not in row.path
 
 
-def test_a_forged_success_callback_pays_nothing(customer_client: APIClient, customer: Customer, now: datetime) -> None:
+def test_a_forged_success_callback_pays_nothing(
+    customer_client: APIClient, customer: Customer, now: datetime
+) -> None:
     order = uzum_order(customer, now)
     payment = registered(customer_client, order, now + timedelta(seconds=5))
     assert callback(payment).status_code == 200  # Uzum's status still says REGISTERED
@@ -180,7 +191,9 @@ def test_a_callback_for_another_order_number_is_ignored(
     assert OutboxMessage.objects.filter(topic="uzum.sync_order").count() == 0
 
 
-def test_the_status_sync_pays_the_order_once(customer_client: APIClient, customer: Customer, now: datetime) -> None:
+def test_the_status_sync_pays_the_order_once(
+    customer_client: APIClient, customer: Customer, now: datetime
+) -> None:
     order = uzum_order(customer, now)
     payment = registered(customer_client, order, now + timedelta(seconds=5))
     fake_uzum.complete(payment.provider_txn_id)
@@ -231,7 +244,10 @@ def test_a_declined_payment_fails_and_the_order_stays_payable(
         assert uzum_flow.sync_payment(payment.pk) == "failed"
     payment.refresh_from_db()
     order.refresh_from_db()
-    assert (payment.status, payment.error_code) == ("failed", "declined") and order.status == "awaiting_payment"
+    assert (payment.status, payment.error_code) == (
+        "failed",
+        "declined",
+    ) and order.status == "awaiting_payment"
     assert OrderEvent.objects.filter(order=order, type="payment_failed").exists()
 
 
@@ -282,9 +298,9 @@ def test_expiry_never_fails_a_form_that_may_still_take_the_money(
 ) -> None:
     order = uzum_order(customer, now)
     payment = registered(customer_client, order, now + timedelta(seconds=5))
-    expires = order.reservation_expires_at
-    assert not services.expire_reservation(order.pk, at=expires + timedelta(seconds=10))  # in grace
-    assert services.expire_reservation(order.pk, at=expires + timedelta(minutes=6))
+    end = expires(order)
+    assert not services.expire_reservation(order.pk, at=end + timedelta(seconds=10))  # in grace
+    assert services.expire_reservation(order.pk, at=end + timedelta(minutes=6))
     payment.refresh_from_db()
     assert payment.status == "failed"  # the session ended inside the grace: failable
 
@@ -333,7 +349,9 @@ def test_a_refund_is_accepted_then_closed_from_the_status(
     assert refund.state == "requested" and refund.manual_reason == ""
     run_refunds(order)
     refund.refresh_from_db()
-    assert refund.state == "submitting" and refund.provider_state["operation_id"] == protocol.operation_id(refund.pk)
+    assert refund.state == "submitting" and refund.provider_state["operation_id"] == protocol.operation_id(
+        refund.pk
+    )
     assert refund.provider_state["accepted_at"]
     sync_messages()
     refund.refresh_from_db()
@@ -355,7 +373,7 @@ def test_a_lost_refund_answer_is_resent_with_the_same_operation_id(
     refund = Refund.objects.get(payment=payment)
     assert refund.state == "submitting" and "accepted_at" not in refund.provider_state
     Order.objects.filter(pk=order.pk).update(metadata={})
-    Refund.objects.filter(pk=refund.pk).update(last_attempt_at=refund.last_attempt_at - timedelta(minutes=10))
+    Refund.objects.filter(pk=refund.pk).update(last_attempt_at=timeutils.now() - timedelta(minutes=10))
     uzum_flow.reconcile()  # resend → 3028 (the operation exists) → accepted; the sync closes it
     sync_messages()
     refund.refresh_from_db()
@@ -363,7 +381,9 @@ def test_a_lost_refund_answer_is_resent_with_the_same_operation_id(
     assert [method for method, _ in fake_uzum.calls].count("refund") == 2
 
 
-def test_a_refused_refund_fails_for_staff(customer_client: APIClient, customer: Customer, now: datetime) -> None:
+def test_a_refused_refund_fails_for_staff(
+    customer_client: APIClient, customer: Customer, now: datetime
+) -> None:
     order, payment = paid_order(customer_client, customer, now, fake={"uzum": {"refund": "rejected"}})
     services.cancel_order(order.pk, "qaytarish", admin().pk)
     run_refunds(order)

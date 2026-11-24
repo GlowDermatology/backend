@@ -94,6 +94,7 @@ TOPIC_PAYLOADS: dict[str, dict[str, Any]] = {
         "courier_claim_id": 16,
         "request_id": "3f2b8c1e-6d4a-4f7b-9a0e-1c2d3e4f5a6b",
     },
+    "uzum.sync_order": {"payment_id": 41},
     "yandex.sync_claim": {
         "order_id": 27,
         "claim_id": "7f5c2a9b1d3e4f60a1b2c3d4e5f60718",

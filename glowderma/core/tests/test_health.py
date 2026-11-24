@@ -52,7 +52,7 @@ def test_health_ready_lists_every_provider_mode() -> None:
 
     modes = {
         f"{name}_MODE": "fake"
-        for name in ("OAUTH", "BILLZ", "FCM", "PAYME", "BTS", "DEVSMS", "EMAIL", "YANDEX_DELIVERY")
+        for name in ("OAUTH", "BILLZ", "FCM", "PAYME", "UZUM", "BTS", "DEVSMS", "EMAIL", "YANDEX_DELIVERY")
     }
     with override_settings(**modes, CLICK_MODE="live"):
         response = Client().get("/api/v1/health/?ready=1")
@@ -63,6 +63,7 @@ def test_health_ready_lists_every_provider_mode() -> None:
         "fcm": "fake",
         "click": "live",
         "payme": "fake",
+        "uzum": "fake",
         "bts": "fake",
         "devsms": "fake",
         "email": "fake",
@@ -159,6 +160,7 @@ def test_provider_modes_serializer_follows_the_settings_map(monkeypatch: pytest.
         "fcm",
         "click",
         "payme",
+        "uzum",
         "bts",
         "devsms",
         "email",

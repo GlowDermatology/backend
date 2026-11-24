@@ -411,7 +411,9 @@ def test_delete_me_refused_while_a_payment_is_in_flight(
     from glowderma.commerce import selectors as commerce_selectors
 
     order = OrderFactory.create(customer=signed.customer)
-    monkeypatch.setattr(commerce_selectors, "customer_inflight_order", lambda customer_id: order.pk)
+    monkeypatch.setattr(
+        commerce_selectors, "customer_inflight_order", lambda customer_id: (order.pk, "click")
+    )
     response = signed.client.delete(ME, {"password": PASSWORD})
     assert (response.status_code, response.data["code"]) == (409, "payment_in_progress")
     assert response.data["details"] == {"provider": "click", "order_id": order.pk}

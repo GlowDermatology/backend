@@ -1,7 +1,8 @@
 """The Uzum Checkout flows of an order (docs/integrations/uzum.md): start a payment, learn its outcome,
 reconcile, refund.
 
-**Starting a payment** (:func:`payment_link`, ``PayView`` under the Order lock): a payment row owns at most
+**Starting a payment** (:func:`prepare_form`, before ``PayView``'s ``@idempotent`` transaction; no row lock
+is held while Uzum answers): a payment row owns at most
 one Uzum order. While its hosted form is live the stored link is handed out again (a second tap never
 registers a second form, so the customer cannot pay twice). A spent form — its session is over — is replaced:
 the row fails ``abandoned`` and a new pending row registers a new form under a fresh order number
@@ -34,7 +35,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -42,7 +42,7 @@ from django.conf import settings
 from django.db import transaction
 
 from glowderma.accounts.models import Customer
-from glowderma.commerce import services, topics
+from glowderma.commerce import locks, selectors, services, topics
 from glowderma.commerce.models import Order
 from glowderma.core import alerts, enums, integration_modes, outbox, timeutils
 from glowderma.core.api.exceptions import OrderExpired, ProviderUnavailable
@@ -90,40 +90,78 @@ def _session_ends(state: dict[str, Any]) -> datetime | None:
     return None
 
 
-@dataclass(frozen=True, slots=True)
-class PaymentLink:
-    payment: payment_selectors.PaymentRow
-    web_url: str
+def form_window_open(order: Order, now: datetime) -> bool:
+    """Whether a new form registered now would end inside the reservation's grace (module docstring)."""
+    expires = order.reservation_expires_at
+    timeout = timedelta(seconds=int(settings.UZUM_SESSION_TIMEOUT_SECS))
+    grace = timedelta(seconds=int(settings.PAYMENT_IN_FLIGHT_GRACE_SECONDS))
+    return expires is not None and now + timeout + UZUM_SETTLE_MARGIN <= expires + grace
 
 
-def payment_link(
-    order: Order,
+def stored_link(payment: payment_selectors.PaymentRow, now: datetime) -> str | None:
+    """The payment's registered form while its session lives, else ``None``."""
+    state = payment.provider_state if isinstance(payment.provider_state, dict) else {}
+    url = state.get("redirect_url")
+    if payment.provider != PROVIDER or payment.status != enums.PaymentStatus.PENDING:
+        return None
+    if not state.get("registered_at") or uzum_session_over(state, now) or not isinstance(url, str) or not url:
+        return None
+    return url
+
+
+def prepare_form(order_id: int, *, customer: Customer, language: str, return_url: str) -> None:
+    """Register the order's Uzum form if it needs one — ``PayView.post`` runs it **before** its
+    ``@idempotent`` transaction, holding no row lock while Uzum answers (AGENTS.md: plan under the Order lock
+    and commit, call the provider holding only the advisory lock ``uzum:pay:{order_id}``, re-lock and
+    record). An order the pay handler will refuse is left alone (the handler answers why); a live form is
+    kept; a spent one is replaced by a new pending payment. Raises ``OrderExpired`` (too little reservation
+    left), ``PaymentInProgress`` (a spent form that may still take money) and ``ProviderUnavailable`` (Uzum
+    did not register it: nothing is attached, the next tap tries again with a new order number)."""
+    now = timeutils.now()
+    with transaction.atomic():
+        order = services.lock_order(order_id)
+        if order.status != enums.OrderStatus.AWAITING_PAYMENT or selectors.honoured_paid(order.pk):
+            return
+        if PROVIDER not in integration_modes.payable_providers():
+            return
+        if not selectors.is_payable(order, None, now, attaching=True):
+            return
+        flying = selectors.inflight_payment(order.pk, now)
+        if flying is not None and flying.provider != PROVIDER:
+            return
+        pending = payment_selectors.active_payment(order.pk, enums.PaymentStatus.PENDING)
+        if pending is not None and stored_link(pending, now) is not None:
+            return
+        renew = pending is not None and pending.provider == PROVIDER and bool(pending.transaction_id)
+        payment = services.ensure_payable_payment(order.pk, PROVIDER, renew=renew, at=now)
+        if not form_window_open(order, now):
+            raise OrderExpired()
+        scenario = services.fake_scenario(order, PROVIDER)
+    try:
+        with locks.uzum_pay_lock(order_id):
+            current = payment_selectors.get_payment(payment.id)
+            if current is None or current.status != enums.PaymentStatus.PENDING or current.transaction_id:
+                return  # another tap registered it (or the payment moved on) meanwhile
+            _register(
+                order_id, current, scenario, customer=customer, language=language, return_url=return_url
+            )
+    except locks.UzumBusy:
+        return  # another tap is registering right now; the handler answers what is stored
+
+
+def _register(
+    order_id: int,
     payment: payment_selectors.PaymentRow,
+    scenario: dict[str, Any],
     *,
     customer: Customer,
     language: str,
     return_url: str,
-    now: datetime,
-) -> PaymentLink:
-    """The hosted form of the order's pending Uzum payment (module docstring). The caller holds the Order
-    lock and checked that the order is payable; raises ``OrderExpired`` (too little reservation left for a
-    new form), ``PaymentInProgress`` (a spent form that may still take money) or ``ProviderUnavailable``
-    (Uzum did not register the form: nothing is stored, the next tap tries again)."""
-    state = payment.provider_state if isinstance(payment.provider_state, dict) else {}
-    if state.get("registered_at"):
-        url = state.get("redirect_url")
-        if not uzum_session_over(state, now) and isinstance(url, str) and url:
-            return PaymentLink(payment, url)
-        payment = services.ensure_payable_payment(order.pk, PROVIDER, renew=True, at=now)
-    expires = order.reservation_expires_at
+) -> None:
     timeout = int(settings.UZUM_SESSION_TIMEOUT_SECS)
-    grace = timedelta(seconds=int(settings.PAYMENT_IN_FLIGHT_GRACE_SECONDS))
-    if expires is None or now + timedelta(seconds=timeout) + UZUM_SETTLE_MARGIN > expires + grace:
-        raise OrderExpired()
     order_number = protocol.new_order_number(str(settings.UZUM_ORDER_PREFIX), payment.id)
-    port = get_uzum(services.fake_scenario(order, PROVIDER))
     try:
-        registration = port.register(
+        registration = get_uzum(scenario).register(
             order_number=order_number,
             amount=protocol.to_tiyin(payment.amount),
             client_id=client_id(customer),
@@ -136,22 +174,32 @@ def payment_link(
         logger.error("uzum.register_rejected %s", {"payment_id": payment.id, "code": exc.code})
         raise ProviderUnavailable() from exc
     except UzumUnavailable as exc:
-        # nothing is stored (the request rolls back): a form registered with a lost answer is held by nobody
+        # nothing is attached: a form registered with a lost answer is held by nobody (a fresh number next)
         logger.warning("uzum.register_unavailable %s", {"payment_id": payment.id, "sent": exc.sent})
         raise ProviderUnavailable() from exc
-    payment_services.attach_transaction(
-        payment.id,
-        registration.order_id,
-        {
-            "order_number": order_number,
-            "registered_at": now.isoformat(),
-            "session_expires_at": (now + timedelta(seconds=timeout)).isoformat(),
-            "redirect_url": registration.redirect_url,
-        },
-    )
-    current = payment_selectors.get_payment(payment.id)
-    assert current is not None  # noqa: S101 - just attached
-    return PaymentLink(current, registration.redirect_url)
+    registered_at = timeutils.now()
+    with transaction.atomic():
+        order = services.lock_order(order_id)
+        current = payment_selectors.get_payment(payment.id)
+        if (
+            current is None
+            or current.status != enums.PaymentStatus.PENDING
+            or current.transaction_id
+            or order.status != enums.OrderStatus.AWAITING_PAYMENT
+        ):
+            # the order moved on while Uzum answered: nobody gets this form's link, so it is never paid
+            logger.warning("uzum.form_unused %s", {"payment_id": payment.id, "order_id": order_id})
+            return
+        payment_services.attach_transaction(
+            payment.id,
+            registration.order_id,
+            {
+                "order_number": order_number,
+                "registered_at": registered_at.isoformat(),
+                "session_expires_at": (registered_at + timedelta(seconds=timeout)).isoformat(),
+                "redirect_url": registration.redirect_url,
+            },
+        )
 
 
 # --- outcome ------------------------------------------------------------------------------------------------
@@ -438,12 +486,13 @@ def _accepted(refund_id: int, uzum_operation_id: str) -> None:
 
 __all__ = [
     "LATE_WINDOW",
-    "PaymentLink",
     "apply_status",
     "client_id",
     "enqueue_sync",
-    "payment_link",
+    "form_window_open",
+    "prepare_form",
     "reconcile",
+    "stored_link",
     "submit_refund",
     "sync_payment",
 ]

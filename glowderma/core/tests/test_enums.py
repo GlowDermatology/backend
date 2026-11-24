@@ -8,7 +8,7 @@ from glowderma.core import enums
 CONTRACT_TABLE: dict[str, list[str]] = {
     "OrderStatus": ["awaiting_payment", "processing", "handed_to_courier", "delivered", "cancelled"],
     "PaymentStatus": ["pending", "paid", "failed", "refunded"],
-    "PaymentProvider": ["click", "payme"],
+    "PaymentProvider": ["click", "payme", "uzum"],
     "FulfilmentMethod": ["delivery", "pickup"],
     "OrderChannel": ["ios", "android", "web"],
     "OrderPeriod": ["today", "week", "month", "all"],

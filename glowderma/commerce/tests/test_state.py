@@ -173,6 +173,7 @@ def test_outbox_topic_registry() -> None:
         "billz.stock_reread",  # gap X-STOCK-FRESHNESS
         "yandex.dispatch",  # Yandex Delivery plan §3.6
         "yandex.sync_claim",  # Yandex Delivery plan §3.7
+        "uzum.sync_order",  # docs/integrations/uzum.md
     )
     assert topics.PRODUCED_TOPICS == (
         "billz.push_sale",
@@ -180,7 +181,9 @@ def test_outbox_topic_registry() -> None:
         "billz.stock_reread",
         "yandex.dispatch",
         "yandex.sync_claim",
+        "uzum.sync_order",
     )
+    assert topics.uzum_sync_order_key(41, "a:b") == "uzum.sync_order:41:a:b"
     assert topics.yandex_dispatch_key("0d6f6c1e") == "yandex.dispatch:0d6f6c1e"
     assert topics.yandex_sync_claim_key("c1", "2026-11-15T10:00:00+00:00") == (
         "yandex.sync_claim:c1:2026-11-15T10:00:00+00:00"
