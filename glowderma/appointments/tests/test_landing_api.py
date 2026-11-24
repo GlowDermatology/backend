@@ -109,7 +109,11 @@ def test_availability_matches_the_slots_route(public_client: APIClient, now: dic
     now["now"] = at(MONDAY, 8, 45)  # lead time 60 min: 09:45 is the earliest start
     slots = public_client.get(
         f"/api/v1/specialists/{professional.pk}/slots/",
-        {"date": MONDAY.isoformat(), "service_id": service.pk, "location_id": professional.location_id},
+        {
+            "date": MONDAY.isoformat(),
+            "service_id": str(service.pk),
+            "location_id": str(professional.clinic_id),
+        },
     ).json()["slots"]
     row = row_of(public_client.get(AVAILABILITY).json(), professional.pk)
     assert row["slots_today"] == len(slots) == 12
