@@ -37,7 +37,7 @@ def fake_scenario_header(request: Request) -> dict[str, Any] | None:
         return None
     if not getattr(settings, "FAKE_SCENARIO_HEADER_ENABLED", False):
         return None
-    providers = ("devsms", "click", "payme", "bts", "yandex", "fcm")
+    providers = ("devsms", "click", "payme", "uzum", "bts", "yandex", "fcm")
     if any(integration_modes.provider_mode(p) != "fake" for p in providers):
         return None
     try:

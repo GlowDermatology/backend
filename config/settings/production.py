@@ -51,6 +51,8 @@ from .base import (
     SMTP_USE_SSL,
     SMTP_USE_TLS,
     SMTP_USER,
+    UZUM_CHECKOUT_BASE_URL,
+    UZUM_MODE,
     VAULT_AI_PREFIX,
     VAULT_MODE,
     YANDEX_DELIVERY_BASE_URL,
@@ -106,6 +108,7 @@ KNOWN_PLACEHOLDER_SECRETS = frozenset(
         "local-bts-webhook-secret-at-least-32-characters",
         "local-click-secret-key",
         "local-payme-key",
+        "local-uzum-callback-token-at-least-32-characters",
     }
 )
 KNOWN_PLACEHOLDER_JWT_KEYS = frozenset(
@@ -329,6 +332,17 @@ if PAYME_MODE == "live":
             "PAYME_MERCHANT_ID must be the merchant (cash desk) id from the Payme cabinet"
         )
     _https_url("PAYME_CHECKOUT_URL", PAYME_CHECKOUT_URL)
+if UZUM_MODE == "live":
+    # Required only when live (never in PROVIDER_SECRETS: that list is enforced in every mode, and the
+    # deployments that predate Uzum have none of these keys).
+    _https_url("UZUM_CHECKOUT_BASE_URL", UZUM_CHECKOUT_BASE_URL)
+    for _name in ("UZUM_TERMINAL_ID", "UZUM_API_KEY"):
+        if not re.fullmatch(r"[0-9A-Za-z-]{8,64}", _required(_name)):
+            raise ImproperlyConfigured(f"{_name} must be the id Uzum issued for the terminal")
+    if len(_required("UZUM_CALLBACK_TOKEN")) < 32 or not re.fullmatch(
+        r"[A-Za-z0-9_-]+", env_str("UZUM_CALLBACK_TOKEN", "").strip()
+    ):
+        raise ImproperlyConfigured("UZUM_CALLBACK_TOKEN must be at least 32 URL-safe characters")
 if BTS_MODE == "live":
     for _name in (
         "BTS_LOGIN",

@@ -24,6 +24,7 @@ PROVIDER_MODE_SETTINGS: dict[str, str] = {
     "fcm": "FCM_MODE",
     "click": "CLICK_MODE",
     "payme": "PAYME_MODE",
+    "uzum": "UZUM_MODE",
     "bts": "BTS_MODE",
     "devsms": "DEVSMS_MODE",
     "email": "EMAIL_MODE",
@@ -34,10 +35,15 @@ PROVIDER_MODE_SETTINGS: dict[str, str] = {
 # Setting values that name the live adapter of a provider with its own vocabulary (``EMAIL_MODE=smtp``).
 LIVE_MODE_ALIASES: dict[str, str] = {"smtp": "live"}
 # Payment providers in the order ``settings/public/`` lists them (customer contract §2.4).
-PAYMENT_PROVIDERS: tuple[str, ...] = (enums.PaymentProvider.CLICK.value, enums.PaymentProvider.PAYME.value)
+# Uzum comes last: released clients that pick the first listed provider keep picking Click.
+PAYMENT_PROVIDERS: tuple[str, ...] = (
+    enums.PaymentProvider.CLICK.value,
+    enums.PaymentProvider.PAYME.value,
+    enums.PaymentProvider.UZUM.value,
+)
 # Providers whose callbacks (webhooks) are refused while they are fake under the production settings
 # (§2.13.0).
-CALLBACK_PROVIDERS: frozenset[str] = frozenset({"click", "payme", "bts", "yandex"})
+CALLBACK_PROVIDERS: frozenset[str] = frozenset({"click", "payme", "uzum", "bts", "yandex"})
 # Home-delivery providers in the order checkout prefers them (plan §3.4: Yandex, else BTS).
 DELIVERY_PROVIDERS: tuple[str, ...] = ("yandex", "bts")
 PRODUCTION_SETTINGS_MODULE = "config.settings.production"
@@ -95,7 +101,8 @@ def callbacks_refused(provider: str) -> bool:
 
 
 def payable_providers() -> list[str]:
-    """Payment providers that can take a payment now, Click then Payme (§2.4): fakes only under local/test."""
+    """Payment providers that can take a payment now, Click, Payme then Uzum (§2.4): fakes only under
+    local/test."""
     return [provider for provider in PAYMENT_PROVIDERS if not callbacks_refused(provider)]
 
 
@@ -135,6 +142,10 @@ def online_sales_enabled() -> bool:
 # only warn).
 BTS_SANDBOX_HOSTS = frozenset({"apitest.bts.uz"})
 PAYME_SANDBOX_HOSTS = frozenset({"test.paycom.uz"})
+# Uzum documents no hosts; these are the ones its test environments are known by (extend when Uzum names
+# others). A live Uzum against any of them takes no real money.
+UZUM_SANDBOX_HOSTS = frozenset({"test-checkout.uzumbank.uz", "test-chk-api.ipt-merch.com"})
+UZUM_SANDBOX_MARKERS = ("test", "sandbox", "staging", "dev")
 
 
 def sandbox_providers() -> list[str]:
@@ -148,4 +159,9 @@ def sandbox_providers() -> list[str]:
         host = urlsplit(str(getattr(settings, "PAYME_CHECKOUT_URL", ""))).hostname or ""
         if bool(getattr(settings, "PAYME_TEST_MODE", False)) or host in PAYME_SANDBOX_HOSTS:
             found.append("payme")
+    if provider_mode("uzum") == enums.IntegrationMode.LIVE:
+        host = urlsplit(str(getattr(settings, "UZUM_CHECKOUT_BASE_URL", ""))).hostname or ""
+        labels = host.split(".")[0].split("-") if host else []
+        if host in UZUM_SANDBOX_HOSTS or any(marker in labels for marker in UZUM_SANDBOX_MARKERS):
+            found.append("uzum")
     return found

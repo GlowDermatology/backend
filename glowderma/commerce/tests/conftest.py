@@ -5,16 +5,19 @@ import pytest
 from glowderma.core import timeutils
 from glowderma.integrations.bts import fake as fake_bts
 from glowderma.integrations.click import fake as fake_click
+from glowderma.integrations.uzum import fake as fake_uzum
 
 
 @pytest.fixture(autouse=True)
 def reset_fake_providers() -> Iterator[None]:
-    """The fake BTS / Click keep their "remote" state per process: start every test from a clean slate."""
+    """The fake BTS / Click / Uzum keep their "remote" state per process: start every test from a clean slate."""
     fake_bts.reset()
     fake_click.reset()
+    fake_uzum.reset()
     yield
     fake_bts.reset()
     fake_click.reset()
+    fake_uzum.reset()
 
 
 _REAL_NOW = timeutils.now

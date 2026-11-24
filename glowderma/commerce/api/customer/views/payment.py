@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from glowderma.accounts import services as account_services
 from glowderma.accounts.api.customer_base import CustomerAPIView
 from glowderma.accounts.api.throttles import CustomerRateThrottle
-from glowderma.commerce import payment_ref, selectors, services, state
+from glowderma.commerce import payment_ref, selectors, services, state, uzum_flow
 from glowderma.commerce.api.customer.schemas.payment import PAY_POST
 from glowderma.commerce.api.customer.serializers import (
     CustomerPayLinkSerializer,
@@ -80,18 +80,31 @@ class PayView(CustomerAPIView):
             order.pk, platform=device.platform if device is not None else None, language=self.language
         )
         scenario = services.fake_scenario(order, provider)
+        pay_by = order.reservation_expires_at
         if provider == enums.PaymentProvider.CLICK:
             web_url = get_click(scenario).pay_url(reference, payment.amount, return_url)
-        else:
+        elif provider == enums.PaymentProvider.PAYME:
             web_url = get_payme(scenario).checkout_url(
                 reference, payment.amount * 100, self.language, return_url
             )
+        elif provider == enums.PaymentProvider.UZUM:
+            # Uzum registers a hosted form (an HTTP call under the Order lock, bounded to 4 s); the stored
+            # form is handed out again while its session lives (uzum_flow.payment_link)
+            uzum = uzum_flow.payment_link(
+                order, payment, customer=customer, language=self.language, return_url=return_url, now=now
+            )
+            payment, web_url = uzum.payment, uzum.web_url
+            session_ends = selectors.uzum_session_ends(payment)
+            if session_ends is not None and (pay_by is None or session_ends < pay_by):
+                pay_by = session_ends  # the form closes before the reservation does
+        else:
+            raise ValueError(f"Unknown payment provider {provider!r}")
         link = {
             "order_id": order.pk,
             "payment_id": payment.id,
             "provider": provider,
             "amount": payment.amount,
-            "pay_by": order.reservation_expires_at,
+            "pay_by": pay_by,
             "account_ref": reference,
             "web_url": web_url,
             "app_url": None,

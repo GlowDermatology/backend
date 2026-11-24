@@ -3,8 +3,9 @@
 ``configured()`` covers the providers whose mode is ``live``: the registry must build the live adapter (one
 that refuses its settings raises ``ImproperlyConfigured`` / ``ValueError`` → not configured) and
 ``is_configured()`` must say yes (Billz: the key and the shop, cash box and payment-type ids; Payme: the
-merchant id and key; Click: the three numeric ids, not ``00000``, and the secret key; BTS: login, password,
-sender city code and, for a branch pickup, the branch code; DevSMS: the API token and a valid service name;
+merchant id and key; Uzum: an https Checkout base URL, the terminal id and the API key; Click: the three
+numeric ids, not ``00000``, and the secret key; BTS: login, password, sender city code and, for a branch
+pickup, the branch code; DevSMS: the API token and a valid service name;
 e-mail (``EMAIL_MODE=smtp``): host and sender; FCM: the project id and an existing key file; Yandex Delivery:
 the token, an https base URL, the currency and the language; AI: the provider adapter exists (its key is read
 from Vault per job); Vault: the agent proxy URL is set). Building an adapter reads settings only and sends
@@ -29,6 +30,7 @@ from glowderma.integrations.llm.registry import get_content_model
 from glowderma.integrations.models import IntegrationState
 from glowderma.integrations.oauth.registry import STAFF_PROVIDERS, get_oauth_provider
 from glowderma.integrations.payme.registry import get_payme
+from glowderma.integrations.uzum.registry import get_uzum
 from glowderma.integrations.vault.registry import get_vault
 from glowderma.integrations.yandex_delivery.registry import get_yandex_delivery
 
@@ -44,6 +46,7 @@ BUILDERS: dict[str, Callable[[], Iterable[object]]] = {
     "fcm": lambda: [get_fcm_port()],
     "click": lambda: [get_click()],
     "payme": lambda: [get_payme()],
+    "uzum": lambda: [get_uzum()],
     "bts": lambda: [get_bts()],
     "devsms": lambda: [get_sms_port()],
     "email": lambda: [get_email_port()],

@@ -10,7 +10,7 @@ from django.db import IntegrityError, transaction
 
 from glowderma.core import enums, timeutils
 from glowderma.core.api.exceptions import Conflict, InvalidTransition
-from glowderma.payments.models import LATE_CAPTURE, Payment
+from glowderma.payments.models import LATE_CAPTURE, Payment, uzum_session_over
 from glowderma.payments.services import common, results
 
 PAYME_STATE_CREATED = 1  # Payme transaction in state 1 is never failed unilaterally (02 P-2)
@@ -60,11 +60,17 @@ def confirm_payment(
         return results.payment_result(payment, changed=True)
 
 
-def can_fail_unilaterally(provider: str, provider_state: dict[str, Any]) -> bool:
-    """False for a Payme transaction in state 1: only Payme's ``CancelTransaction`` fails it (02 P-2)."""
-    return not (
-        provider == enums.PaymentProvider.PAYME and provider_state.get("state") == PAYME_STATE_CREATED
-    )
+def can_fail_unilaterally(provider: str, provider_state: dict[str, Any], at: datetime | None = None) -> bool:
+    """False for a Payme transaction in state 1 (only Payme's ``CancelTransaction`` fails it, 02 P-2) and
+    for an Uzum payment whose hosted form may still take the money (its session is not over: Uzum's status
+    decides it, ``commerce.uzum_flow``). Click is always failable (its Complete is checked against us)."""
+    if provider == enums.PaymentProvider.PAYME:
+        return provider_state.get("state") != PAYME_STATE_CREATED
+    if provider == enums.PaymentProvider.UZUM:
+        return uzum_session_over(provider_state, at or timeutils.now())
+    if provider == enums.PaymentProvider.CLICK:
+        return True
+    raise ValueError(f"Unknown payment provider {provider!r}")
 
 
 def fail_payment(
@@ -78,8 +84,9 @@ def fail_payment(
     """``pending → failed`` (``failed_at``, ``error_code``); an already failed payment is a no-op.
 
     ``unilateral=True`` (reservation expiry, admin cancel, provider switch) leaves a Payme state-1
-    transaction ``pending`` (``changed=False``). No order event is written here or by the callers of those
-    paths (03 C-8); ``payment_failed`` is reserved for provider callbacks.
+    transaction, and an Uzum payment whose form may still be paid, ``pending`` (``changed=False``). No order
+    event is written here or by the callers of those paths (03 C-8); ``payment_failed`` is reserved for
+    provider callbacks.
     """
     common.require_aware(at, "at")
     with transaction.atomic():
@@ -88,7 +95,7 @@ def fail_payment(
             return results.payment_result(payment, changed=False)
         if payment.status != enums.PaymentStatus.PENDING:
             raise InvalidTransition(f"Payment {payment_id} is {payment.status}, not pending")
-        if unilateral and not can_fail_unilaterally(payment.provider, payment.provider_state):
+        if unilateral and not can_fail_unilaterally(payment.provider, payment.provider_state, at):
             return results.payment_result(payment, changed=False)
         payment.status = enums.PaymentStatus.FAILED
         payment.failed_at = at or timeutils.now()

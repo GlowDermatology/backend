@@ -23,6 +23,7 @@ class WebhookInbox(AppendOnlyModel):
         BTS = "bts", "BTS"
         BILLZ = "billz", "Billz"
         YANDEX = "yandex", "Yandex Delivery"
+        UZUM = "uzum", "Uzum"
 
     provider = models.CharField(max_length=16, choices=Provider.choices, verbose_name="provayder")
     # provider-specific natural key of the delivery
@@ -141,6 +142,7 @@ class IntegrationState(models.Model):
         DEVSMS = "devsms", "DevSMS"
         FCM = "fcm", "FCM"
         YANDEX = "yandex", "Yandex Delivery"
+        UZUM = "uzum", "Uzum"
 
     provider = models.CharField(
         max_length=16, choices=Provider.choices, unique=True, verbose_name="provayder"

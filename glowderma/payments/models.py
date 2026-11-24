@@ -8,6 +8,9 @@ provider callbacks live in ``integrations.WebhookInbox`` (P-1): ``provider_state
 protocol fields the design lists.
 """
 
+from datetime import datetime, timedelta
+from typing import Any
+
 from django.db import models
 from django.db.models import Q
 from django.utils.translation import gettext
@@ -23,6 +26,25 @@ ACTIVE_PAYMENT_STATUSES: tuple[str, ...] = (enums.PaymentStatus.PENDING, enums.P
 # did not honour; the row is ``paid`` until its refund succeeds and never counts as the order's active
 # payment.
 LATE_CAPTURE = "late_capture"
+# Uzum (docs/integrations/uzum.md): the hosted form can still complete a payment until its session ends;
+# a margin covers the clock skew and the debit Uzum finishes after the form closes.
+UZUM_SETTLE_MARGIN = timedelta(seconds=120)
+
+
+def uzum_session_over(provider_state: Any, now: datetime) -> bool:
+    """Whether an Uzum payment's hosted form can no longer take money (its session ended more than
+    :data:`UZUM_SETTLE_MARGIN` ago). A payment that never got a form (nothing registered) is over."""
+    state = provider_state if isinstance(provider_state, dict) else {}
+    raw = state.get("session_expires_at")
+    if not isinstance(raw, str) or not raw:
+        return True
+    try:
+        ends = datetime.fromisoformat(raw)
+    except ValueError:
+        return False  # unreadable: never treat a possibly live form as over
+    return now >= ends + UZUM_SETTLE_MARGIN
+
+
 # Payment statuses that require a provider transaction id (the money moved under that id).
 SETTLED_PAYMENT_STATUSES: tuple[str, ...] = (enums.PaymentStatus.PAID, enums.PaymentStatus.REFUNDED)
 # Refund states that keep a refund "open" for the one-open-per-payment partial unique.

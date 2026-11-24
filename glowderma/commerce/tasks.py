@@ -59,7 +59,7 @@ from django.db import connection, transaction
 from django.utils.translation import gettext, gettext_lazy
 
 from glowderma.catalog import topics as catalog_topics
-from glowderma.commerce import delivery_review, selectors, services, topics, yandex_flow
+from glowderma.commerce import delivery_review, selectors, services, topics, uzum_flow, yandex_flow
 from glowderma.commerce.billz_sales import PurchaseJournal, get_sale_port, sale_request
 from glowderma.commerce.models import Order, StockReservation
 from glowderma.core import alerts, audit, enums, integration_modes, outbox, timeutils
@@ -785,11 +785,24 @@ def submit_refund(payload: dict[str, Any]) -> None:
         raise LookupError(f"Refund {refund_id} does not exist")
     if refund.state not in (enums.RefundState.REQUESTED, enums.RefundState.SUBMITTING):
         return  # succeeded / failed / manual_required / unknown: nothing to do (unknown is never retried)
-    if refund.provider != enums.PaymentProvider.CLICK:
+    if refund.provider not in (enums.PaymentProvider.CLICK, enums.PaymentProvider.UZUM):
+        # Payme refunds are cabinet refunds (manual_required from the start): one that reached here is a bug
+        logger.error(
+            "refund.submit: refund %s of provider %s is not submitted automatically",
+            refund_id,
+            refund.provider,
+        )
+        if refund.state == enums.RefundState.REQUESTED:
+            payment_services.mark_manual_required(
+                refund_id, timeutils.now(), reason=enums.RefundManualReason.PAYME
+            )
         return
     payment = payment_selectors.get_payment(refund.payment_id)
     if payment is None or payment.status != enums.PaymentStatus.PAID:
         _fail_unpaid(refund)
+        return
+    if refund.provider == enums.PaymentProvider.UZUM:
+        uzum_flow.submit_refund(refund)
         return
     ref = refund.provider_payment_ref
     if not ref or integration_modes.callbacks_refused("click"):
@@ -920,6 +933,8 @@ __all__ = [
     "dispatch_courier",
     "on_yandex_dispatch_dead",
     "poll_yandex",
+    "reconcile_uzum",
+    "sync_uzum_order",
     "sync_yandex_claim",
     "create_shipment",
     "expire_reservations",
@@ -1109,7 +1124,7 @@ def report_fake_provider_open_money() -> list[str]:
     the production settings and still holds open money (the operator procedure of §6.14 was skipped). Changes
     no payment; returns the providers reported."""
     reported = []
-    for provider in (enums.PaymentProvider.CLICK, enums.PaymentProvider.PAYME):
+    for provider in integration_modes.PAYMENT_PROVIDERS:
         if not integration_modes.fake_in_production(provider):
             continue
         money = selectors.provider_open_money(provider)
@@ -1160,6 +1175,23 @@ def sync_yandex_claim(message: OutboxMessage) -> None:
 
 outbox.on_dead(topics.YANDEX_DISPATCH)(on_yandex_dispatch_dead)
 outbox.register_deferral_window(topics.YANDEX_DISPATCH, lambda: yandex_flow.DISPATCH_DEFERRAL_WINDOW)
+
+
+# --- Uzum Checkout (docs/integrations/uzum.md) --------------------------------------------------------
+
+
+@outbox.register(topics.UZUM_SYNC_ORDER)
+def sync_uzum_order(message: OutboxMessage) -> None:
+    """``uzum.sync_order``: a callback's hint (or an accepted refund) → ``getOrderStatus`` → the payment's and
+    its refunds' outcome (``commerce.uzum_flow.apply_status``)."""
+    uzum_flow.sync_payment(int(_payload(message)["payment_id"]))
+
+
+@shared_task(name="commerce.reconcile_uzum")  # type: ignore[untyped-decorator]
+def reconcile_uzum() -> dict[str, int]:
+    """Uzum reconciliation (beat ``commerce-reconcile-uzum`` every 2 minutes; a no-op while the fake runs
+    under the production settings): pending and recently failed Uzum payments, and submitting refunds."""
+    return uzum_flow.reconcile()
 
 
 @shared_task(name="commerce.poll_yandex")  # type: ignore[untyped-decorator]

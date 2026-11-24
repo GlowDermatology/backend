@@ -690,6 +690,31 @@ if not re.fullmatch(r"[a-z][a-z0-9_]{0,31}", PAYME_ACCOUNT_FIELD):
     raise ImproperlyConfigured("PAYME_ACCOUNT_FIELD must be a lower-case identifier")
 PAYME_ALLOWED_IPS = env_networks("PAYME_ALLOWED_IPS", [])
 PAYME_FISCAL_DETAIL_ENABLED = env_bool("PAYME_FISCAL_DETAIL_ENABLED", False)
+# Uzum Bank Checkout (docs/integrations/uzum.md): the hosted card form, ONE_STEP payments with viewType
+# REDIRECT. UZUM_MODE defaults to fake — never to INTEGRATIONS_MODE: a deployment switched to live for the
+# other providers must not start sending customers to Uzum before its credentials are loaded.
+UZUM_MODE = env_value("UZUM_MODE", "fake")
+if UZUM_MODE not in {"fake", "live"}:
+    raise ImproperlyConfigured("UZUM_MODE must be 'fake' or 'live'")
+# Live only (config.settings.production requires them when UZUM_MODE=live): the Checkout API base URL Uzum
+# issues per environment (the spec documents no host), the terminal id and the API key.
+UZUM_CHECKOUT_BASE_URL = env_value("UZUM_CHECKOUT_BASE_URL", "").rstrip("/")
+UZUM_TERMINAL_ID = env_value("UZUM_TERMINAL_ID", "")
+UZUM_API_KEY = env_value("UZUM_API_KEY", "")
+# The secret path segment of our callback URL (Uzum's callbacks carry no signature): the terminal is
+# configured with https://<api>/api/v1/webhooks/uzum/<UZUM_CALLBACK_TOKEN>/.
+UZUM_CALLBACK_TOKEN = env_value("UZUM_CALLBACK_TOKEN", "")
+UZUM_ALLOWED_IPS = env_networks("UZUM_ALLOWED_IPS", [])
+# Hosts the payment page URL Uzum returns may point at (empty = any https host).
+UZUM_REDIRECT_HOSTS = [host.strip().lower() for host in env_list("UZUM_REDIRECT_HOSTS", []) if host.strip()]
+# The payment form's lifetime (Uzum accepts 600–1800 s). A payment is only started while the reservation
+# outlives the form by enough to keep its end inside PAYMENT_IN_FLIGHT_GRACE_SECONDS.
+UZUM_SESSION_TIMEOUT_SECS = env_bounded_int("UZUM_SESSION_TIMEOUT_SECS", 600, minimum=600, maximum=1800)
+# Our order numbers at Uzum are "<prefix>-<payment id>-<nonce>": one prefix per environment, so a staging
+# terminal's callbacks never match production payments.
+UZUM_ORDER_PREFIX = env_value("UZUM_ORDER_PREFIX", "gd")
+if not re.fullmatch(r"[a-z0-9]{1,8}", UZUM_ORDER_PREFIX):
+    raise ImproperlyConfigured("UZUM_ORDER_PREFIX must be 1-8 lower-case letters or digits")
 # Webhooks (C§2.13.0): stored rows per IP per minute for requests that fail provider authentication.
 WEBHOOK_REJECTED_PER_IP_PER_MIN = env_positive_int("WEBHOOK_REJECTED_PER_IP_PER_MIN", 10)
 # BTS (C§2.13.3, §2.14.3).
@@ -809,12 +834,15 @@ BOOKING_CANCEL_MIN_LEAD_MINUTES = env_non_negative_int("BOOKING_CANCEL_MIN_LEAD_
 # provider.
 FAKE_PAYMENTS_ENABLED = env_bool("FAKE_PAYMENTS_ENABLED", False)
 FAKE_SCENARIO_HEADER_ENABLED = env_bool("FAKE_SCENARIO_HEADER_ENABLED", False)
-if FAKE_PAYMENTS_ENABLED and not CLICK_MODE == PAYME_MODE == "fake":
-    raise ImproperlyConfigured("FAKE_PAYMENTS_ENABLED requires CLICK_MODE=fake and PAYME_MODE=fake")
+if FAKE_PAYMENTS_ENABLED and not CLICK_MODE == PAYME_MODE == UZUM_MODE == "fake":
+    raise ImproperlyConfigured(
+        "FAKE_PAYMENTS_ENABLED requires CLICK_MODE=fake, PAYME_MODE=fake and UZUM_MODE=fake"
+    )
 SCENARIO_PROVIDER_MODES = {
     "DEVSMS_MODE": DEVSMS_MODE,
     "CLICK_MODE": CLICK_MODE,
     "PAYME_MODE": PAYME_MODE,
+    "UZUM_MODE": UZUM_MODE,
     "BTS_MODE": BTS_MODE,
     "FCM_MODE": FCM_MODE,
     "YANDEX_DELIVERY_MODE": YANDEX_DELIVERY_MODE,

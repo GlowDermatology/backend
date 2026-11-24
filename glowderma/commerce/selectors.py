@@ -50,7 +50,7 @@ from glowderma.delivery import yandex as delivery_yandex
 from glowderma.delivery.models import Shipment
 from glowderma.loyalty import selectors as loyalty_selectors
 from glowderma.payments import selectors as payment_selectors
-from glowderma.payments.models import LATE_CAPTURE, Payment, Refund
+from glowderma.payments.models import LATE_CAPTURE, Payment, Refund, uzum_session_over
 from glowderma.site_config.models import SiteSettings
 
 SEARCH_MIN_PHONE_DIGITS = 3
@@ -556,6 +556,7 @@ __all__ = [
     "attached_at",
     "cart_view",
     "cashback_max",
+    "blocks_other_providers",
     "customer_inflight_order",
     "customer_order",
     "customer_order_detail",
@@ -572,6 +573,7 @@ __all__ = [
     "product_name",
     "progress",
     "provider_open_money",
+    "uzum_session_ends",
     "OrderDetail",
     "OrderFilters",
     "available_actions",
@@ -610,8 +612,9 @@ _S = enums.OrderStatus
 _E = enums.OrderEventType
 _CLICK = enums.PaymentProvider.CLICK
 _PAYME = enums.PaymentProvider.PAYME
+_UZUM = enums.PaymentProvider.UZUM
 PAYME_STATE_CREATED = 1
-PROVIDER_BRANDS: dict[str, str] = {_CLICK: "Click", _PAYME: "Payme"}
+PROVIDER_BRANDS: dict[str, str] = {_CLICK: "Click", _PAYME: "Payme", _UZUM: "Uzum"}
 OPEN_ORDER_SCOPES: dict[str, tuple[str, ...]] = {
     enums.OrderScope.ACTIVE: (_S.AWAITING_PAYMENT, _S.PROCESSING, _S.HANDED_TO_COURIER),
     enums.OrderScope.COMPLETED: (_S.DELIVERED,),
@@ -650,18 +653,26 @@ class OrderLike(Protocol):
 # --
 
 
+def _iso(raw: object) -> datetime | None:
+    if isinstance(raw, str) and raw:
+        try:
+            return datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+    return None
+
+
 def attached_at(payment: PaymentLike) -> datetime | None:
     """When the payment got its provider transaction: Click ``provider_state.prepare_at`` (a Prepare answered
-    ``0``), Payme ``provider_state.create_time`` (ms; a ``CreateTransaction`` answered state 1)."""
+    ``0``), Payme ``provider_state.create_time`` (ms; a ``CreateTransaction`` answered state 1), Uzum
+    ``provider_state.registered_at`` (the hosted form was registered). An unknown provider raises."""
     state = payment.provider_state if isinstance(payment.provider_state, dict) else {}
     if payment.provider == _CLICK:
-        raw = state.get("prepare_at")
-        if isinstance(raw, str) and raw:
-            try:
-                return datetime.fromisoformat(raw)
-            except ValueError:
-                return None
-        return None
+        return _iso(state.get("prepare_at"))
+    if payment.provider == _UZUM:
+        return _iso(state.get("registered_at"))
+    if payment.provider != _PAYME:
+        raise ValueError(f"Unknown payment provider {payment.provider!r}")
     created = state.get("create_time")
     if isinstance(created, int) and not isinstance(created, bool):
         return datetime.fromtimestamp(created / 1000, tz=TASHKENT)
@@ -670,24 +681,44 @@ def attached_at(payment: PaymentLike) -> datetime | None:
 
 def is_open(payment: PaymentLike) -> bool:
     """A ``pending`` payment with an attached, uncompleted transaction (Click: no Complete yet; Payme: state
-    1)."""
+    1; Uzum: a registered form, until Uzum's status is final — a final status fails or pays the row)."""
     if payment.status != enums.PaymentStatus.PENDING or attached_at(payment) is None:
         return False
     state = payment.provider_state if isinstance(payment.provider_state, dict) else {}
     if payment.provider == _CLICK:
         return "complete_at" not in state
+    if payment.provider == _UZUM:
+        return True
     return state.get("state") == PAYME_STATE_CREATED
 
 
 def in_flight(payment: PaymentLike, now: datetime) -> bool:
     """An open transaction the customer may be confirming right now: Click for ``CLICK_INFLIGHT_SECONDS``
-    after its Prepare, Payme while in state 1."""
+    after its Prepare, Payme while in state 1, Uzum until its form's session is over
+    (``payments.models.uzum_session_over``)."""
     if not is_open(payment):
         return False
     if payment.provider == _CLICK:
         prepared = attached_at(payment)
         return prepared is not None and now < prepared + timedelta(seconds=settings.CLICK_INFLIGHT_SECONDS)
+    if payment.provider == _UZUM:
+        return not uzum_session_over(payment.provider_state, now)
     return True
+
+
+def uzum_session_ends(payment: PaymentLike) -> datetime | None:
+    """When the Uzum payment's hosted form closes (``provider_state.session_expires_at``), else ``None``."""
+    state = payment.provider_state if isinstance(payment.provider_state, dict) else {}
+    return _iso(state.get("session_expires_at")) if payment.provider == _UZUM else None
+
+
+def blocks_other_providers(payment: PaymentLike, now: datetime) -> bool:
+    """Whether this payment keeps **another** provider from attaching a transaction to its order (a second
+    provider would let the customer pay twice): Payme while open (state 1 is only ever cancelled by Payme),
+    Click and Uzum while in flight."""
+    if payment.provider == _PAYME:
+        return is_open(payment)
+    return in_flight(payment, now)
 
 
 def is_payable(order: OrderLike, payment: PaymentLike | None, now: datetime, *, attaching: bool) -> bool:
@@ -739,16 +770,17 @@ def inflight_payment(order_id: int, now: datetime | None = None) -> payment_sele
     return next((row for row in _pending_payments(order_id) if in_flight(row, instant)), None)
 
 
-def customer_inflight_order(customer_id: int) -> int | None:
-    """The customer's ``awaiting_payment`` order whose **Click** payment is in flight (customer contract
-    §2.2.3 step 1: ``DELETE me/`` answers 409 ``payment_in_progress``), else ``None``."""
+def customer_inflight_order(customer_id: int) -> tuple[int, str] | None:
+    """The customer's ``awaiting_payment`` order whose **Click** or **Uzum** payment is in flight, with its
+    provider (customer contract §2.2.3 step 1: ``DELETE me/`` answers 409 ``payment_in_progress``), else
+    ``None``. A Payme state-1 transaction does not block: Payme cancels it on its own."""
     now = timeutils.now()
     for order_id in Order.objects.filter(customer_id=customer_id, status=_S.AWAITING_PAYMENT).values_list(
         "id", flat=True
     ):
         payment = inflight_payment(int(order_id), now)
-        if payment is not None and payment.provider == _CLICK:
-            return int(order_id)
+        if payment is not None and payment.provider in (_CLICK, _UZUM):
+            return int(order_id), str(payment.provider)
     return None
 
 
@@ -1004,11 +1036,12 @@ def actions(order: Order, now: datetime) -> dict[str, bool]:
     """``actions`` (customer contract §2.8)."""
     awaiting = order.status == _S.AWAITING_PAYMENT
     payme_open = any(p.provider == _PAYME and is_open(p) for p in _payments(order))
-    click_inflight = any(p.provider == _CLICK and in_flight(p, now) for p in _payments(order))
+    # a Click or Uzum payment in flight may be taking the money right now: cancelling would race it
+    card_inflight = any(p.provider in (_CLICK, _UZUM) and in_flight(p, now) for p in _payments(order))
     expired = order.reservation_expires_at is not None and now >= order.reservation_expires_at
     return {
         "pay": awaiting and is_payable(order, None, now, attaching=True) and not payme_open,
-        "cancel": awaiting and not click_inflight,
+        "cancel": awaiting and not card_inflight,
         "reorder": not awaiting or expired,
     }
 

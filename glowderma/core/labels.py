@@ -32,6 +32,7 @@ PAYMENT_STATUS: dict[str, str] = {
 PROVIDER: dict[str, str] = {
     enums.PaymentProvider.CLICK: "Click",
     enums.PaymentProvider.PAYME: "Payme",
+    enums.PaymentProvider.UZUM: "Uzum",
 }
 FULFILMENT: dict[str, str] = {
     enums.FulfilmentMethod.DELIVERY: "Yetkazib berish",

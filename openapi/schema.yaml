@@ -6637,11 +6637,13 @@ paths:
           enum:
           - click
           - payme
+          - uzum
           type: string
           minLength: 1
         description: |-
           * `click` - click
           * `payme` - payme
+          * `uzum` - uzum
       - in: query
         name: refund_state
         schema:
@@ -19269,6 +19271,42 @@ paths:
                 type: object
                 additionalProperties: {}
           description: ''
+  /api/v1/webhooks/uzum/:
+    post:
+      operationId: webhook_uzum_checkout
+      description: 'Uzum Checkout payment callback (an unsigned hint): `?token=` is
+        our shared secret; answers 200 for a verified token and re-reads the payment''s
+        status asynchronously.'
+      parameters:
+      - in: query
+        name: token
+        schema:
+          type: string
+        required: true
+      tags:
+      - webhooks
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/v1/webhooks/yandex-delivery/:
     post:
       operationId: webhook_yandex_delivery_status
@@ -24386,11 +24424,13 @@ components:
       - payme
       - no_paydoc
       - fake_mode
+      - uzum_fake
       type: string
       description: |-
         * `payme` - payme
         * `no_paydoc` - no_paydoc
         * `fake_mode` - fake_mode
+        * `uzum_fake` - uzum_fake
     Me:
       type: object
       properties:
@@ -26702,10 +26742,12 @@ components:
       enum:
       - click
       - payme
+      - uzum
       type: string
       description: |-
         * `click` - click
         * `payme` - payme
+        * `uzum` - uzum
     PaymentStatusEnum:
       enum:
       - pending
@@ -27450,6 +27492,8 @@ components:
           $ref: '#/components/schemas/IntegrationModeEnum'
         payme:
           $ref: '#/components/schemas/IntegrationModeEnum'
+        uzum:
+          $ref: '#/components/schemas/IntegrationModeEnum'
         bts:
           $ref: '#/components/schemas/IntegrationModeEnum'
         devsms:
@@ -27472,6 +27516,7 @@ components:
       - fcm
       - oauth
       - payme
+      - uzum
       - vault
       - yandex
     ProviderReadiness:
@@ -27864,11 +27909,12 @@ components:
         manual_reason:
           nullable: true
           description: |-
-            Why the refund is (or was) `manual_required`: `payme` (a Payme cabinet refund), `no_paydoc` (a Click payment without Click's payment id), `fake_mode` (Click fake under the production settings); `null` for a refund that was never manual.
+            Why the refund is (or was) `manual_required`: `payme` (a Payme cabinet refund), `no_paydoc` (a Click payment without Click's payment id), `fake_mode` (Click fake under the production settings), `uzum_fake` (Uzum fake under the production settings); `null` for a refund that was never manual.
 
             * `payme` - payme
             * `no_paydoc` - no_paydoc
             * `fake_mode` - fake_mode
+            * `uzum_fake` - uzum_fake
           oneOf:
           - $ref: '#/components/schemas/ManualReasonEnum'
           - $ref: '#/components/schemas/NullEnum'

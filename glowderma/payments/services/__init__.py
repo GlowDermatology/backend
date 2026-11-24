@@ -42,6 +42,7 @@ from glowderma.payments.services.refund_attempts import (
     mark_submitting,
     mark_succeeded,
     mark_unknown,
+    merge_refund_state,
     release_claim,
 )
 from glowderma.payments.services.refund_requests import (
@@ -79,6 +80,7 @@ __all__ = [
     "mark_succeeded",
     "mark_unknown",
     "merge_provider_state",
+    "merge_refund_state",
     "release_claim",
     "retry_refund",
 ]

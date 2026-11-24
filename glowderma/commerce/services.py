@@ -2255,9 +2255,17 @@ def refund_manual_reason(payment: payment_selectors.PaymentRow) -> str | None:
     """Why a new refund of ``payment`` is ``manual_required`` (admin §4 ``refund_requested.manual_reason``):
     ``payme`` (Payme refunds are cabinet refunds), ``no_paydoc`` (a Click payment without ``click_paydoc_id``
     was never sent to Click with another id), ``fake_mode`` (the Click port is fake under the production
-    settings: the fake would report a reversal that moved no money); ``None`` = submitted to Click."""
+    settings: the fake would report a reversal that moved no money), ``uzum_fake`` (the same for Uzum);
+    ``None`` = submitted to the provider (Click, Uzum)."""
     if payment.provider == enums.PaymentProvider.PAYME:
         return MANUAL_REASON_PAYME
+    if payment.provider == enums.PaymentProvider.UZUM:
+        # refunds go to Uzum's API with the payment's Uzum order id (its provider transaction id)
+        if integration_modes.callbacks_refused("uzum"):
+            return enums.RefundManualReason.UZUM_FAKE.value
+        return None
+    if payment.provider != enums.PaymentProvider.CLICK:
+        raise ValueError(f"Unknown payment provider {payment.provider!r}")
     if not payment_selectors.click_paydoc_id(payment.provider_state):
         return MANUAL_REASON_NO_PAYDOC
     if integration_modes.callbacks_refused("click"):
@@ -3060,13 +3068,21 @@ def checkout(customer_id: int, data: CheckoutInput, *, stock: StockCheck = FRESH
 
 
 def ensure_payable_payment(
-    order_id: int, provider: str, *, superseding: str | None = None, at: datetime | None = None
+    order_id: int,
+    provider: str,
+    *,
+    superseding: str | None = None,
+    renew: bool = False,
+    at: datetime | None = None,
 ) -> payment_selectors.PaymentRow:
     """The payment a provider page / callback works on, under ``lock_order`` → Payment locks.
 
     Same provider → the active ``pending`` payment is reused as it is (nothing written); with
     ``superseding=<click_trans_id>`` (Click Prepare only) a Click payment attached to **another** transaction
-    is failed ``abandoned`` (no event) and a new ``pending`` row is created; a Payme row is reused only while
+    is failed ``abandoned`` (no event) and a new ``pending`` row is created; with ``renew=True`` (Uzum only:
+    the payment's form is spent — its session is over, Uzum refused the order number, or the attempt's
+    outcome is unknown) the Uzum row is failed ``abandoned`` and replaced the same way, never while its form
+    may still take the money (:class:`PaymentInProgress`); a Payme row is reused only while
     it has no transaction (``attach_transaction`` refuses another id with ``TransactionTaken``). Other
     provider: in flight → :class:`PaymentInProgress`; else the pending row is failed ``abandoned`` and a new
     one created (``Order.payment_provider`` updated). A failed previous attempt gets a new ``pending`` row. An
@@ -3083,10 +3099,15 @@ def ensure_payable_payment(
                 and provider == enums.PaymentProvider.CLICK
                 and bool(pending.transaction_id)
                 and pending.transaction_id != superseding
-            )
+            ) or (renew and provider == enums.PaymentProvider.UZUM)
             if not superseded:
                 return pending
-            payment_services.fail_payment(pending.id, "abandoned", now, unilateral=True)
+            result = payment_services.fail_payment(pending.id, "abandoned", now, unilateral=True)
+            if not result.changed:  # an Uzum form that may still take the money is never replaced
+                raise PaymentInProgress(
+                    details={"provider": pending.provider, "order_id": order_id},
+                    params={"provider": selectors.provider_brand(pending.provider)},
+                )
         elif pending is not None:
             if selectors.in_flight(pending, now):
                 raise PaymentInProgress(
@@ -3115,11 +3136,11 @@ def cancel_by_customer(order_id: int, customer_id: int, *, at: datetime | None =
     """Cancel an ``awaiting_payment`` order of the customer (C-6); returns the order id.
 
     Another customer's order → :class:`OrderNotFound`; any other status → 409 ``not_cancellable``
-    (``error.order_not_cancellable``); a **Click** payment in flight → 409 ``payment_in_progress``. The
-    pending payment fails unilaterally (``cancelled``; a Payme state-1 transaction stays ``pending`` until
-    Payme's ``CancelTransaction``), reservations and the hold are released, ``cancelled`` /
-    ``customer_request`` with ``cancelled_by`` null, event ``cancelled`` (source system), push ``cancelled``.
-    No audit."""
+    (``error.order_not_cancellable``); a **Click** or **Uzum** payment in flight → 409
+    ``payment_in_progress``. The pending payment fails unilaterally (``cancelled``; a Payme state-1
+    transaction stays ``pending`` until Payme's ``CancelTransaction``), reservations and the hold are
+    released, ``cancelled`` / ``customer_request`` with ``cancelled_by`` null, event ``cancelled`` (source
+    system), push ``cancelled``. No audit."""
     _aware(at, "at")
     with transaction.atomic():
         order = lock_order(order_id)
@@ -3131,11 +3152,12 @@ def cancel_by_customer(order_id: int, customer_id: int, *, at: datetime | None =
         pending = payment_selectors.active_payment(order.pk, enums.PaymentStatus.PENDING)
         if (
             pending is not None
-            and pending.provider == enums.PaymentProvider.CLICK
+            and pending.provider in (enums.PaymentProvider.CLICK, enums.PaymentProvider.UZUM)
             and in_flight(pending, instant)
         ):
             raise PaymentInProgress(
-                details={"provider": pending.provider, "order_id": order.pk}, params={"provider": "Click"}
+                details={"provider": pending.provider, "order_id": order.pk},
+                params={"provider": selectors.provider_brand(pending.provider)},
             )
         if pending is not None:
             payment_services.fail_payment(pending.id, "cancelled", instant, unilateral=True)

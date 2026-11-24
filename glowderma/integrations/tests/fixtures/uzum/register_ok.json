@@ -1,0 +1,9 @@
+{
+  "_source": "en_checkout.yaml ApiResponse[PaymentRegisterResponse]: errorCode 0, result {orderId, paymentRedirectUrl}",
+  "errorCode": 0,
+  "message": null,
+  "result": {
+    "orderId": "3f2b8c1e-6d4a-4b7e-9c11-0a1b2c3d4e5f",
+    "paymentRedirectUrl": "https://checkout.uzumbank.uz/pay/3f2b8c1e-6d4a-4b7e-9c11-0a1b2c3d4e5f"
+  }
+}

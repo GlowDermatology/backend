@@ -33,7 +33,8 @@ class RefundSerializer(serializers.Serializer[RefundRow]):
         allow_null=True,
         help_text="Why the refund is (or was) `manual_required`: `payme` (a Payme cabinet refund), "
         "`no_paydoc` (a Click payment without Click's payment id), `fake_mode` (Click fake under the "
-        "production settings); `null` for a refund that was never manual.",
+        "production settings), `uzum_fake` (Uzum fake under the production settings); `null` for a refund "
+        "that was never manual.",
     )
 
 
