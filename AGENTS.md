@@ -223,7 +223,7 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   **Billz is the documented exception** (the `integrations/billz/client/` package): its 429 is Billz's documented rate-limit
   signal (a shared limiter pauses every worker), and transport errors / 5xx are retried only for calls that are
   safe to repeat (reads, absolute upserts) or that certainly never reached Billz.
-- **Live adapters (M3: Click, Payme, BTS, Eskiz, FCM; Yandex Delivery)** share `glowderma/integrations/httpclient.py`: one
+- **Live adapters (M3: Click, Payme, BTS, DevSMS, FCM; Yandex Delivery)** share `glowderma/integrations/httpclient.py`: one
   `Deadline` per port call (10 s; 4 s on a customer request path), `send()` retries only what never left
   (`TransportFailure(sent=False)`), and **every** other failure once the request may have left — a timeout, a body
   that does not decode, any unexpected exception — is `TransportFailure(sent=True)` ("outcome unknown", never
@@ -232,8 +232,8 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   401/403/408/425/429: map it to the provider's "unavailable, nothing happened" error, never to a definitive
   refusal. Parse provider codes with `httpclient.int_code` (strict ASCII digits) and every answer shape
   defensively: an unexpected shape is the provider's Unavailable error, never an untyped exception; provider
-  free text goes through `httpclient.safe_text` (Eskiz also masks 4-digit runs: an echoed OTP). Bearer tokens
-  (BTS, Eskiz) live only in the cache through `integrations.tokens.SharedToken` (key scoped by
+  free text goes through `httpclient.safe_text` (DevSMS logs only its `error_code`, never its text). Bearer
+  tokens (BTS) live only in the cache through `integrations.tokens.SharedToken` (key scoped by
   `account_scope(base_url, login)`, single-flight `cache.add` lock of 45 s with the fetch bounded to half of it,
   owner-checked unlock, a `LoginRefused` remembered 60 s, a cache outage fails closed with a process-local
   single-flight fallback). Click's port types the outcomes the refund state machine relies on:
@@ -292,7 +292,7 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
 - Retention jobs delete from `core.db.PURGEABLE_TABLES` only inside `core.db.purge_window()`; the outbox offers
   `outbox.on_dead(topic)` hooks for the orchestrating module to record what a dead message means.
 - Rows that must always exist (the `SiteSettings` and `DeliverySettings` singletons, the seven `IntegrationState`
-  rows — billz, bts, click, payme, eskiz, fcm, yandex —, status templates,
+  rows — billz, bts, click, payme, devsms, fcm, yandex —, status templates,
   …) are created by a data migration **and** re-ensured by a `post_migrate` receiver in the app's `AppConfig.ready()`
   (pattern: `glowderma/integrations/apps.py` `ensure_provider_rows`, `glowderma/delivery/apps.py` `ensure_settings`,
   `glowderma/site_config/apps.py`

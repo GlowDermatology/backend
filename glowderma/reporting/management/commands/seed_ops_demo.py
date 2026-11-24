@@ -122,7 +122,7 @@ class Command(BaseCommand):
                 "failed",
                 now - timedelta(minutes=95),
                 {"sms_code_id": code.pk if code else None},
-                "Eskiz timeout",
+                "DevSMS timeout",
             ),
             (
                 "sms.send",
@@ -217,7 +217,7 @@ class Command(BaseCommand):
             last_success_at=now - timedelta(minutes=4),
             updated_at=now,
         )
-        IntegrationState.objects.filter(provider="eskiz").update(
+        IntegrationState.objects.filter(provider="devsms").update(
             last_success_at=now - timedelta(minutes=11),
             last_error_at=now - timedelta(minutes=95),
             consecutive_failures=1,

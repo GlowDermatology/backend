@@ -33,11 +33,7 @@ LIVE_ENV: dict[str, dict[str, str]] = {
         "BTS_SENDER_ADDRESS": "Toshkent sh., Amir Temur 1",
         "BTS_SENDER_CITY_CODE": "0101",
     },
-    "ESKIZ_MODE": {
-        "ESKIZ_EMAIL": "sms@glowderma.uz",
-        "ESKIZ_PASSWORD": "eskiz-password-value",
-        "ESKIZ_SENDER": "GlowDerma",
-    },
+    "DEVSMS_MODE": {"DEVSMS_API_TOKEN": "devsms-api-token-value"},
     "FCM_MODE": {"FCM_PROJECT_ID": "glow-derma"},
 }
 SECRET_KEY_LINE = "PRIVATE-KEY-MATERIAL-MUST-NOT-LEAK"  # noqa: S105 - a test marker
@@ -86,7 +82,7 @@ def test_fake_providers_need_no_provider_values(
             monkeypatch.delenv(name, raising=False)
     production = load_fresh_production()
     assert {production.CLICK_MODE, production.PAYME_MODE, production.BTS_MODE} == {"fake"}
-    assert production.ESKIZ_MODE == production.FCM_MODE == "fake"
+    assert production.DEVSMS_MODE == production.FCM_MODE == "fake"
 
 
 @pytest.mark.parametrize("mode", sorted(LIVE_ENV))
@@ -131,14 +127,16 @@ def test_a_live_provider_refuses_to_start_without_each_value(
         ("BTS_MODE", "BTS_PASSWORD", "change-me"),
         ("BTS_MODE", "BTS_SENDER_PHONE", "998712000000"),
         ("BTS_MODE", "BTS_BASE_URL", "http://api.bts.uz"),
-        ("ESKIZ_MODE", "ESKIZ_PASSWORD", "change-me-eskiz-password"),
-        ("ESKIZ_MODE", "ESKIZ_BASE_URL", "http://notify.eskiz.uz/api"),
-        ("ESKIZ_MODE", "ESKIZ_CALLBACK_URL", "http://glowderma.uz/sms"),
+        ("DEVSMS_MODE", "DEVSMS_API_TOKEN", "change-me-devsms-api-token"),
+        ("DEVSMS_MODE", "DEVSMS_API_TOKEN", " "),
+        ("DEVSMS_MODE", "DEVSMS_BASE_URL", "http://devsms.uz/api/v1"),
+        ("DEVSMS_MODE", "DEVSMS_SERVICE_NAME", "Glow_Derma!"),
+        ("DEVSMS_MODE", "DEVSMS_SERVICE_NAME", "G"),
+        ("DEVSMS_MODE", "DEVSMS_TIMEOUT_SECONDS", "120"),
         ("FCM_MODE", "FCM_PROJECT_ID", "Glow Derma"),
         # R9: non-ASCII digits are not a Click id; the committed example values never reach a provider
         ("CLICK_MODE", "CLICK_SERVICE_ID", "٣٦١٢٣"),
         ("CLICK_MODE", "CLICK_MERCHANT_ID", "²0456"),
-        ("ESKIZ_MODE", "ESKIZ_SENDER", "4546"),
         ("BTS_MODE", "BTS_SENDER_PHONE", "+998901234567"),
         ("BTS_MODE", "BTS_CLIENT_ID_PREFIX", "stg-1"),
     ],
@@ -169,13 +167,13 @@ def test_the_adapters_get_the_values_without_surrounding_whitespace(
 ) -> None:
     """R9: a CRLF ``.env`` or a stray space is validated and used stripped — never validated stripped and
     sent raw (a login BTS refuses, a Click id in a URL, an unreadable credentials path)."""
-    for mode in ("CLICK_MODE", "BTS_MODE", "ESKIZ_MODE", "FCM_MODE"):
+    for mode in ("CLICK_MODE", "BTS_MODE", "DEVSMS_MODE", "FCM_MODE"):
         live(mode)
     path = service_account(tmp_path / "padded.json")
     for name, value in {
         "BTS_LOGIN": " glowderma ",
         "BTS_BASE_URL": "https://api.bts.uz ",
-        "ESKIZ_PASSWORD": "pw\r\n",
+        "DEVSMS_API_TOKEN": "token\r\n",
         "CLICK_SERVICE_ID": " 36123",
         "CLICK_MERCHANT_USER_ID": "40789 ",
         "FCM_CREDENTIALS_FILE": f"{path} ",
@@ -183,10 +181,10 @@ def test_the_adapters_get_the_values_without_surrounding_whitespace(
     }.items():
         monkeypatch.setenv(name, value)
     production = load_fresh_production()
-    assert (production.BTS_LOGIN, production.BTS_BASE_URL, production.ESKIZ_PASSWORD) == (
+    assert (production.BTS_LOGIN, production.BTS_BASE_URL, production.DEVSMS_API_TOKEN) == (
         "glowderma",
         "https://api.bts.uz",
-        "pw",
+        "token",
     )
     assert (production.CLICK_SERVICE_ID, production.CLICK_MERCHANT_USER_ID) == ("36123", "40789")
     assert production.FCM_CREDENTIALS_FILE == str(path) and production.BTS_MODE == "live"

@@ -577,9 +577,6 @@ QR_HMAC_KEY = ""
 BTS_WEBHOOK_SECRET = ""
 CLICK_SECRET_KEY = ""
 PAYME_KEY = ""
-ANDROID_SMS_APP_HASH = env_str("ANDROID_SMS_APP_HASH", "")
-if ANDROID_SMS_APP_HASH and len(ANDROID_SMS_APP_HASH) != 11:
-    raise ImproperlyConfigured("ANDROID_SMS_APP_HASH must be the 11-character app hash or empty")
 SOCIAL_TICKET_TTL_SECONDS = env_positive_int("SOCIAL_TICKET_TTL_SECONDS", 600)
 SOCIAL_NONCE_TTL_SECONDS = env_positive_int("SOCIAL_NONCE_TTL_SECONDS", 600)
 GOOGLE_APP_CLIENT_IDS = env_list("GOOGLE_APP_CLIENT_IDS", [])
@@ -599,14 +596,25 @@ MIN_APP_VERSION_ANDROID = env_app_version("MIN_APP_VERSION_ANDROID")
 APP_STORE_URL = env_str("APP_STORE_URL", "https://apps.apple.com/app/id0000000000")
 PLAY_STORE_URL = env_str("PLAY_STORE_URL", "https://play.google.com/store/apps/details?id=uz.glowderma.app")
 ADDRESS_MAX_PER_CUSTOMER = env_positive_int("ADDRESS_MAX_PER_CUSTOMER", 10)
-# Eskiz SMS (C§2.14.1); the fixed OTP ESKIZ_FAKE_CODE is read by config.settings.local only.
-ESKIZ_MODE = env_mode("ESKIZ_MODE")
-ESKIZ_BASE_URL = env_value("ESKIZ_BASE_URL", "https://notify.eskiz.uz/api")
-ESKIZ_EMAIL = env_value("ESKIZ_EMAIL", "")
-ESKIZ_PASSWORD = env_value("ESKIZ_PASSWORD", "")
-ESKIZ_SENDER = env_value("ESKIZ_SENDER", "4546")
-ESKIZ_CALLBACK_URL = env_value("ESKIZ_CALLBACK_URL", "")
-ESKIZ_FAKE_CODE = ""
+# DevSMS SMS (C§2.14.1, docs/integrations/devsms.md): one-time codes through DevSMS's four universal OTP
+# templates, from its shared default sender (4546; no Alpha Sender ID). The fixed OTP OTP_FAKE_CODE is read by
+# config.settings.local only.
+DEVSMS_MODE = env_mode("DEVSMS_MODE")
+DEVSMS_BASE_URL = env_value("DEVSMS_BASE_URL", "https://devsms.uz/api/v1")
+DEVSMS_API_TOKEN = env_value("DEVSMS_API_TOKEN", "")
+# The {service_name} of the templates ("… GlowDerma xizmatiga kirish uchun tasdiqlash kodi: …"), moderated by
+# DevSMS: 2–50 letters, digits, spaces, dots and hyphens.
+DEVSMS_SERVICE_NAME = env_value("DEVSMS_SERVICE_NAME", "GlowDerma")
+if not (
+    2 <= len(DEVSMS_SERVICE_NAME) <= 50
+    and DEVSMS_SERVICE_NAME == DEVSMS_SERVICE_NAME.strip()
+    and all(char.isalnum() or char in " .-" for char in DEVSMS_SERVICE_NAME)
+):
+    raise ImproperlyConfigured("DEVSMS_SERVICE_NAME must be 2-50 letters, digits, spaces, dots or hyphens")
+DEVSMS_TIMEOUT_SECONDS = env_positive_int("DEVSMS_TIMEOUT_SECONDS", 10)
+if DEVSMS_TIMEOUT_SECONDS > 60:
+    raise ImproperlyConfigured("DEVSMS_TIMEOUT_SECONDS must be at most 60")
+OTP_FAKE_CODE = ""
 # E-mail OTP (hybrid identity, C§2.1): EMAIL_MODE fake (in-process, nothing delivered; the default, like every
 # provider allowed under the production settings with a startup WARNING and the health flag) or smtp (any SMTP
 # relay; the provider is chosen through these variables). EMAIL_USE_TLS = STARTTLS, EMAIL_USE_SSL = implicit
@@ -804,7 +812,7 @@ FAKE_SCENARIO_HEADER_ENABLED = env_bool("FAKE_SCENARIO_HEADER_ENABLED", False)
 if FAKE_PAYMENTS_ENABLED and not CLICK_MODE == PAYME_MODE == "fake":
     raise ImproperlyConfigured("FAKE_PAYMENTS_ENABLED requires CLICK_MODE=fake and PAYME_MODE=fake")
 SCENARIO_PROVIDER_MODES = {
-    "ESKIZ_MODE": ESKIZ_MODE,
+    "DEVSMS_MODE": DEVSMS_MODE,
     "CLICK_MODE": CLICK_MODE,
     "PAYME_MODE": PAYME_MODE,
     "BTS_MODE": BTS_MODE,

@@ -24,7 +24,7 @@ ALL_FAKE = {
         "CLICK",
         "PAYME",
         "BTS",
-        "ESKIZ",
+        "DEVSMS",
         "EMAIL",
         "YANDEX_DELIVERY",
         "AI",
@@ -68,7 +68,7 @@ def test_production_warns_once_per_process_listing_the_fake_providers(
     assert _lines(caplog) == [
         (
             "WARNING",
-            "integrations running in fake mode in production: billz, fcm, click, payme, eskiz, email, "
+            "integrations running in fake mode in production: billz, fcm, click, payme, devsms, email, "
             "yandex, ai, vault",
         )
     ]
@@ -92,11 +92,11 @@ def test_ready_emits_the_warning_and_no_system_check_reports_fake_mode(
         caplog.at_level(logging.WARNING, logger="glowderma.integrations"),
     ):
         django_apps.get_app_config("integrations").ready()
-        messages = checks.run_checks()
+        messages = checks.run_checks(databases=[])  # static checks: no connection outside a db test
     assert _lines(caplog) == [
         (
             "WARNING",
-            "integrations running in fake mode in production: oauth, billz, fcm, click, payme, bts, eskiz, "
+            "integrations running in fake mode in production: oauth, billz, fcm, click, payme, bts, devsms, "
             "email, yandex, ai, vault",
         )
     ]
@@ -112,7 +112,7 @@ def test_provider_modes_cover_every_mode_setting() -> None:
             "click": "fake",
             "payme": "live",
             "bts": "fake",
-            "eskiz": "fake",
+            "devsms": "fake",
             "email": "fake",
             "yandex": "fake",
             "ai": "fake",
@@ -124,7 +124,7 @@ def test_provider_modes_cover_every_mode_setting() -> None:
             "fcm",
             "click",
             "bts",
-            "eskiz",
+            "devsms",
             "email",
             "yandex",
             "ai",

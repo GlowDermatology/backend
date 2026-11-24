@@ -11,7 +11,7 @@ from glowderma.core import integration_modes
 logger = logging.getLogger("glowderma.integrations")
 _fake_mode_warned = False
 
-PROVIDERS = ("billz", "bts", "click", "payme", "eskiz", "fcm", "yandex")
+PROVIDERS = ("billz", "bts", "click", "payme", "devsms", "fcm", "yandex")
 
 
 def ensure_provider_rows(sender: AppConfig, *, using: str, apps: Any = global_apps, **kwargs: Any) -> None:
@@ -54,7 +54,7 @@ _sandbox_warned = False
 
 def warn_sandbox_providers() -> bool:
     """Log one WARNING per process naming the live providers configured against a sandbox (BTS's test host,
-    ``PAYME_TEST_MODE`` / Payme's sandbox checkout, Eskiz's test sender); never a refusal to start (staging
+    ``PAYME_TEST_MODE`` / Payme's sandbox checkout); never a refusal to start (staging
     runs the production settings against sandboxes). Returns whether the line was emitted by this call."""
     global _sandbox_warned
     sandboxes = integration_modes.sandbox_providers()

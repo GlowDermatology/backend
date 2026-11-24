@@ -1722,6 +1722,10 @@ msgstr "Дерматолог"
 msgid "Dermatologiya"
 msgstr "Дерматология"
 
+#: model metadata
+msgid "DevSMS"
+msgstr "DevSMS"
+
 #: glowderma/commerce/admin.py
 msgid "Diagnostika"
 msgstr "Диагностика"
@@ -1843,10 +1847,6 @@ msgstr "Устаревший остаток"
 #: glowderma/reporting/dashboards/money.py
 msgid "Eskirgan: %(ago)s"
 msgstr "Устарел: %(ago)s"
-
-#: model metadata
-msgid "Eskiz"
-msgstr "Eskiz"
 
 #: admin history (professionals.Professional)
 msgid "E’lon qilingan"

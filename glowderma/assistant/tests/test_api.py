@@ -12,7 +12,7 @@ from rest_framework.test import APIClient
 from glowderma.assistant.api.admin.views import AssistantGenerateThrottle
 from glowderma.assistant.models import AssistantSettings, GenerationJob
 from glowderma.assistant.tests.factories import GenerationJobFactory
-from glowderma.catalog.models import Product
+from glowderma.catalog.models import Category, Product
 from glowderma.catalog.tests.factories import ProductFactory, ProductImageFactory
 from glowderma.core import enums
 from glowderma.core.models import AuditEntry
@@ -35,9 +35,17 @@ def job_url(job_id: int, action: str = "") -> str:
 
 
 def make_product(**fields: Any) -> Product:
+    """A product whose data holds no number but 30: the factories' sequence-numbered POS label
+    (``TEST PRODUCT 5 30ML``) and category name (``Kategoriya 5``) would otherwise make a suggested "5%" a
+    supported number in one test order and not in another."""
+    category, _ = Category.objects.get_or_create(
+        slug="assistant-serums", defaults={"name_uz": "Serumlar", "position": 0}
+    )
     return ProductFactory.create(
         name_uz="Gialuron serum",
         description_uz="Namlovchi serum, 30 ml.",
+        billz_name="GIALURON SERUM 30ML",
+        category=category,
         status=enums.ProductStatus.HIDDEN,
         **fields,
     )

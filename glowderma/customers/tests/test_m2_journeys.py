@@ -54,7 +54,7 @@ from glowderma.core.models import AuditEntry, OutboxMessage
 from glowderma.core.timeutils import TASHKENT
 from glowderma.integrations.bts import fake as fake_bts
 from glowderma.integrations.click import fake as fake_click
-from glowderma.integrations.eskiz.registry import fake_eskiz
+from glowderma.integrations.devsms.registry import fake_sms
 from glowderma.integrations.fcm import registry as fcm_registry
 from glowderma.integrations.fcm.fake import FakeFcm
 from glowderma.integrations.fcm.ports import PushMessage
@@ -88,12 +88,12 @@ Commit = Callable[[], AbstractContextManager[Any]]
 
 @pytest.fixture(autouse=True)
 def clean_fakes() -> Iterator[None]:
-    """The fake Eskiz, BTS and Click keep per-process state: every journey starts from a clean slate."""
-    fake_eskiz().sent.clear()
+    """The fake SMS, BTS and Click keep per-process state: every journey starts from a clean slate."""
+    fake_sms().sent.clear()
     fake_bts.reset()
     fake_click.reset()
     yield
-    fake_eskiz().sent.clear()
+    fake_sms().sent.clear()
     fake_bts.reset()
     fake_click.reset()
 
@@ -297,7 +297,7 @@ def verify(app: App, phone: str, purpose: str) -> str:
     """``auth/verify-code/`` with the fixed fake OTP of the test settings (C§2.14.1)."""
     response = app.post(
         "auth/verify-code/",
-        {"phone": phone, "purpose": purpose, "code": settings.ESKIZ_FAKE_CODE},
+        {"phone": phone, "purpose": purpose, "code": settings.OTP_FAKE_CODE},
         auth=False,
     )
     assert response.status_code == 200, response.content
@@ -322,7 +322,7 @@ def sign_up(
         "attempts": 5,
         "length": 6,
     }
-    assert any(settings.ESKIZ_FAKE_CODE in m.text for m in fake_eskiz().sent if m.phone == phone)
+    assert any(m.code == settings.OTP_FAKE_CODE for m in fake_sms().sent if m.phone == phone)
     token = verify(app, phone, "register")
     body: dict[str, Any] = {
         "verification_token": token,
@@ -621,7 +621,7 @@ def test_journey_1_register_second_device_refresh_reuse_and_logout(world: World)
         "email_mask": None,
         "expires_in": step.json()["expires_in"],
     }
-    assert len([m for m in fake_eskiz().sent if m.phone == phone]) == 2  # the register and the login code
+    assert len([m for m in fake_sms().sent if m.phone == phone]) == 2  # the register and the login code
     token = verify(second, phone, "login_new_device")
     signed = second.post(
         "auth/login/", {"phone": phone, "password": PASSWORD, "verification_token": token}, auth=False
@@ -657,10 +657,10 @@ def test_journey_1_register_second_device_refresh_reuse_and_logout(world: World)
     error(second.post("auth/logout/", {"refresh": second.refresh}, auth=False), 401, "SESSION_EXPIRED")
 
     # signing in again on this install: the kept device key makes it known — no SMS, no new key
-    texts_before = len(fake_eskiz().sent)
+    texts_before = len(fake_sms().sent)
     again = second.post("auth/login/", {"phone": phone, "password": PASSWORD}, auth=False)
     assert again.status_code == 200, again.content
-    assert again.json()["device_key"] is None and len(fake_eskiz().sent) == texts_before
+    assert again.json()["device_key"] is None and len(fake_sms().sent) == texts_before
     second.store(again.json())
 
     # refresh reuse: an old token presented after the rotation was confirmed and the grace is over kills it

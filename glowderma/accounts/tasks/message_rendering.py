@@ -1,5 +1,6 @@
-"""The texts accounts sends: the one-time-code SMS and e-mail, and the staff password-link e-mail (pure
-rendering, in the recipient's language)."""
+"""The texts accounts sends: the one-time-code e-mail and the staff password-link e-mail (pure rendering, in
+the recipient's language). The one-time-code SMS has no text of ours: DevSMS's universal OTP template is
+chosen by purpose in ``otp_delivery``."""
 
 from __future__ import annotations
 
@@ -7,15 +8,6 @@ from django.conf import settings
 from django.template.loader import render_to_string
 
 from glowderma.core import enums, i18n
-
-
-def sms_text(code: str, lang: str, platform: str) -> str:
-    """``sms.otp`` in the request language; Android gets the SMS Retriever app hash on a second line."""
-    text = i18n.t("sms.otp", lang, code=code)
-    app_hash = str(settings.ANDROID_SMS_APP_HASH)
-    if platform == enums.OrderChannel.ANDROID and app_hash:
-        text = f"{text}\n{app_hash}"
-    return text
 
 
 def email_parts(code: str, lang: str, purpose: str) -> tuple[str, str, str]:
@@ -64,7 +56,6 @@ def staff_link_parts(*, link: str, name: str, lang: str, purpose: str) -> tuple[
 
 
 __all__ = [
-    "sms_text",
     "email_parts",
     "staff_link_parts",
 ]

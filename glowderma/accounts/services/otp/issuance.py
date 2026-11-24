@@ -26,8 +26,8 @@ from glowderma.core.api.exceptions import (
     PhoneRegistered,
 )
 from glowderma.core.pii import pii_ref
+from glowderma.integrations.devsms import registry as sms_registry
 from glowderma.integrations.email import registry as email_registry
-from glowderma.integrations.eskiz import registry as eskiz_registry
 
 logger = logging.getLogger("glowderma.accounts.services")
 
@@ -87,7 +87,7 @@ def _create_code(
     target.codes().filter(purpose=stored_purpose, consumed_at__isnull=True, expires_at__gt=now).update(
         expires_at=now
     )
-    code = email_registry.new_code() if target.is_email else eskiz_registry.new_code()
+    code = email_registry.new_code() if target.is_email else sms_registry.new_code()
     ttl = int(settings.CUSTOMER_OTP_TTL_SECONDS)
     row = SmsCode.objects.create(
         **target.lookup,

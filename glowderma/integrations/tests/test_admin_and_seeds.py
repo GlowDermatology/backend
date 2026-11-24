@@ -130,11 +130,12 @@ def test_integrations_migrations_reverse_to_zero_and_forward_again() -> None:
 def test_0003_reverse_deletes_the_provider_rows_and_forward_restores_them() -> None:
     module = importlib.import_module("glowderma.integrations.migrations.0003_seed_integration_state")
     module.delete_provider_rows(django_apps, connection.schema_editor)
-    assert list(IntegrationState.objects.values_list("provider", flat=True)) == ["yandex"]  # 0006's row
+    # 0006's and 0007's rows (0003 seeded "eskiz", which 0007 renamed)
+    assert sorted(IntegrationState.objects.values_list("provider", flat=True)) == ["devsms", "yandex"]
     module.create_provider_rows(django_apps, connection.schema_editor)
     module.create_provider_rows(django_apps, connection.schema_editor)  # idempotent
     assert sorted(IntegrationState.objects.values_list("provider", flat=True)) == sorted(
-        (*module.PROVIDERS, "yandex")
+        (*module.PROVIDERS, "devsms", "yandex")
     )
 
 
@@ -156,7 +157,7 @@ def test_flush_keeps_the_provider_rows() -> None:
     IntegrationState.objects.filter(provider="billz").update(consecutive_failures=3)
     call_command("flush", interactive=False, verbosity=0)
     providers = sorted(IntegrationState.objects.values_list("provider", flat=True))
-    assert providers == ["billz", "bts", "click", "eskiz", "fcm", "payme", "yandex"]
+    assert providers == ["billz", "bts", "click", "devsms", "fcm", "payme", "yandex"]
     assert IntegrationState.objects.get(provider="billz").consecutive_failures == 0
     call_command("flush", interactive=False, verbosity=0)  # idempotent
     assert IntegrationState.objects.count() == 7

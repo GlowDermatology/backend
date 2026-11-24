@@ -1,0 +1,24 @@
+{
+  "success": true,
+  "message": "SMS yuborildi",
+  "data": {
+    "id": 81234,
+    "phone": "998901231231",
+    "message": "MyService tizimi: GlowDerma xizmatiga ro'yxatdan o'tish uchun tasdiqlash kodi: ******",
+    "status": "sent",
+    "type": "universal_otp",
+    "parts": 1,
+    "price_per_part": "214.00",
+    "total_cost": "214.00",
+    "currency": "UZS",
+    "provider_request_id": "6f1c2a0e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+    "country_code": "uz",
+    "sent_via": "api",
+    "error": null,
+    "created_at": "2026-11-24T10:00:00+05:00",
+    "sent_at": "2026-11-24T10:00:01+05:00",
+    "delivered_at": null,
+    "failed_at": null,
+    "outcome": "sent"
+  }
+}

@@ -15,14 +15,15 @@ from rest_framework.test import APIClient
 
 from glowderma.accounts import services, tasks
 from glowderma.accounts.models import AuthSession, Customer, SmsCode, SocialIdentity, StaffUser
+from glowderma.accounts.tasks import otp_delivery
 from glowderma.accounts.tests.factories import AuthSessionFactory, start_test_session
 from glowderma.core import outbox, secretbox
 from glowderma.core.models import OutboxMessage
 from glowderma.integrations import services as integration_services
-from glowderma.integrations.eskiz import registry as eskiz_registry
-from glowderma.integrations.eskiz.fake import FakeEskiz
-from glowderma.integrations.eskiz.live import LiveEskiz
-from glowderma.integrations.eskiz.ports import EskizUnavailable, SmsMessage
+from glowderma.integrations.devsms import registry as sms_registry
+from glowderma.integrations.devsms.fake import FakeSms
+from glowderma.integrations.devsms.live import LiveDevsms
+from glowderma.integrations.devsms.ports import OtpPurpose, OtpSms, SmsDelivery, SmsUnavailable
 from glowderma.integrations.oauth import fake as oauth_fake
 from glowderma.integrations.oauth.registry import fake_apple
 
@@ -32,10 +33,10 @@ PHONE = "+998901231231"
 
 @pytest.fixture(autouse=True)
 def clean_fakes() -> Any:
-    eskiz_registry.fake_eskiz().sent.clear()
+    sms_registry.fake_sms().sent.clear()
     fake_apple().revoked.clear()
     yield
-    eskiz_registry.fake_eskiz().sent.clear()
+    sms_registry.fake_sms().sent.clear()
     fake_apple().revoked.clear()
 
 
@@ -53,46 +54,113 @@ def issue(phone: str = PHONE, platform: str = "ios") -> OutboxMessage:
 def test_claims_before_sending_and_never_resends(monkeypatch: pytest.MonkeyPatch) -> None:
     message = issue()
     seen: list[Any] = []
-    original = FakeEskiz.send
+    original = FakeSms.send_otp
 
-    def spy(self: FakeEskiz, sms: SmsMessage) -> str:
+    def spy(self: FakeSms, sms: OtpSms) -> SmsDelivery:
         seen.append(SmsCode.objects.get(pk=sms.sms_code_id).sent_at)
         return original(self, sms)
 
-    monkeypatch.setattr(FakeEskiz, "send", spy)
+    monkeypatch.setattr(FakeSms, "send_otp", spy)
     tasks.send_sms(message)
     tasks.send_sms(message)  # a redelivery
     assert len(seen) == 1 and seen[0] is not None
-    assert len(eskiz_registry.fake_eskiz().sent) == 1
+    assert len(sms_registry.fake_sms().sent) == 1
+    row = SmsCode.objects.get(phone=PHONE)
+    assert row.provider_message_id == f"fake-{row.pk}"
+
+
+@pytest.mark.parametrize(
+    ("purpose", "expected"),
+    [
+        ("register", OtpPurpose.REGISTRATION),
+        ("reset_password", OtpPurpose.PASSWORD_RESET),
+        ("link_social", OtpPurpose.ACTION_CONFIRMATION),
+        ("attach_phone", OtpPurpose.ACTION_CONFIRMATION),
+    ],
+)
+def test_the_code_goes_out_with_the_template_of_its_purpose(purpose: str, expected: OtpPurpose) -> None:
+    """Every stored SMS purpose has a universal OTP template; the plain code is the one the row's HMAC
+    holds."""
+    if purpose == "reset_password":
+        Customer.objects.create(phone=PHONE, password="x")
+    services.send_code(
+        PHONE,
+        purpose,
+        ip="203.0.113.1",
+        fid="fid-tasks-0001",
+        lang="ru",
+        platform="ios",
+        social_jti="jti-1" if purpose == "link_social" else None,
+    )
+    row = SmsCode.objects.get(phone=PHONE)
+    tasks.send_sms(OutboxMessage.objects.get(dedupe_key=f"sms.send:{row.pk}"))
+    [sms] = sms_registry.fake_sms().sent
+    assert (sms.phone, sms.purpose, sms.sms_code_id) == (PHONE, expected, row.pk)
+    assert services.code_hmac(sms.code) == row.code_hmac
+
+
+def test_every_sms_purpose_has_a_template() -> None:
+    sms_purposes = {stored for stored in SmsCode.Purpose.values if stored != SmsCode.Purpose.VERIFY_EMAIL}
+    assert set(otp_delivery.SMS_PURPOSES) == sms_purposes
+    assert otp_delivery.SMS_PURPOSES[SmsCode.Purpose.NEW_DEVICE] == OtpPurpose.LOGIN
+
+
+def test_the_idempotency_key_is_stable_per_code_and_distinct_across_codes() -> None:
+    issue()
+    row = SmsCode.objects.get(phone=PHONE)
+    key = otp_delivery.sms_idempotency_key
+    assert key(row) == key(SmsCode.objects.get(pk=row.pk))
+    later = row.created_at.replace(microsecond=(row.created_at.microsecond + 1) % 10**6)
+    assert key(SmsCode(pk=row.pk, created_at=later)) != key(row)  # the same id in another database
+
+
+def test_a_repeatable_failure_unclaims_keeps_the_payload_and_repeats_with_the_same_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    message = issue()
+    keys: list[str] = []
+
+    def down(self: FakeSms, sms: OtpSms) -> SmsDelivery:
+        keys.append(sms.idempotency_key)
+        raise SmsUnavailable("read timeout", sent=False)
+
+    monkeypatch.setattr(FakeSms, "send_otp", down)
+    for _ in range(2):
+        with pytest.raises(SmsUnavailable):
+            tasks.send_sms(message)
+    row = SmsCode.objects.get(phone=PHONE)
+    assert row.sent_at is None
+    assert cache.get(services.otp_payload_key(row.pk)) is not None
+    assert keys[0] == keys[1] == otp_delivery.sms_idempotency_key(row)
 
 
 def test_connect_failure_unclaims_and_keeps_the_payload() -> None:
     message = issue("+998901239999")
     row = SmsCode.objects.get(phone="+998901239999")
-    with pytest.raises(EskizUnavailable):
+    with pytest.raises(SmsUnavailable):
         tasks.send_sms(message)
     row.refresh_from_db()
     assert row.sent_at is None
     assert cache.get(services.otp_payload_key(row.pk)) is not None
 
 
-def test_timeout_after_sending_keeps_the_claim(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_unknown_outcome_keeps_the_claim_and_the_provider_id(monkeypatch: pytest.MonkeyPatch) -> None:
     message = issue()
 
-    def timeout(self: FakeEskiz, sms: SmsMessage) -> str:
-        raise EskizUnavailable("read timeout", sent=True)
+    def unknown(self: FakeSms, sms: OtpSms) -> SmsDelivery:
+        raise SmsUnavailable("provider outcome unknown", sent=True, message_id="81234")
 
-    monkeypatch.setattr(FakeEskiz, "send", timeout)
+    monkeypatch.setattr(FakeSms, "send_otp", unknown)
     tasks.send_sms(message)
     row = SmsCode.objects.get(phone=PHONE)
-    assert row.sent_at is not None
+    assert row.sent_at is not None and row.provider_message_id == "81234"
     assert cache.get(services.otp_payload_key(row.pk)) is None
 
 
 def test_rejection_is_final_and_recorded() -> None:
     message = issue("+998901230000")
     tasks.send_sms(message)
-    assert integration_services.get_state("eskiz").last_error.startswith("rejected")
+    assert integration_services.get_state("devsms").last_error.startswith("rejected")
     assert SmsCode.objects.get(phone="+998901230000").sent_at is not None
 
 
@@ -100,7 +168,7 @@ def test_missing_ciphertext_sends_nothing() -> None:
     message = issue()
     cache.delete(services.otp_payload_key(SmsCode.objects.get(phone=PHONE).pk))
     tasks.send_sms(message)
-    assert eskiz_registry.fake_eskiz().sent == []
+    assert sms_registry.fake_sms().sent == []
 
 
 def test_tampered_ciphertext_sends_nothing(caplog: pytest.LogCaptureFixture) -> None:
@@ -109,34 +177,29 @@ def test_tampered_ciphertext_sends_nothing(caplog: pytest.LogCaptureFixture) -> 
     cache.set(services.otp_payload_key(row.pk), secretbox.seal(b"999999", aad=b"another-row"), 120)
     with caplog.at_level(logging.ERROR):
         tasks.send_sms(message)
-    assert eskiz_registry.fake_eskiz().sent == []
-
-
-@override_settings(ANDROID_SMS_APP_HASH="AbCdEfGhIjK")
-def test_android_hash_line_only_for_android() -> None:
-    assert tasks.sms_text("123456", "en", "android").endswith("\nAbCdEfGhIjK")
-    assert "\n" not in tasks.sms_text("123456", "en", "ios")
+    assert sms_registry.fake_sms().sent == []
 
 
 @override_settings(DEV_FEATURES_ALLOWED=False)
-def test_fake_eskiz_in_production_keeps_nothing_and_the_fixed_code_is_off(
+def test_fake_sms_in_production_keeps_nothing_and_the_fixed_code_is_off(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    fake = FakeEskiz()
+    fake = FakeSms()
+    sms = OtpSms(phone=PHONE, code="123456", purpose=OtpPurpose.LOGIN, sms_code_id=7, idempotency_key="k")
     with caplog.at_level(logging.INFO):
-        assert fake.send(SmsMessage(phone=PHONE, text="code 123456", sms_code_id=7)) == "fake-7"
+        assert fake.send_otp(sms) == SmsDelivery(message_id="fake-7", status="sent")
     assert fake.sent == []
     assert all("123456" not in record.getMessage() for record in caplog.records)
     assert any("sms.fake_accepted sms_code_id=7" in record.getMessage() for record in caplog.records)
-    codes = {eskiz_registry.new_code() for _ in range(5)}
+    codes = {sms_registry.new_code() for _ in range(5)}
     assert codes != {"123456"} and all(len(code) == 6 and code.isdigit() for code in codes)
 
 
 def test_fixed_code_under_local_settings() -> None:
-    assert eskiz_registry.new_code() == "123456"
-    with override_settings(ESKIZ_MODE="live"):
-        assert isinstance(eskiz_registry.get_eskiz_port(), LiveEskiz)
-        codes = {eskiz_registry.new_code() for _ in range(5)}  # the fixed code is a fake-mode switch only
+    assert sms_registry.new_code() == "123456"
+    with override_settings(DEVSMS_MODE="live"):
+        assert isinstance(sms_registry.get_sms_port(), LiveDevsms)
+        codes = {sms_registry.new_code() for _ in range(5)}  # the fixed code is a fake-mode switch only
     assert codes != {"123456"} and all(len(code) == 6 and code.isdigit() for code in codes)
 
 

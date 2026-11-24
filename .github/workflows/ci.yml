@@ -229,7 +229,7 @@ jobs:
         # Secrets are generated per run (production refuses the values committed in .env.example); the rest
         # are non-secret placeholders that satisfy production settings validation. Every provider runs fake
         # here (INTEGRATIONS_MODE defaults to fake): M3's live-only variables (Billz, Click ids, Payme merchant,
-        # BTS, Eskiz, FCM, Apple) are required only when their *_MODE is live; the list below is what
+        # BTS, DevSMS, FCM, Apple) are required only when their *_MODE is live; the list below is what
         # config/settings/production.py requires in every mode (in production the secrets come from Vault,
         # the topology from the infra repo's compose/app.yaml).
         env:

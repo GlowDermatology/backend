@@ -138,7 +138,7 @@ class IntegrationState(models.Model):
         BTS = "bts", "BTS"
         CLICK = "click", "Click"
         PAYME = "payme", "Payme"
-        ESKIZ = "eskiz", "Eskiz"
+        DEVSMS = "devsms", "DevSMS"
         FCM = "fcm", "FCM"
         YANDEX = "yandex", "Yandex Delivery"
 

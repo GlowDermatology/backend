@@ -1,6 +1,6 @@
 """The e-mail port (hybrid identity, customer contract §2.1, §2.14.4): one call per message.
 
-The outcomes the ``email.send`` handler tells apart (as the SMS port's, ``integrations.eskiz.ports``):
+The outcomes the ``email.send`` handler tells apart (as the SMS port's, ``integrations.devsms.ports``):
 
 * a message id → accepted (stored in ``SmsCode.provider_message_id``);
 * :class:`EmailRejected` → a definitive refusal (the relay refused the recipient or the sender): logged,

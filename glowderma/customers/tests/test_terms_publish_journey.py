@@ -25,7 +25,7 @@ from rest_framework.test import APIClient
 from glowderma.accounts.models import Customer
 from glowderma.catalog.tests.factories import ProductFactory, ProductStockFactory
 from glowderma.core.models import AuditEntry
-from glowderma.integrations.eskiz.registry import fake_eskiz
+from glowderma.integrations.devsms.registry import fake_sms
 from glowderma.site_config.models import SiteSettings
 from glowderma.site_config.tests.console_page import URL as CONSOLE
 from glowderma.site_config.tests.console_page import page_forms
@@ -40,9 +40,9 @@ VERSION = re.compile(r"^\d{8}-\d+$")
 
 @pytest.fixture(autouse=True)
 def clean_sms() -> Iterator[None]:
-    fake_eskiz().sent.clear()
+    fake_sms().sent.clear()
     yield
-    fake_eskiz().sent.clear()
+    fake_sms().sent.clear()
 
 
 class App:
@@ -94,7 +94,7 @@ def verification_token(app: App) -> str:
     verified = app.call(
         "post",
         "auth/verify-code/",
-        {"phone": PHONE, "purpose": "register", "code": settings.ESKIZ_FAKE_CODE},
+        {"phone": PHONE, "purpose": "register", "code": settings.OTP_FAKE_CODE},
     )
     assert verified.status_code == 200, verified.content
     return str(verified.json()["verification_token"])

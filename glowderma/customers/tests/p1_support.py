@@ -15,7 +15,7 @@ from glowderma.accounts import tokens
 from glowderma.accounts.models import Customer, SmsCode
 from glowderma.accounts.tests.factories import device_headers, start_test_session
 from glowderma.core import timeutils
-from glowderma.integrations.eskiz.registry import fake_eskiz
+from glowderma.integrations.devsms.registry import fake_sms
 from glowderma.integrations.oauth.registry import fake_apple
 from glowderma.site_config.models import SiteSettings
 
@@ -68,12 +68,12 @@ def verification(phone: str, purpose: str, *, jti: str | None = None, minutes: i
 
 
 def sent_codes() -> list[str]:
-    """The codes the fake Eskiz received (the last six characters of the first line)."""
-    return [message.text.split("\n")[0].split("kodingiz ")[-1][:6] for message in fake_eskiz().sent]
+    """The codes the fake SMS adapter received."""
+    return [message.code for message in fake_sms().sent]
 
 
 def reset_fakes() -> None:
-    fake_eskiz().sent.clear()
+    fake_sms().sent.clear()
     fake_apple().revoked.clear()
     fake_apple().exchanged.clear()
     fake_apple().redirect_uris.clear()

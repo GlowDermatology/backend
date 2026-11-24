@@ -1,7 +1,0 @@
-{
-  "message": "token_generated",
-  "data": {
-    "token": "eskiz-token-1"
-  },
-  "token_type": "bearer"
-}

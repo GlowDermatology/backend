@@ -46,7 +46,7 @@ def test_fake_under_production_settings_keeps_nothing_and_logs_no_address(
 
 def test_registry_selects_the_adapter_and_the_fixed_code() -> None:
     assert registry.get_email_port() is registry.fake_email()
-    assert registry.new_code() == "123456"  # ESKIZ_FAKE_CODE of the local/test settings
+    assert registry.new_code() == "123456"  # OTP_FAKE_CODE of the local/test settings
     with override_settings(EMAIL_MODE="smtp", SMTP_HOST="smtp.example.uz"):
         port = registry.get_email_port()
         assert isinstance(port, SmtpEmail) and port.is_configured()

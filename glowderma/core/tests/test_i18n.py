@@ -37,11 +37,11 @@ def test_every_key_named_by_the_contract_exists() -> None:
 
 def test_placeholders_are_the_contract_ones() -> None:
     allowed = {"n", "m", "limit", "max", "available", "order_id", "provider", "amount", "percent"}
-    allowed |= {"item_count", "total", "tracking_number", "code"}
+    allowed |= {"item_count", "total", "tracking_number"}
     used = set().union(*(i18n.placeholders(texts["uz"]) for texts in i18n.CATALOG.values()))
     assert used <= allowed
-    sms_only = [key for key, texts in i18n.CATALOG.items() if "code" in i18n.placeholders(texts["uz"])]
-    assert sms_only == ["sms.otp"]
+    # the one-time-code SMS is DevSMS's universal OTP template: no catalog text carries a code
+    assert [key for key, texts in i18n.CATALOG.items() if "code" in i18n.placeholders(texts["uz"])] == []
 
 
 def test_generic_field_messages_are_the_catalog_uzbek_texts() -> None:
@@ -72,7 +72,6 @@ def test_t_renders_and_falls_back_to_uzbek() -> None:
     assert i18n.t("error.otp_locked", "ru", m=3) == "Попытки закончились. Повторите через 3 мин."
     assert i18n.t("error.otp_locked", "en", m=3) == "No attempts left. Try again in 3 min."
     assert i18n.t("error.not_found", "de") == i18n.t("error.not_found") == "Topilmadi."
-    assert i18n.t("sms.otp", "uz", code="123456").startswith("Glow Derma: tasdiqlash kodingiz 123456.")
     with pytest.raises(KeyError, match="needs"):
         i18n.t("error.otp_locked", "uz")
     with pytest.raises(KeyError):
