@@ -15,6 +15,7 @@ from django.template.response import TemplateResponse
 from django.urls import reverse
 from django.utils.cache import add_never_cache_headers
 from django.utils.translation import gettext
+from django.views.generic import View
 from rest_framework.exceptions import Throttled
 
 from glowderma.accounts import console_sessions, second_factor
@@ -70,36 +71,43 @@ def _login_context(request: HttpRequest, extra_context: dict[str, Any] | None) -
     return context
 
 
-def guarded_admin_login(
-    request: HttpRequest, extra_context: dict[str, Any] | None = None
-) -> HttpResponseBase:
-    request.current_app = admin.site.name
-    if request.method == "GET" and admin.site.has_permission(request):
-        return HttpResponseRedirect(reverse("admin:index", current_app=admin.site.name))
-    context = _login_context(request, extra_context)
-    try:
-        return ConsolePasswordView.as_view(
-            extra_context=context,
-            authentication_form=admin.site.login_form,
-            template_name=paths.LOGIN_TEMPLATE,
-        )(request)
-    except Throttled as exc:
-        message, wait = notices.lockout_message(exc)
-        email = str(request.POST.get("username", "")).strip().lower()[:254]
-        if isinstance(exc, IpThrottled):
-            lockouts.record_ip_locked(request, "password", wait, email=email)
-        else:
-            events.record("console.login_locked", request, email=email, wait=wait)
-        form = forms.GuardedAdminAuthenticationForm(request, initial={"username": email})
-        response = TemplateResponse(
-            request, paths.LOGIN_TEMPLATE, {**context, "form": form, "lockout_message": message}, status=429
-        )
-        response["Retry-After"] = str(wait)
-        add_never_cache_headers(response)
-        return response
+class GuardedAdminLoginView(View):
+    """The console's login page (``django-admin/login/``): a signed-in staff member goes to the index; anyone
+    else gets :class:`ConsolePasswordView` with the admin site's context and login form, or the 429 page of
+    a running lockout."""
+
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
+        extra_context: dict[str, Any] | None = None
+        request.current_app = admin.site.name
+        if request.method == "GET" and admin.site.has_permission(request):
+            return HttpResponseRedirect(reverse("admin:index", current_app=admin.site.name))
+        context = _login_context(request, extra_context)
+        try:
+            return ConsolePasswordView.as_view(
+                extra_context=context,
+                authentication_form=admin.site.login_form,
+                template_name=paths.LOGIN_TEMPLATE,
+            )(request)
+        except Throttled as exc:
+            message, wait = notices.lockout_message(exc)
+            email = str(request.POST.get("username", "")).strip().lower()[:254]
+            if isinstance(exc, IpThrottled):
+                lockouts.record_ip_locked(request, "password", wait, email=email)
+            else:
+                events.record("console.login_locked", request, email=email, wait=wait)
+            form = forms.GuardedAdminAuthenticationForm(request, initial={"username": email})
+            response = TemplateResponse(
+                request,
+                paths.LOGIN_TEMPLATE,
+                {**context, "form": form, "lockout_message": message},
+                status=429,
+            )
+            response["Retry-After"] = str(wait)
+            add_never_cache_headers(response)
+            return response
 
 
 __all__ = [
     "ConsolePasswordView",
-    "guarded_admin_login",
+    "GuardedAdminLoginView",
 ]

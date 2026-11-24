@@ -71,7 +71,7 @@ def test_secrets_are_never_shown(super_client: Client, staff: StaffUser) -> None
 def test_guarded_login_form_is_wired_once_at_import() -> None:
     assert admin.site.login_form is console_forms.GuardedAdminAuthenticationForm
     # the view reads the site's form; it never assigns one per request
-    assert "site.login_form =" not in inspect.getsource(console_views.guarded_admin_login)
+    assert "site.login_form =" not in inspect.getsource(console_views.GuardedAdminLoginView)
 
 
 def test_guarded_login_accepts_a_staff_user_and_asks_for_the_second_factor() -> None:

@@ -37,7 +37,7 @@ from django.utils import translation
 from django.utils.functional import lazy
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.translation import gettext
-from django.views.decorators.http import require_POST
+from django.views.generic import View
 
 from glowderma.core.network import CONSOLE_PREFIX
 
@@ -92,30 +92,33 @@ def switcher_languages(request: HttpRequest) -> list[dict[str, Any]]:
     ]
 
 
-@require_POST
-def set_language(request: HttpRequest) -> HttpResponse:
+class SetLanguageView(View):
     """``POST /django-admin/language/`` (``language``, optional ``next``): remembers the language in the
     console cookie and returns to the page the form was on. Reachable before sign-in (the login page has a
     switcher); an unknown language changes nothing. ``next`` and the referrer are followed only on this
     host, so the form is not an open redirect."""
-    target = request.POST.get("next") or request.headers.get("referer") or ""
-    if not url_has_allowed_host_and_scheme(
-        target, allowed_hosts={request.get_host()}, require_https=request.is_secure()
-    ):
-        target = reverse("admin:index")
-    response = HttpResponseRedirect(target)
-    code = request.POST.get("language", "")
-    if code in CODES:
-        response.set_cookie(
-            COOKIE_NAME,
-            code,
-            max_age=COOKIE_MAX_AGE,
-            path=COOKIE_PATH,
-            secure=bool(settings.SESSION_COOKIE_SECURE),
-            httponly=True,
-            samesite="Lax",
-        )
-    return response
+
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest) -> HttpResponse:
+        target = request.POST.get("next") or request.headers.get("referer") or ""
+        if not url_has_allowed_host_and_scheme(
+            target, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+        ):
+            target = reverse("admin:index")
+        response = HttpResponseRedirect(target)
+        code = request.POST.get("language", "")
+        if code in CODES:
+            response.set_cookie(
+                COOKIE_NAME,
+                code,
+                max_age=COOKIE_MAX_AGE,
+                path=COOKIE_PATH,
+                secure=bool(settings.SESSION_COOKIE_SECURE),
+                httponly=True,
+                samesite="Lax",
+            )
+        return response
 
 
 # --- model metadata ----------------------------------------------------------------------------------------

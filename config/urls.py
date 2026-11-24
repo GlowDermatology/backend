@@ -91,7 +91,9 @@ if settings.DJANGO_ADMIN_ENABLED:
     # The console's sign-in (password, TOTP 2FA, enrolment, logout) ahead of the site's own routes.
     urlpatterns.extend(console_urls.urlpatterns)
     # The console's language switcher (before and after sign-in).
-    urlpatterns.append(path("django-admin/language/", console_i18n.set_language, name="ops_set_language"))
+    urlpatterns.append(
+        path("django-admin/language/", console_i18n.SetLanguageView.as_view(), name="ops_set_language")
+    )
     urlpatterns.append(path("django-admin/", admin.site.urls))
 if (
     settings.DEBUG

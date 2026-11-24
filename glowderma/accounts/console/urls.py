@@ -6,11 +6,13 @@ from django.urls import URLPattern, path
 from glowderma.accounts.console import views
 
 urlpatterns: list[URLPattern] = [
-    path("django-admin/login/", views.guarded_admin_login, name="ops_login"),
-    path("django-admin/logout/", views.logout, name="ops_logout"),
-    path("django-admin/2fa/", views.verify, name="ops_2fa_verify"),
-    path("django-admin/2fa/recovery/", views.recovery, name="ops_2fa_recovery"),
-    path("django-admin/2fa/enrol/", views.enrol, name="ops_2fa_enrol"),
-    path("django-admin/2fa/recovery-codes/", views.recovery_codes, name="ops_2fa_recovery_codes"),
-    path("django-admin/2fa/cancel/", views.cancel, name="ops_2fa_cancel"),
+    path("django-admin/login/", views.GuardedAdminLoginView.as_view(), name="ops_login"),
+    path("django-admin/logout/", views.ConsoleLogoutView.as_view(), name="ops_logout"),
+    path("django-admin/2fa/", views.TotpVerifyView.as_view(), name="ops_2fa_verify"),
+    path("django-admin/2fa/recovery/", views.RecoveryCodeSignInView.as_view(), name="ops_2fa_recovery"),
+    path("django-admin/2fa/enrol/", views.EnrolmentView.as_view(), name="ops_2fa_enrol"),
+    path(
+        "django-admin/2fa/recovery-codes/", views.RecoveryCodesView.as_view(), name="ops_2fa_recovery_codes"
+    ),
+    path("django-admin/2fa/cancel/", views.CancelSignInView.as_view(), name="ops_2fa_cancel"),
 ]

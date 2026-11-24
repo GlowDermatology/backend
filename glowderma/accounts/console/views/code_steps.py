@@ -4,15 +4,15 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from typing import Any
 
 from django.contrib import messages
-from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
+from django.http import HttpRequest, HttpResponse, HttpResponseBase, HttpResponseRedirect
+from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.debug import sensitive_post_parameters
-from django.views.decorators.http import require_http_methods
+from django.views.generic import View
 from rest_framework.exceptions import Throttled
 
 from glowderma.accounts import console_sessions
@@ -28,28 +28,27 @@ logger = logging.getLogger("glowderma.accounts.console.views")
 SCOPE = "django_admin_otp"
 CODE_STEP = "code"  # the per-address budget of the code steps (TOTP, recovery code, enrolment)
 
-type StepView = Callable[[HttpRequest, console_sessions.Pending], HttpResponse]
 
+@method_decorator([sensitive_post_parameters("code"), csrf_protect, never_cache], name="dispatch")
+class SignInStepView(View):
+    """A step of a pending sign-in (GET shows it, POST submits its code): without one (none, expired, password
+    changed) back to the login page. Subclasses implement :meth:`step`."""
 
-def signin_step(view: StepView) -> Callable[[HttpRequest], HttpResponse]:
-    """A step of a pending sign-in: without one (none, expired, password changed) back to the login page."""
+    http_method_names = ["get", "post"]
 
-    @sensitive_post_parameters("code")
-    @csrf_protect
-    @never_cache
-    @require_http_methods(["GET", "POST"])
-    def wrapper(request: HttpRequest) -> HttpResponse:
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
+        if (request.method or "").lower() not in self.http_method_names:
+            return self.http_method_not_allowed(request, *args, **kwargs)
         had_signin = console_sessions.PENDING in request.session
         current = console_sessions.pending(request)
         if current is None:
             if had_signin:
                 messages.warning(request, notices.SIGNIN_EXPIRED)
             return HttpResponseRedirect(paths.LOGIN_PATH)
-        return view(request, current)
+        return self.step(request, current)
 
-    wrapper.__name__ = view.__name__
-    wrapper.__doc__ = view.__doc__
-    return wrapper
+    def step(self, request: HttpRequest, current: console_sessions.Pending) -> HttpResponse:
+        raise NotImplementedError
 
 
 def locked_response(
@@ -103,11 +102,10 @@ def record_success(request: HttpRequest, user: StaffUser) -> None:
 __all__ = [
     "CODE_STEP",
     "SCOPE",
-    "StepView",
+    "SignInStepView",
     "clear_code",
     "locked_response",
     "record_failed_attempt",
     "record_success",
     "reserve_attempt",
-    "signin_step",
 ]
