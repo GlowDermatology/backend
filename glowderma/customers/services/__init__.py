@@ -28,6 +28,7 @@ from glowderma.customers.services.auth.dormancy import (
     dormant_reset,
 )
 from glowderma.customers.services.auth.login import (
+    code_target,
     login,
 )
 from glowderma.customers.services.auth.recovery import (
@@ -161,6 +162,7 @@ __all__ = [
     "attach_phone",
     "change_password",
     "check_login_password",
+    "code_target",
     "complete_social",
     "customer_guard_key",
     "customer_identifier",

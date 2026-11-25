@@ -63,6 +63,7 @@ def reset_password(
             farewell_tokens=[*farewell, *started.farewell_tokens],
         )
         trail.audit_customer("customer.password_reset", customer, request)
+        trail.alert_by_email(customer.pk, "password_reset")
         return results.SignIn(started, customer.pk)
 
 

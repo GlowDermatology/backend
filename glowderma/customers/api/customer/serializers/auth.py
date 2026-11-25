@@ -71,6 +71,13 @@ class SendCodeSerializer(IdentifierSerializer):
 class VerifyCodeSerializer(IdentifierSerializer):
     purpose = serializers.ChoiceField(choices=enums.OtpPurpose.values)
     code = code_field()
+    otp_channel = serializers.ChoiceField(
+        choices=enums.OtpChannel.values,
+        required=False,
+        allow_null=True,
+        help_text="login_new_device only: the channel `auth/login/` sent the code to (`otp_channel`); the "
+        "identifier stays the one signed in with.",
+    )
 
     def validate_purpose(self, value: str) -> str:
         if value in SIGNED_IN_PURPOSES:  # verified by me/phone/ and me/email/ themselves
@@ -81,6 +88,12 @@ class VerifyCodeSerializer(IdentifierSerializer):
         if not CODE_PATTERN.fullmatch(value):
             raise serializers.ValidationError([field_error("invalid", message_key="field.otp_format")])
         return value
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        attrs = super().validate(attrs)
+        if attrs.get("otp_channel") and attrs["purpose"] != enums.OtpPurpose.LOGIN_NEW_DEVICE:
+            raise serializers.ValidationError({"otp_channel": [field_error("invalid")]})
+        return attrs
 
 
 class SetPasswordSerializer(serializers.Serializer[dict[str, Any]]):
@@ -98,6 +111,14 @@ class CustomerLoginSerializer(IdentifierSerializer):
     password = password_field()
     verification_token = serializers.CharField(
         max_length=128, required=False, allow_null=True, allow_blank=True
+    )
+    otp_channel = serializers.ChoiceField(
+        choices=enums.OtpChannel.values,
+        required=False,
+        allow_null=True,
+        help_text="New device: send the code by SMS to the account's phone or to its verified e-mail instead "
+        "of the identifier signed in with (`NextStep.channels` lists what the account has); a channel the "
+        "account lacks → field `otp_channel` `invalid`.",
     )
 
 
@@ -134,6 +155,11 @@ class OtpInfoSerializer(serializers.Serializer[dict[str, Any]]):
     length = serializers.IntegerField()
 
 
+class OtpChannelSerializer(serializers.Serializer[dict[str, Any]]):
+    channel = serializers.ChoiceField(choices=enums.OtpChannel.values)
+    mask = serializers.CharField()
+
+
 class NextStepSerializer(serializers.Serializer[dict[str, Any]]):
     next_step = serializers.ChoiceField(choices=enums.NextStep.values)
     phone_mask = serializers.CharField(allow_null=True)
@@ -142,6 +168,11 @@ class NextStepSerializer(serializers.Serializer[dict[str, Any]]):
     provider = serializers.ChoiceField(choices=enums.CustomerSocialProvider.values, allow_null=True)
     email_mask = serializers.CharField(allow_null=True)
     expires_in = serializers.IntegerField()
+    channels = OtpChannelSerializer(
+        many=True,
+        help_text="verify_device: where the code can be sent (the account's verified phone and e-mail); "
+        "repeat `auth/login/` with `otp_channel` to send it to the other one. Empty for verify_phone.",
+    )
 
 
 class CodeIssueSerializer(serializers.Serializer[dict[str, Any]]):

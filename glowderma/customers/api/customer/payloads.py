@@ -40,6 +40,11 @@ def device_step_body(step: services.DeviceStep) -> dict[str, Any]:
         # The step lasts as long as the app may keep the password and the verification token (C§2.0,
         # §2.1.4: 10 min), not the code's own TTL (that is otp.expires_in).
         "expires_in": int(settings.CUSTOMER_VERIFICATION_TTL_SECONDS),
+        # additive: every place the code can go (the account's verified phone and e-mail), masked
+        "channels": [
+            {"channel": channel, "mask": mask_email(value) if channel == "email" else mask_phone(value)}
+            for channel, value in step.channels
+        ],
     }
 
 
@@ -52,6 +57,7 @@ def phone_step_body(step: services.PhoneStep) -> dict[str, Any]:
         "provider": step.provider,
         "email_mask": mask_email(step.email) if step.email else None,
         "expires_in": step.expires_in,
+        "channels": [],
     }
 
 

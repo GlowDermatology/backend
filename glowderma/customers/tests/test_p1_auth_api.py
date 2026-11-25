@@ -221,6 +221,7 @@ def test_login_unknown_device_asks_for_the_code_then_signs_in(
         "provider": None,
         "email_mask": None,
         "expires_in": 600,  # the step window (C§2.0), not the code TTL
+        "channels": [{"channel": "sms", "mask": "+998 90 *** ** 33"}],
     }
     row = SmsCode.objects.get(purpose="new_device")
     # a second call within 60 s reuses the live code

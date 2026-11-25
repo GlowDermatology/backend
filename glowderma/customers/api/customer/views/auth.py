@@ -75,8 +75,11 @@ class VerifyCodeView(CustomerAuthAPIView):
         serializer = s.VerifyCodeSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
+        target = data["identifier"]
+        if data.get("otp_channel"):  # the new-device code went to the account's other identifier
+            target = services.code_target(data["identifier"], data["otp_channel"]) or target
         try:
-            result = account_services.verify_code(data["identifier"], data["purpose"], data["code"])
+            result = account_services.verify_code(target, data["purpose"], data["code"])
         except OtpInvalid as exc:
             return otp_invalid_response(exc, request, self.language)
         return Response(
@@ -128,6 +131,7 @@ class LoginView(CustomerAuthAPIView):
             device=device,
             device_key=str(request.headers.get("X-GD-Device-Key", "")) or None,
             request=request,
+            otp_channel=data.get("otp_channel") or None,
         )
         if isinstance(result, services.DeviceStep):
             return Response(device_step_body(result))

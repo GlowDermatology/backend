@@ -160,6 +160,7 @@ CUSTOMER_TABLE: dict[str, list[str]] = {
     "InboxKind": ["promo", "general", "order_status", "appointment"],
     "InboxLinkKind": ["none", "product", "order", "appointment", "url"],
     "PushDataType": ["order_status", "appointment", "campaign", "account_security", "session_replaced"],
+    "OtpChannel": ["sms", "email"],
     "AccountSecurityEvent": [
         "social_linked",
         "social_unlinked",

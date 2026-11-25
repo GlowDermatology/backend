@@ -620,6 +620,7 @@ def test_journey_1_register_second_device_refresh_reuse_and_logout(world: World)
         "provider": None,
         "email_mask": None,
         "expires_in": step.json()["expires_in"],
+        "channels": [{"channel": "sms", "mask": mask(phone)}],  # a phone-only account: SMS only
     }
     assert len([m for m in fake_sms().sent if m.phone == phone]) == 2  # the register and the login code
     token = verify(second, phone, "login_new_device")

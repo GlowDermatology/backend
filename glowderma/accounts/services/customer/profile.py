@@ -89,7 +89,9 @@ def set_customer_email(customer_id: int, email: str) -> None:
 
 
 EMAIL_NOTICE_AAD = b"email.notice"
-EMAIL_NOTICE_KINDS = frozenset({"email_replaced"})
+# email_replaced: the previous address of a replaced e-mail (C§2.2.10); the security alerts (new device signed
+# in, password reset, password changed) go to the account's verified address.
+EMAIL_NOTICE_KINDS = frozenset({"email_replaced", "new_sign_in", "password_reset", "password_changed"})
 
 
 def enqueue_email_notice(address: str, *, lang: str, kind: str) -> None:

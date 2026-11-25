@@ -370,8 +370,10 @@ IP per minute, the rest only counted and sampled in the log).
  "otp": {"expires_in": 120, "resend_in": 60, "length": 6},   // verify_device: the code just sent (or the live one); null for verify_phone
  "social_ticket": null,                          // verify_phone only: opaque signed ticket, 10 min, single use, bound to this fid
  "provider": null,                               // verify_phone only: CustomerSocialProvider
- "email_mask": null,                             // verify_phone only: masked provider email | null
- "expires_in": 600}                              // validity of the ticket / of this step in seconds
+ "email_mask": null,                             // verify_phone: masked provider email | null; verify_device: the code went by e-mail
+ "expires_in": 600,                              // validity of the ticket / of this step in seconds
+ "channels": [{"channel": "sms", "mask": "+998 90 *** ** 67"},   // additive: verify_device = every place the code can be sent
+              {"channel": "email", "mask": "m***@example.uz"}]}  // (the account's phone and verified e-mail); [] for verify_phone
 ```
 
 ### 2.1 Auth
@@ -451,7 +453,9 @@ Phone enumeration through `register`/`reset_password` answers is an accepted UX 
 (§7 `M2-A9`).
 
 #### 2.1.2 `POST auth/verify-code/`
-Body `{"phone": str, "purpose": OtpPurpose, "code": str}` — or `email` instead of `phone` (hybrid identity).
+Body `{"phone": str, "purpose": OtpPurpose, "code": str}` — or `email` instead of `phone` (hybrid identity). With
+`purpose: login_new_device` the optional `otp_channel` (`sms` | `email`) names the channel `auth/login/` sent the code
+to (§2.1.4); any other purpose with `otp_channel` → field `otp_channel` `invalid`.
 
 | Field / check | Code | Message (uz) · key |
 |---|---|---|
@@ -537,6 +541,21 @@ when the app holds one. `invalid_credentials` reads "Telefon raqami, email yoki 
    new_device: true}`. A bad token → 400 `verification_invalid`.
 
 The app keeps the typed password in memory only until step 7 (≤10 minutes) and never persists it.
+
+**Choosing where the code goes (`otp_channel`, additive).** The body may carry `"otp_channel": "sms" | "email"`: the
+code of step 6 goes to the account's **phone** (SMS) or its **verified e-mail** instead of the identifier typed
+(`NextStep.channels` lists what the account has, masked; `phone_mask` / `email_mask` still say where this code went).
+Resend through the other channel = `auth/login/` again with the password and `otp_channel`. The caps of step 3 are
+those of the chosen target. A channel the account lacks is refused **after** the password check (400 field
+`otp_channel` `invalid`), so a wrong password still answers `invalid_credentials` and reveals nothing. The code is
+verified with `auth/verify-code/` `{<the identifier typed>, purpose: login_new_device, code, otp_channel}`; step 7
+accepts the token whether or not `otp_channel` is repeated.
+
+**Security alert e-mails.** A sign-in that issues a device key on a **new device** for an existing account (step 7, a
+social sign-in or completion on a new install, the verified-e-mail auto-link) sends the account's verified address
+the `email.notice` `new_sign_in` e-mail; `auth/reset-password/` sends `password_reset` and `me/password/`
+`password_changed` (in addition to their `push.account_security`). Registration, a known device and an account
+without a verified e-mail send nothing. The texts name no code, IP address or device id.
 
 #### 2.1.5 `POST auth/reset-password/`
 Body `{"verification_token": str (purpose reset_password), "password": str}`; the token may come from an SMS or an

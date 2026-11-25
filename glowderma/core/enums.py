@@ -556,6 +556,13 @@ class PushDataType(TextChoices):
     SESSION_REPLACED = "session_replaced"
 
 
+class OtpChannel(TextChoices):
+    """Where a new-device code can be sent (``auth/login/`` ``otp_channel``, ``NextStep.channels``)."""
+
+    SMS = "sms"
+    EMAIL = "email"
+
+
 class AccountSecurityEvent(TextChoices):
     SOCIAL_LINKED = "social_linked"
     SOCIAL_UNLINKED = "social_unlinked"
@@ -777,6 +784,7 @@ CONTRACT_ENUMS: tuple[type[TextChoices], ...] = (
     InboxKind,
     InboxLinkKind,
     PushDataType,
+    OtpChannel,
     AccountSecurityEvent,
     SeoSeverity,
     SeoIssueCode,
