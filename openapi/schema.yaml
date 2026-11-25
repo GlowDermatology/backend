@@ -24062,8 +24062,8 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/HomeSpotlight'
-          description: Up to 6 products with an image, each once with its first reason
-            (promo, bestseller, low_stock, new), rotated by the Tashkent hour.
+          description: Up to 6 products with an image, each once, taken one per reason
+            in turn (promo, bestseller, low_stock, new), rotated by the Tashkent hour.
         rails:
           type: array
           items:
@@ -24075,9 +24075,16 @@ components:
           - $ref: '#/components/schemas/HomeCashback'
           nullable: true
           description: The active cashback policy; null = none.
+        feed_cursor:
+          type: string
+          nullable: true
+          description: The `catalog/feed/` cursor right after the `new` rail's last
+            product (the landing's unfiltered feed starts there, so it does not repeat
+            the rail); null = no products.
       required:
       - cashback
       - content_language
+      - feed_cursor
       - online_sales_enabled
       - rails
       - spotlight

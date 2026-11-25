@@ -27,6 +27,7 @@ from glowderma.loyalty.models import CashbackPolicy
 from glowderma.professionals.tests.factories import LocationFactory, ProfessionalFactory
 
 pytestmark = pytest.mark.django_db
+FEED = "/api/v1/catalog/feed/"
 HOME = "/api/v1/home/"
 T0 = datetime(2026, 11, 2, 0, 30, tzinfo=TASHKENT)  # hour 0: the spotlight is not rotated
 CARD_KEYS = {
@@ -97,6 +98,7 @@ def test_empty_storefront(at_hour: Callable[[int], None]) -> None:
         "spotlight": [],
         "rails": [],
         "cashback": None,
+        "feed_cursor": None,
     }
 
 
@@ -141,6 +143,28 @@ def test_numbers_rails_and_spotlight(at_hour: Callable[[int], None]) -> None:
     assert low_card["available"] == 3
 
 
+def test_spotlight_takes_one_product_per_reason_in_turn(at_hour: Callable[[int], None]) -> None:
+    fresh = [product(minutes) for minutes in range(1, 4)]
+    promos = [product(minutes, promo=True) for minutes in range(10, 18)]  # more promos than spotlight frames
+    assert spotlight(app_client().get(HOME).json()) == [
+        ("promo", promos[0].pk),
+        ("new", fresh[0].pk),
+        ("promo", promos[1].pk),
+        ("new", fresh[1].pk),
+        ("promo", promos[2].pk),
+        ("new", fresh[2].pk),
+    ]
+
+
+def test_feed_cursor_continues_after_the_new_rail(at_hour: Callable[[int], None]) -> None:
+    rows = [product(minutes) for minutes in range(1, 31)]  # 30 products, newest first
+    body = app_client().get(HOME).json()
+    assert rails(body)["new"] == [row.pk for row in rows[:12]]
+    page = app_client().get(FEED, {"cursor": body["feed_cursor"]}).json()
+    assert [card["id"] for card in page["results"]] == [row.pk for row in rows[12:30]]
+    assert page["next_cursor"] is None
+
+
 def test_spotlight_rotates_with_the_tashkent_hour(at_hour: Callable[[int], None]) -> None:
     rows = [product(minutes) for minutes in range(1, 5)]  # 4 spotlight items
     at_hour(0)
@@ -157,10 +181,11 @@ def test_bestsellers_come_from_the_cache_only(at_hour: Callable[[int], None]) ->
     cache.set(commerce_selectors.BESTSELLERS_CACHE_KEY, best)
     body = app_client().get(HOME).json()
     assert "bestsellers" not in rails(body)  # three visible: below the rail's minimum of four
-    assert spotlight(body)[:3] == [
+    assert spotlight(body)[:4] == [  # one per reason in turn
         ("bestseller", rows[5].pk),
+        ("new", rows[0].pk),
         ("bestseller", rows[4].pk),
-        ("bestseller", rows[3].pk),
+        ("new", rows[1].pk),
     ]
     cache.set(commerce_selectors.BESTSELLERS_CACHE_KEY, [*best, rows[0].pk])
     body = app_client().get(HOME).json()

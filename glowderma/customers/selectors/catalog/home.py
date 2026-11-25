@@ -1,6 +1,9 @@
 """The storefront landing page (``GET home/``): the shop's numbers, the spotlight, the product rails and the
 cashback tiers, in a bounded number of queries whatever the catalog size.
 
+``feed_cursor`` is the ``catalog/feed/`` cursor right after the ``new`` rail's last product: the landing's
+unfiltered feed starts there, so it never repeats the rail.
+
 Queries: three rail id lists (newest, promo, the cached bestsellers still visible), the low-stock ids
 (online selling only), one product read and one ``product_cards`` call (stock + images, + the cart when
 signed in) over the union of every id, five counts and the active cashback policy (with its tiers). The
@@ -20,7 +23,7 @@ from glowderma.catalog import selectors as catalog_selectors
 from glowderma.catalog.models import ProductImage
 from glowderma.commerce import selectors as commerce_selectors
 from glowderma.core import enums, integration_modes, timeutils
-from glowderma.customers.selectors.catalog import categories, products
+from glowderma.customers.selectors.catalog import categories, feed, products
 from glowderma.loyalty import selectors as loyalty_selectors
 from glowderma.professionals import selectors as professional_selectors
 
@@ -54,18 +57,26 @@ def cashback_payload(now: datetime) -> dict[str, Any] | None:
 def _spotlight(
     sources: list[tuple[str, list[int]]], cards: dict[int, dict[str, Any]], hour: int
 ) -> list[dict[str, Any]]:
-    """Up to ``SPOTLIGHT_SIZE`` products with an image, each once with its first reason (sources in
-    priority order), then rotated by ``hour mod length`` so the lead frame changes through the day."""
+    """Up to ``SPOTLIGHT_SIZE`` products with an image, each once with its first reason, taken one per source
+    in turn (sources in priority order) so every reason with products shows up, then rotated by
+    ``hour mod length`` so the lead frame changes through the day."""
     chosen: list[dict[str, Any]] = []
     seen: set[int] = set()
-    for reason, ids in sources:
-        for pk in ids:
-            card = cards.get(pk)
+    queues = [(reason, iter(ids)) for reason, ids in sources]
+    while queues and len(chosen) < SPOTLIGHT_SIZE:
+        for reason, ids in list(queues):
             if len(chosen) >= SPOTLIGHT_SIZE:
                 break
-            if card is None or pk in seen or card["main_image_url"] is None:
+            card = None
+            for pk in ids:
+                candidate = cards.get(pk)
+                if candidate is not None and pk not in seen and candidate["main_image_url"] is not None:
+                    seen.add(pk)
+                    card = candidate
+                    break
+            if card is None:
+                queues.remove((reason, ids))
                 continue
-            seen.add(pk)
             chosen.append({"reason": reason, "product": card})
     if not chosen:
         return chosen
@@ -78,7 +89,14 @@ def home_payload(lang: str, customer_id: int | None = None, now: datetime | None
     online = integration_modes.online_sales_enabled()
     visible = catalog_selectors.customer_visible_products()
     newest = ("-created_at", "-id")
-    new_ids = list(visible.order_by(*newest).values_list("pk", flat=True)[:RAIL_SIZE])
+    newest_rows = list(visible.order_by(*newest).values_list("pk", "created_at")[:RAIL_SIZE])
+    new_ids = [pk for pk, _ in newest_rows]
+    # The feed continues after the `new` rail, so the landing never shows those products twice.
+    feed_cursor = (
+        feed.encode_cursor(feed.FeedCursor(created_at=newest_rows[-1][1], id=newest_rows[-1][0]))
+        if newest_rows
+        else None
+    )
     promo_ids = list(visible.filter(promo=True).order_by(*newest).values_list("pk", flat=True)[:RAIL_SIZE])
     cached = commerce_selectors.cached_bestseller_ids()[: commerce_selectors.BESTSELLERS_LIMIT]
     still_visible = set(visible.filter(pk__in=cached).values_list("pk", flat=True)) if cached else set()
@@ -135,6 +153,7 @@ def home_payload(lang: str, customer_id: int | None = None, now: datetime | None
         "spotlight": spotlight,
         "rails": rails,
         "cashback": cashback_payload(instant),
+        "feed_cursor": feed_cursor,
     }
 
 

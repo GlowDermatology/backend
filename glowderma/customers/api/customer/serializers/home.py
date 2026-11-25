@@ -56,8 +56,8 @@ class HomeSerializer(serializers.Serializer[dict[str, Any]]):
     spotlight = HomeSpotlightSerializer(
         many=True,
         help_text=(
-            "Up to 6 products with an image, each once with its first reason (promo, bestseller, low_stock, "
-            "new), rotated by the Tashkent hour."
+            "Up to 6 products with an image, each once, taken one per reason in turn (promo, bestseller, "
+            "low_stock, new), rotated by the Tashkent hour."
         ),
     )
     rails = HomeRailSerializer(
@@ -65,6 +65,13 @@ class HomeSerializer(serializers.Serializer[dict[str, Any]]):
         help_text="`new`, `promo`, `bestsellers` (at least 4 items) in that order; empty rails are left out.",
     )
     cashback = HomeCashbackSerializer(allow_null=True, help_text="The active cashback policy; null = none.")
+    feed_cursor = serializers.CharField(
+        allow_null=True,
+        help_text=(
+            "The `catalog/feed/` cursor right after the `new` rail's last product (the landing's unfiltered "
+            "feed starts there, so it does not repeat the rail); null = no products."
+        ),
+    )
 
 
 __all__ = [
