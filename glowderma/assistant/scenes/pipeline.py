@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from io import BytesIO
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageChops, ImageOps
 
 from glowderma.core import compose
 from glowderma.integrations.llm.ports import (
@@ -235,6 +235,11 @@ def analyse(photo: Image.Image, providers: Providers, config: Config, usage: Usa
     occluded = occlusion.percent
     if segmentation.hand_covers_product:
         occluded = max(occluded, round(segmentation.covered_percent, 2))
+    if occluded > OCCLUSION_FLOOR and compose.area(occlusion.hidden) == 0:
+        # The model says a hand hides part of the product but sent no usable hand mask: whatever the
+        # scene shows inside the product's outline is not the photo's, so all of it is marked generated.
+        hidden = ImageChops.subtract(occlusion.hull, mask)
+        occlusion = compose.Occlusion(hull=occlusion.hull, hidden=hidden, percent=occlusion.percent)
     warnings: list[str] = []
     if segmentation.hand_present and occluded <= OCCLUSION_FLOOR:
         warnings.append("hand_removed")
@@ -274,7 +279,7 @@ def check_occlusion(analysis: Analysis, kind: str, config: Config) -> bool:
 def prepare(analysis: Analysis, config: Config) -> Prepared:
     """The product on the 4:5 master, upright when it leans 3-25° (a hand-held shot)."""
     photo, mask, hidden = analysis.photo, analysis.mask, analysis.occlusion.hidden
-    tilt = compose.tilt_degrees(mask)
+    tilt = compose.tilt_degrees(analysis.occlusion.hull)
     straightened = config.straighten and 3.0 < abs(tilt) < 25.0
     if straightened:
         photo, mask = compose.rotate_upright(photo, mask, tilt)

@@ -85,6 +85,18 @@ SCHEMA: dict[str, Any] = {
 MAX_OUTPUT_TOKENS = 24_576  # a base64 PNG mask is long: the default 4096 would truncate it
 
 
+def without_masks(value: Any) -> Any:
+    """The answer with every ``mask`` payload replaced by its length (what a reviewer needs to debug)."""
+    if isinstance(value, dict):
+        return {
+            key: (f"<{len(item)} chars>" if key == "mask" and isinstance(item, str) else without_masks(item))
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [without_masks(item) for item in value]
+    return value
+
+
 def box_pixels(box_2d: Any, width: int, height: int) -> tuple[int, int, int, int] | None:
     """``[y0, x0, y1, x1]`` (0-1000) → pixel ``(x0, y0, x1, y1)``; ``None`` when malformed or empty."""
     if (
@@ -217,5 +229,9 @@ class GeminiJsonSegmenter:
             exc.input_tokens, exc.output_tokens = result.input_tokens, result.output_tokens
             raise
         return Segmentation(
-            **fields, input_tokens=result.input_tokens, output_tokens=result.output_tokens, model=result.model
+            **fields,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            model=result.model,
+            raw=without_masks(result.data),
         )

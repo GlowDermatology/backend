@@ -205,3 +205,22 @@ def test_encode_and_decode_round_trip() -> None:
     image = Image.new("RGB", (20, 30), (1, 2, 3))
     assert compose.decode(compose.encode(image, "PNG")).getpixel((0, 0)) == (1, 2, 3)
     assert compose.decode(compose.encode(image)).size == (20, 30)
+
+
+def test_a_jar_with_a_finger_notch_is_not_tilted() -> None:
+    jar = rect_mask((400, 400), (120, 100, 300, 320))  # slightly taller than wide
+    ImageDraw.Draw(jar).rectangle([120, 180, 160, 220], fill=0)  # a cut-away finger
+    assert compose.tilt_degrees(jar) == 0.0
+    assert compose.tilt_degrees(compose.filled_hull(jar)) == 0.0
+
+
+def test_a_flat_pack_on_a_flat_scene_is_not_called_drift() -> None:
+    size = (928, 1160)
+    sent = Image.new("RGB", size, compose.PLACEHOLDER)
+    ImageDraw.Draw(sent).rectangle([330, 300, 600, 950], fill=(246, 246, 246))
+    core = rect_mask(size, (340, 310, 590, 940))
+    scene = Image.new("RGB", size, (244, 243, 240))
+    ImageDraw.Draw(scene).rectangle([330, 300, 600, 950], fill=(246, 246, 246))
+    answer = compose.decode(compose.encode(scene.resize((1856, 2320)), "JPEG", 85))
+    found = compose.register(answer.resize(size), sent, core)
+    assert (found.dx, found.dy, found.scale) == (0.0, 0.0, 1.0)

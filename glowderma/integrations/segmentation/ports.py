@@ -52,6 +52,7 @@ class Segmentation:
     output_tokens: int = 0  # text rate
     output_image_tokens: int = 0  # image rate (the matte strategy)
     model: str = ""
+    raw: dict[str, object] = field(default_factory=dict)  # the answer without mask payloads (review/debug)
 
 
 class Segmenter(Protocol):

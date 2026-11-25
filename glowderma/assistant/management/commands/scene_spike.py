@@ -88,6 +88,14 @@ def _save(image: Any, path: Path, fmt: str = "PNG") -> str:
     return path.name
 
 
+def review_overlay(photo: Any, analysis: pipeline.Analysis) -> Any:
+    """The photo with the product mask's outline (magenta), the hull (cyan) and the hands (yellow)."""
+    image = compose.outline_overlay(photo, analysis.occlusion.hull, (0, 200, 220))
+    if analysis.segmentation.hands is not None:
+        image = compose.outline_overlay(image, analysis.segmentation.hands, (250, 210, 0))
+    return compose.outline_overlay(image, analysis.mask)
+
+
 def run_one(
     photo_path: Path,
     templates: list[Template],
@@ -110,6 +118,7 @@ def run_one(
         analysis = pipeline.analyse(photo, providers, config, usage)
     except (pipeline.SceneError, LLMError) as exc:
         entry["error"] = exc.code
+        entry["detail"] = str(exc)  # ours, never the provider's text (adapters map errors)
         entry["cost_usd"] = str(usage.cost(prices))
         return entry
     seg = analysis.segmentation
@@ -120,9 +129,10 @@ def run_one(
         "hand_present": seg.hand_present,
         "hand_covers_product": seg.hand_covers_product,
         "background": seg.background,
+        "raw": seg.raw,
         "warnings": analysis.warnings,
         "seconds": analysis.seconds,
-        "outline": _save(compose.outline_overlay(photo, analysis.mask), folder / "outline.jpg", "JPEG"),
+        "outline": _save(review_overlay(photo, analysis), folder / "outline.jpg", "JPEG"),
         "mask": _save(analysis.mask, folder / "mask.png"),
     }
     if analysis.occlusion.percent > 0:
@@ -233,7 +243,10 @@ def summarise(entries: list[dict[str, Any]]) -> dict[str, Any]:
         "photos": len(entries),
         "photo_errors": {e["photo"]: e["error"] for e in entries if e.get("error")},
         "results": len(rows),
-        "rule_held": all(row.get("interior_difference", 0) == 0 for row in rows),
+        "rule_held": all(
+            row.get("interior_difference", 0) == 0 and row.get("error") != pipeline.RULE_BROKEN
+            for row in rows
+        ),
         "ai_scenes": len(ai),
         "ai_accepted": len(ai_ok),
         "ai_first_attempt": len(first_try),

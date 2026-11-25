@@ -41,6 +41,8 @@ BASELINE = 0.82
 MAX_UPSCALE = 1.5
 MIN_CANVAS_WIDTH = 928
 MAX_CANVAS_WIDTH = 1920
+MIN_ELONGATION = 1.4  # length / width below which a silhouette has no reliable axis
+REGISTRATION_MARGIN = 1.0  # grey levels a shifted match must beat the aligned one by
 
 
 # --- masks --------------------------------------------------------------------------------------------------
@@ -393,6 +395,8 @@ def register(
                 if best is None or error < best[0] - 1e-9:
                     best = (error, dx, dy, scale)
     error, dx, dy, scale = best if best is not None else (aligned, 0, 0, 1.0)
+    if aligned - error < max(REGISTRATION_MARGIN, 0.1 * aligned):
+        error, dx, dy, scale = aligned, 0, 0, 1.0  # a near-tie (a flat pack on a flat scene) is no drift
     scale = round(1 / scale, 2)  # the correction that matched → the size change the model made
     return Registration(
         dx=dx / width, dy=dy / width, scale=scale, error=round(error, 2), aligned_error=round(aligned, 2)
@@ -488,7 +492,9 @@ def studio_scene(placed: Placed, layout: Layout, params: dict[str, object]) -> I
 def tilt_degrees(mask: Image.Image, side: int = 128) -> float:
     """The principal-axis angle of a binary mask from vertical, in degrees (positive = leaning right).
 
-    Second-order central moments of the mask downscaled to ``side`` px; 0 for an empty or round mask.
+    Second-order central moments of the mask downscaled to ``side`` px; 0 for an empty mask or one that is
+    not elongated (axis ratio below :data:`MIN_ELONGATION`). Pass the filled hull: notches left by cut-away
+    fingers skew the moments.
     """
     small = binary(mask.resize(_fit(mask.size, side), Image.Resampling.BILINEAR))
     width = small.width
@@ -510,6 +516,10 @@ def tilt_degrees(mask: Image.Image, side: int = 128) -> float:
     mu20, mu02, mu11 = sxx / count - mx * mx, syy / count - my * my, sxy / count - mx * my
     if abs(mu20 - mu02) < 1e-6 and abs(mu11) < 1e-6:
         return 0.0
+    spread = math.sqrt((mu20 - mu02) ** 2 + 4 * mu11 * mu11)
+    major, minor = (mu20 + mu02 + spread) / 2, (mu20 + mu02 - spread) / 2
+    if minor <= 0 or major / minor < MIN_ELONGATION**2:
+        return 0.0  # a jar or a square box: its axis is arbitrary, never "tilted"
     theta = 0.5 * math.atan2(2 * mu11, mu20 - mu02)  # angle of the major axis from the x axis
     from_vertical = math.degrees(theta) - 90 if theta > 0 else math.degrees(theta) + 90
     return round(from_vertical, 1)

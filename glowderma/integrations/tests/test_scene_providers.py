@@ -383,3 +383,9 @@ def test_segmenter_registry(settings: Any) -> None:
     settings.SETTINGS_MODULE = "config.settings.production"
     with pytest.raises(LLMNotConfigured):
         get_segmenter()
+
+
+def test_the_raw_answer_is_kept_without_mask_payloads() -> None:
+    result, _ = segment(answer())
+    assert result.raw["product"]["mask"].startswith("<") and result.raw["background"] == "office"
+    assert result.raw["hands"][0]["mask"].endswith("chars>")

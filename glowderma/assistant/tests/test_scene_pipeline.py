@@ -334,3 +334,26 @@ def test_scene_spike_keys_and_live_providers(monkeypatch: pytest.MonkeyPatch) ->
 def test_scene_spike_vault_key_needs_an_active_version() -> None:
     with pytest.raises(CommandError, match="no active Gemini key"):
         scene_spike._key("vault", "X")
+
+
+def test_a_reported_cover_without_a_hand_mask_is_marked_generated() -> None:
+    notch = rect(BOX)
+    ImageDraw.Draw(notch).rectangle([BOX[0], 600, BOX[0] + 40, 640], fill=0)  # where the finger was
+    seg = Segmentation(
+        product=notch, box=BOX, hand_present=True, hand_covers_product=True, covered_percent=3.0
+    )
+    _analysis, result, _usage = run(MARBLE, providers(seg))
+    assert result.generated_inside_pct > 0 and "product_partly_generated" in result.warnings
+    with pytest.raises(pipeline.SceneError) as caught:
+        run(
+            STUDIO,
+            providers(Segmentation(product=notch, box=BOX, hand_covers_product=True, covered_percent=3.0)),
+        )
+    assert caught.value.code == pipeline.OCCLUSION_NEEDS_AI
+
+
+def test_summary_counts_a_broken_rule() -> None:
+    entries = [
+        {"photo": "a.jpg", "results": [{"kind": "studio", "error": pipeline.RULE_BROKEN, "cost_usd": "0"}]}
+    ]
+    assert scene_spike.summarise(entries)["rule_held"] is False
