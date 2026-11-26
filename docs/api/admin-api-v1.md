@@ -640,6 +640,10 @@ A Yandex Delivery shipment (§2.18) keeps this union BTS-shaped: `not_created` u
 
 **`DELETE products/{id}/images/{image_id}/`** → 204; positions are compacted. 409 `conflict` "Faol mahsulotda kamida bitta rasm bo‘lsin." for the last image of an active product. 404 if the image belongs to another product.
 
+**Image shape** (product scenes): `ProductImage` also carries `width`, `height`, `source` (`upload` | `studio` | `ai_scene`), `derived_from_id` (the image a scene was built from, or null), `product_box` (`[x0, y0, x1, y1]`, 0-1, or null) and `renditions = {"portrait": R | null, "square": R | null}` with `R = {crop: [x, y, w, h] (0-1), mode: "auto" | "manual", url, medium_url, thumbnail_url}` — screen-shaped WebP copies (4:5 for cards, the product page and the cart; 1:1 for rails, feeds, app cards and thumbnails). The image itself never changes.
+
+**`PUT products/{id}/images/{image_id}/renditions/`** (optional `Idempotency-Key`; JSON) Body `{"portrait"?: [x, y, w, h] | "auto" | null, "square"?: …}`: a crop (0-1 of the image, the shape's ratio in pixels ±2 %, inside the image, ≥ 200 px on its short side), `"auto"` (framed on `product_box` with a 14 % margin, else the largest centred crop) or `null` (removed); a shape left out is kept → 200 `ProductImage`. Field errors per shape: `invalid_crop`, `crop_too_small`. 404 if the image belongs to another product. Replaced files are deleted after commit; deleting an image deletes its renditions. Audit `product.image_renditions` (`{image_id, renditions: {ratio: crop}}` before/after).
+
 **`PUT products/{id}/images/order/`**. Body `{"image_ids": [32, 31]}`, exactly the current set (`mismatch`; `[]` is the exact set of a product without images → 200) → 200 `{"images": [ProductImage…]}`. Audit `product.images_reordered`.
 
 **`POST integrations/billz/import/`**. Body `{}` or `{"mode": "delta"|"full"}` (default `delta`) → 202 `Job`.
@@ -1770,6 +1774,50 @@ suggestion) → 200
 
 Audit: `assistant.suggestions_applied` (entity `product`; `{job_id, applied, conflicts}`) and
 `assistant.suggestions_discarded` (`{job_id, suggestions}`), plus the usual `product.updated` of the write.
+
+### 2.20 Product scenes and screen fitting
+
+A new background around a saved product photo, or proposed 4:5 and square crops of it. **The product itself is
+never redrawn**: the photo's own pixels are pasted back over whatever the image model returns, and results
+where the model moved, resized or restyled the product are refused. Ships switched off (ops console
+`ai/scenes/`); `docs/ops/product-scenes.md` describes the pipeline.
+
+**`GET scenes/status/`** → `{"enabled": bool, "ai_enabled": bool, "max_occluded_pct": "15.00", "segmenter":
+"gemini_matte" | "bria" | "gemini_json"}`.
+
+**`GET scenes/templates/`** → `{"results": [{"id", "key", "kind": "studio" | "ai_scene", "name" (request
+language, else uz), "colours": ["#rrggbb", …] (studio swatch)}]}`, enabled ones in console order.
+
+**`POST products/{id}/images/{image_id}/scenes/`** (optional `Idempotency-Key`; throttle `scene_generate`
+20/hour per staff) Body `{"kind": "studio" | "ai_scene" | "fit", "template_id"?: int}` (required unless `fit`;
+its kind must match) → 202 `SceneJob` (new) or 200 (the image's queued/running job). 409 `scenes_disabled`,
+`scene_ai_disabled`, `assistant_budget_exceeded`; 429 `scene_daily_limit`; 400 `template_id`; 404 another
+product's image.
+
+**`GET scenes/jobs/{id}/`** → `SceneJob = {id, product_id, source_image_id, kind, template: {key, name} | null,
+state (JobState), outcome ("pending" | "accepted" | "discarded" | "expired"), progress: null, result, error:
+{code, message} | null, warnings: [str], accepted_image_id, created_at, finished_at, expires_at, created_by}`.
+`result` (succeeded and not expired) = `{url (the 4:5 candidate; null for fit), overlay_url (the candidate with
+the parts drawn inside the product washed pink; null when none), product_box, crops: {portrait, square},
+generated_inside_pct, occluded_pct}`. Failure codes: `scene_product_cut_off` (the product is not whole in the
+photo), `scene_hand_covers_product` (a hand hides more than `max_occluded_pct`), `scene_occlusion_needs_ai`
+(studio templates fill nothing), `scene_no_product`, `scene_mask_unusable`, `scene_product_drift`,
+`scene_result_rejected`, `scene_source_changed`, `provider_unavailable`, `ai_not_configured`, `ai_refused`,
+`ai_bad_output`, `vault_unavailable`, `worker_lost`, `server_error`. Warnings: `hand_removed`,
+`product_partly_generated`, `product_floating`, `low_resolution`, `straightened`.
+
+**`POST scenes/jobs/{id}/accept/`** (optional `Idempotency-Key`) Body `{"make_main"?: bool, "acknowledge_generated"?:
+bool}` → 200 `{"job": SceneJob, "image": ProductImage}`. A scene becomes a **new** gallery image (`source`
+`studio` / `ai_scene`, `derived_from_id` = the source, both renditions set; the source stays; `make_main` puts
+it first; 400 `images` `max_items` at 8); a `fit` writes the proposed renditions (`mode` `auto`) and
+`product_box` on the source image. 400 `acknowledge_generated` when `generated_inside_pct` > 0 and not
+acknowledged; 409 `scene_job_not_ready` (not succeeded or already reviewed), `scene_source_changed`.
+
+**`POST scenes/jobs/{id}/discard/`** (no body) → 200 `SceneJob` (`discarded`; its files are deleted).
+
+Unreviewed candidates expire after `candidate_ttl_hours` (default 72; beat `assistant.scenes_housekeeping`).
+Audit: `assistant.scene_accepted` (entity `product`; `{job_id, kind, image_id, source_image_id}`) plus the
+catalog's own `product.image_added` / `product.image_renditions`.
 
 ---
 

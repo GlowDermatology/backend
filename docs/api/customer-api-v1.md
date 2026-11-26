@@ -1155,6 +1155,10 @@ the fake Billz serves stock normally.
  "main_image_url": "https://media.example.uz/products/1/9f2c.webp",   // | null
  "main_image_thumbnail_url": "https://media.example.uz/products/1/9f2c_400.webp",   // image variants | null
  "main_image_medium_url": "https://media.example.uz/products/1/9f2c_1000.webp",
+ "main_image_renditions": {"portrait": null, "square": null},   // additive (product scenes): screen-shaped copies
+                                                    // of the main image, each {url, medium_url, thumbnail_url} | null
+                                                    // (portrait 4:5 for cards / product page / cart, square 1:1
+                                                    // for rails / feeds / app cards / thumbs); null → the image
  "available": 12, "stock_status": "in_stock",       // StockStatus: in_stock (available > 0) | out_of_stock
  "in_cart_quantity": 0,                              // 0 when anonymous
  "updated_at": "2026-10-22T18:04:00+05:00"}         // B-W1: last change of the product page (texts, price, status,
@@ -1164,6 +1168,8 @@ the fake Billz serves stock normally.
  "description": "…", "ingredients": "…", "usage": "…",             // resolved language, "" when empty
  "images": [{"id": 31, "url": "https://…/9f2c.webp", "thumbnail_url": "https://…/9f2c_400.webp",
              "medium_url": "https://…/9f2c_1000.webp", "position": 0,
+             "renditions": {"portrait": {"url": "https://…/9f2c_r45-1a2b3c4d.webp", "medium_url": "…_1000.webp",
+                                         "thumbnail_url": "…_400.webp"}, "square": null},   // additive, as above
              "alt": "…"}],                          // feat/ai-assistant: the image's alt text (resolved language,
                                                     // else uz), else the product name — never empty
  "max_quantity": 10,                                 // min(available, CART_MAX_QTY_PER_LINE); 0 = cannot be added
@@ -1263,6 +1269,7 @@ placed earlier.
    {"product_id": 4, "name": "Seramidli namlantiruvchi krem", "volume": "50 ml",
     "main_image_url": "https://…/a1b2.webp",          // | null
     "main_image_thumbnail_url": "https://…/a1b2_400.webp", "main_image_medium_url": "https://…/a1b2_1000.webp",
+    "main_image_renditions": {"portrait": null, "square": null},   // additive: as on ProductCard
     "unit_price": 312000, "promo": false,             // current Product.price / promo (no snapshot)
     "quantity": 2, "line_total": 624000,
     "available": 7,                                   // §1.4
