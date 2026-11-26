@@ -48,6 +48,8 @@ DEFAULT_THROTTLE_RATES: Final[dict[str, str]] = {
     "mfa_verify": "30/min",
     # feat/ai-assistant: products/{id}/assistant/jobs/ per staff (each call may reach the paid AI provider)
     "assistant_generate": "30/hour",
+    # products/{id}/images/{image_id}/scenes/ per staff (each call may reach paid image providers)
+    "scene_generate": "20/hour",
 }
 
 # DRF ``SimpleRateThrottle.parse_rate``: "<requests>/<period>" where the period's first letter is one of

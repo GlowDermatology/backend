@@ -79,6 +79,7 @@ def test_card_shape_language_fallback_and_availability() -> None:
         "main_image_url",
         "main_image_thumbnail_url",
         "main_image_medium_url",
+        "main_image_renditions",
         "available",
         "stock_status",
         "in_cart_quantity",

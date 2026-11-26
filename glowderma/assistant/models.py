@@ -8,6 +8,9 @@
 * :class:`PromptTemplate` / :class:`PromptVersion` — the five editable style-guidance templates and their
   numbered versions (draft → tested → active → retired; one active version per template). The mandatory app
   rules are code (``assistant.prompts``), never rows.
+* :class:`SceneSettings` / :class:`SceneTemplate` / :class:`SceneJob` — product scenes and screen fitting
+  (``assistant.scenes``): the switches, models, limits and prices; the studio and AI scene templates; one
+  job per request with its candidate image until staff accept or discard it.
 * :class:`GenerationJob` — one generation (admin panel jobs, or a console prompt test with mode ``test``):
   its request, input snapshot, suggestions, usage, cost and outcome. Suggestions never touch the product
   until a person applies them. Usage and cost reports are aggregates over these rows.
@@ -33,9 +36,10 @@ class AssistantSettings(models.Model):
 
     id = models.PositiveSmallIntegerField(primary_key=True, default=SETTINGS_PK)
     enabled = models.BooleanField(default=False, verbose_name="yoqilgan")
+    # the text assistant runs on a language-model provider only (Bria is the scenes' background remover)
     active_provider = models.CharField(
         max_length=32,
-        choices=enums.AssistantProvider.choices,
+        choices=[(enums.AssistantProvider.GEMINI.value, enums.AssistantProvider.GEMINI.label)],
         default=enums.AssistantProvider.GEMINI,
         verbose_name="faol provayder",
     )
@@ -357,3 +361,253 @@ class GenerationJob(TimeStampedModel):
     @property
     def is_active(self) -> bool:
         return self.state in ACTIVE_JOB_STATES
+
+
+# --- product scenes (glowderma.assistant.scenes) -----------------------------------------------------------
+
+ACTIVE_SCENE_STATES = ACTIVE_JOB_STATES
+
+
+def scene_candidate_path(instance: SceneJob, filename: str) -> str:
+    return f"scene-candidates/{instance.product_id or 0}/{filename}"
+
+
+class SceneSettings(models.Model):
+    """The singleton (pk 1) of product scenes; ships switched off."""
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=SETTINGS_PK)
+    enabled = models.BooleanField(default=False, verbose_name="sahnalar yoqilgan")
+    ai_enabled = models.BooleanField(default=False, verbose_name="AI sahnalar yoqilgan")
+    segmenter = models.CharField(
+        max_length=16,
+        choices=enums.SceneSegmenter.choices,
+        default=enums.SceneSegmenter.GEMINI_MATTE,
+        verbose_name="mahsulotni kesib olish",
+    )
+    analyst_model = models.CharField(
+        max_length=100, default="gemini-3.5-flash-lite", verbose_name="tahlil modeli (Gemini)"
+    )
+    image_model = models.CharField(
+        max_length=100, default="gemini-nano-banana-2.1", verbose_name="rasm modeli (Gemini)"
+    )
+    image_size = models.CharField(
+        max_length=4, choices=[("1K", "1K"), ("2K", "2K")], default="2K", verbose_name="rasm o‘lchami"
+    )
+    bria_model = models.CharField(
+        max_length=8,
+        choices=[("RMBG2", "RMBG 2.0"), ("RMBG3", "RMBG 3.0")],
+        default="RMBG2",
+        verbose_name="Bria modeli",
+    )
+    qa_check = models.BooleanField(default=True, verbose_name="natijani AI bilan tekshirish")
+    max_occluded_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("15.00"),
+        verbose_name="qo‘l yopishi mumkin bo‘lgan ulush (%)",
+    )
+    max_attempts = models.PositiveSmallIntegerField(default=2, verbose_name="urinishlar soni")
+    daily_budget_usd = models.DecimalField(
+        max_digits=10, decimal_places=4, default=Decimal("3"), verbose_name="kunlik byudjet (USD)"
+    )
+    monthly_budget_usd = models.DecimalField(
+        max_digits=10, decimal_places=4, default=Decimal("40"), verbose_name="oylik byudjet (USD)"
+    )
+    per_user_daily_jobs = models.PositiveIntegerField(
+        default=20, verbose_name="bir xodim uchun kunlik so‘rovlar"
+    )
+    candidate_ttl_hours = models.PositiveSmallIntegerField(default=72, verbose_name="natija saqlanadi (soat)")
+    price_text_input = models.DecimalField(
+        max_digits=10, decimal_places=4, default=Decimal("0.10"), verbose_name="matn kirish (1M token, USD)"
+    )
+    price_text_output = models.DecimalField(
+        max_digits=10, decimal_places=4, default=Decimal("0.40"), verbose_name="matn chiqish (1M token, USD)"
+    )
+    price_image_input = models.DecimalField(
+        max_digits=10, decimal_places=4, default=Decimal("1.50"), verbose_name="rasm modeli kirish (1M, USD)"
+    )
+    price_image_text_output = models.DecimalField(
+        max_digits=10, decimal_places=4, default=Decimal("7.50"), verbose_name="rasm modeli matn (1M, USD)"
+    )
+    price_image_output = models.DecimalField(
+        max_digits=10, decimal_places=4, default=Decimal("30.00"), verbose_name="rasm chiqish (1M, USD)"
+    )
+    price_bria_call = models.DecimalField(
+        max_digits=10, decimal_places=4, default=Decimal("0.018"), verbose_name="Bria (bitta so‘rov, USD)"
+    )
+    # editable style guidance appended to the fixed scene rules (assistant.scenes.prompts)
+    style = models.TextField(blank=True, default="", verbose_name="uslub ko‘rsatmasi")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="yangilangan")
+    updated_by = models.ForeignKey(
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="yangilagan",
+    )
+
+    class Meta:
+        verbose_name = "sahna sozlamalari"
+        verbose_name_plural = "sahna sozlamalari"
+        constraints = [
+            models.CheckConstraint(condition=Q(id=SETTINGS_PK), name="assistant_scene_settings_singleton"),
+            models.CheckConstraint(
+                condition=Q(max_occluded_pct__gte=0, max_occluded_pct__lte=50),
+                name="assistant_scene_max_occluded",
+            ),
+            models.CheckConstraint(
+                condition=Q(max_attempts__gte=1, max_attempts__lte=3), name="assistant_scene_max_attempts"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return str(self._meta.verbose_name)
+
+
+class SceneTemplate(models.Model):
+    """A scene staff can pick: ``studio`` (composed on our server from ``params``) or ``ai_scene``
+    (``prompt`` describes the scene for the image model; the fixed rules wrap it)."""
+
+    key = models.SlugField(max_length=40, unique=True, verbose_name="kalit")
+    kind = models.CharField(max_length=16, choices=enums.SceneTemplateKind.choices, verbose_name="turi")
+    name_uz = models.CharField(max_length=60, verbose_name="nomi (uz)")
+    name_ru = models.CharField(max_length=60, blank=True, default="", verbose_name="nomi (ru)")
+    name_en = models.CharField(max_length=60, blank=True, default="", verbose_name="nomi (en)")
+    enabled = models.BooleanField(default=True, verbose_name="yoqilgan")
+    position = models.PositiveSmallIntegerField(default=0, verbose_name="tartib")
+    params = models.JSONField(default=dict, blank=True, verbose_name="studiya parametrlari")
+    prompt = models.TextField(blank=True, default="", verbose_name="sahna tavsifi")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="yangilangan")
+
+    class Meta:
+        verbose_name = "sahna shabloni"
+        verbose_name_plural = "sahna shablonlari"
+        ordering = ["position", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=~Q(kind=enums.SceneTemplateKind.AI_SCENE) | ~Q(prompt=""),
+                name="assistant_scene_template_ai_prompt",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.name_uz
+
+
+class SceneJob(TimeStampedModel):
+    """One scene or fitting request on one product image; its candidate waits for staff to accept it."""
+
+    product = models.ForeignKey(
+        "catalog.Product", null=True, on_delete=models.SET_NULL, related_name="+", verbose_name="mahsulot"
+    )
+    source_image = models.ForeignKey(
+        "catalog.ProductImage",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="asl rasm",
+    )
+    source_sha256 = models.CharField(max_length=64, verbose_name="asl rasm SHA-256")
+    kind = models.CharField(max_length=16, choices=enums.SceneJobKind.choices, verbose_name="turi")
+    template = models.ForeignKey(
+        SceneTemplate,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="shablon",
+    )
+    template_snapshot = models.JSONField(default=dict, blank=True, verbose_name="shablon (o‘sha paytdagi)")
+    created_by = models.ForeignKey(
+        "accounts.StaffUser", on_delete=models.PROTECT, related_name="+", verbose_name="so‘ragan"
+    )
+    state = models.CharField(
+        max_length=16,
+        choices=enums.JobState.choices,
+        default=enums.JobState.QUEUED,
+        db_index=True,
+        verbose_name="holat",
+    )
+    outcome = models.CharField(
+        max_length=16,
+        choices=enums.SceneJobOutcome.choices,
+        default=enums.SceneJobOutcome.PENDING,
+        verbose_name="natija",
+    )
+    error_code = models.CharField(max_length=40, blank=True, default="", verbose_name="xato kodi")
+    warnings = models.JSONField(default=list, blank=True, verbose_name="ogohlantirishlar")
+    candidate = models.FileField(
+        upload_to=scene_candidate_path, max_length=255, blank=True, verbose_name="natija rasmi"
+    )
+    # the candidate with the generated-inside-the-product spots washed in pink (staff check them)
+    overlay = models.FileField(
+        upload_to=scene_candidate_path, max_length=255, blank=True, verbose_name="belgilar"
+    )
+    # the product's box [x0, y0, x1, y1] (0-1) in the candidate (scenes) or in the source image (fit)
+    product_box = models.JSONField(null=True, blank=True, verbose_name="mahsulot chegarasi")
+    crops = models.JSONField(default=dict, blank=True, verbose_name="taklif qilingan kesimlar")
+    occluded_pct = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal(0), verbose_name="yopilgan (%)"
+    )
+    generated_inside_pct = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal(0), verbose_name="mahsulot ichida chizilgan (%)"
+    )
+    usage = models.JSONField(default=dict, blank=True, verbose_name="sarf")
+    cost_usd = models.DecimalField(
+        max_digits=12, decimal_places=6, default=Decimal(0), verbose_name="narx (USD)"
+    )
+    attempts = models.PositiveSmallIntegerField(default=0, verbose_name="urinishlar")
+    celery_task_id = models.CharField(max_length=64, blank=True, default="", verbose_name="Celery vazifasi")
+    started_at = models.DateTimeField(null=True, blank=True, verbose_name="boshlangan")
+    heartbeat_at = models.DateTimeField(null=True, blank=True, verbose_name="oxirgi signal")
+    finished_at = models.DateTimeField(null=True, blank=True, verbose_name="tugagan")
+    expires_at = models.DateTimeField(null=True, blank=True, verbose_name="natija muddati")
+    accepted_image = models.ForeignKey(
+        "catalog.ProductImage",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="qabul qilingan rasm",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True, verbose_name="ko‘rib chiqilgan")
+    reviewed_by = models.ForeignKey(
+        "accounts.StaffUser",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="ko‘rib chiqqan",
+    )
+
+    class Meta:
+        verbose_name = "sahna so‘rovi"
+        verbose_name_plural = "sahna so‘rovlari"
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source_image"],
+                condition=Q(state__in=ACTIVE_SCENE_STATES),
+                name="assistant_one_active_scene_per_image",
+            ),
+            models.CheckConstraint(
+                condition=~Q(state=enums.JobState.FAILED) | ~Q(error_code=""),
+                name="assistant_failed_scene_has_error",
+            ),
+            models.CheckConstraint(condition=Q(cost_usd__gte=0), name="assistant_scene_cost_non_negative"),
+            models.CheckConstraint(
+                condition=Q(outcome=enums.SceneJobOutcome.PENDING) | Q(state=enums.JobState.SUCCEEDED),
+                name="assistant_scene_outcome_needs_success",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["created_by", "created_at"], name="assistant_scene_user_created"),
+            models.Index(fields=["state", "expires_at"], name="assistant_scene_expiry"),
+        ]
+
+    def __str__(self) -> str:
+        return f"#{self.pk} {self.get_kind_display()}"
+
+    @property
+    def is_active(self) -> bool:
+        return self.state in ACTIVE_SCENE_STATES

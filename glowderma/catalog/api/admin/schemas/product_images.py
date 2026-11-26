@@ -8,6 +8,7 @@ from rest_framework import serializers
 from glowderma.catalog.api.admin.serializers import (
     ImageOrderSerializer,
     ImagePatchSerializer,
+    ImageRenditionsPutSerializer,
     ImagesResponseSerializer,
     ProductImageSerializer,
 )
@@ -40,8 +41,19 @@ PRODUCT_IMAGES_ORDER_PUT = extend_schema(
     responses={200: ImagesResponseSerializer, **ADMIN_ERRORS},
 )
 
+PRODUCT_IMAGE_RENDITIONS_PUT = extend_schema(
+    operation_id="admin_product_images_renditions",
+    description=(
+        "Set the screen shapes of an image: a 4:5 `portrait` and a `square` crop, stored as WebP copies "
+        "(the image itself is never changed). `invalid_crop` / `crop_too_small` per shape."
+    ),
+    request=ImageRenditionsPutSerializer,
+    responses={200: ProductImageSerializer, **ADMIN_ERRORS},
+)
+
 
 __all__ = [
+    "PRODUCT_IMAGE_RENDITIONS_PUT",
     "PRODUCT_IMAGES_ORDER_PUT",
     "PRODUCT_IMAGES_POST",
     "PRODUCT_IMAGE_DETAIL_DELETE",

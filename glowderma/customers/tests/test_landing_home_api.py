@@ -43,6 +43,7 @@ CARD_KEYS = {
     "main_image_url",
     "main_image_thumbnail_url",
     "main_image_medium_url",
+    "main_image_renditions",
     "available",
     "stock_status",
     "in_cart_quantity",

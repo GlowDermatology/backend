@@ -27,9 +27,9 @@ from glowderma.integrations.llm.ports import (
     LLMUnavailable,
 )
 from glowderma.integrations.secret import Secret
+from glowderma.integrations.segmentation.combined import CombinedSegmenter
 from glowderma.integrations.segmentation.fake import FakeSegmenter
 from glowderma.integrations.segmentation.gemini_json import GeminiJsonSegmenter
-from glowderma.integrations.segmentation.gemini_matte import GeminiMatteSegmenter
 from glowderma.integrations.segmentation.ports import Segmentation
 
 SIZE = (900, 1200)
@@ -195,34 +195,60 @@ def test_the_occlusion_rule_reaches_the_prompt() -> None:
 
 def test_a_hand_over_too_much_of_the_product_is_refused() -> None:
     with pytest.raises(pipeline.SceneError) as caught:
-        run(MARBLE, providers(segmentation(finger(84))))
+        run(MARBLE, providers(segmentation(finger(84))), max_occluded_pct=5.0)
     assert caught.value.code == pipeline.HAND_COVERS_PRODUCT
-    # the owner's threshold is a setting
-    _analysis, result, _usage = run(MARBLE, providers(segmentation(finger(84))), max_occluded_pct=15.0)
-    assert result.generated_inside_pct > 5.0
-
-
-def test_the_models_own_estimate_counts_when_higher() -> None:
+    # the owner's limit (15 %) lets a typical grip through, highlighted for staff
+    _analysis, result, _usage = run(MARBLE, providers(segmentation(finger(84))))
+    assert 5.0 < result.generated_inside_pct <= 15.0
     with pytest.raises(pipeline.SceneError) as caught:
-        run(MARBLE, providers(segmentation(None, hand_covers_product=True, covered_percent=9.0)))
+        run(MARBLE, providers(segmentation(finger(140))))
     assert caught.value.code == pipeline.HAND_COVERS_PRODUCT
+
+
+def test_a_measured_mask_wins_over_the_models_guess() -> None:
+    # live, the analyst answered "18 % hidden" for every hand-held photo: with a pixel mask we measure
+    guess = segmentation(None, hand_present=True, hand_covers_product=True, covered_percent=19.0)
+    analysis, result, _usage = run(MARBLE, providers(guess))
+    assert analysis.occluded_pct < 0.3 and result.generated_inside_pct == 0.0
+    assert "hand_removed" in result.warnings
+
+
+def test_a_box_only_answer_keeps_the_models_estimate() -> None:
+    box_only = segmentation(None, hand_covers_product=True, covered_percent=19.0, exact=False)
+    analysis = pipeline.analyse(
+        photo(), providers(box_only), pipeline.Config(), pipeline.Usage(), for_scene=False
+    )
+    assert analysis.occluded_pct == 19.0
 
 
 def test_photos_without_a_usable_product_are_refused() -> None:
-    tiny = rect((10, 10, 40, 40))
+    tiny = rect((400, 500, 430, 530))
     with pytest.raises(pipeline.SceneError) as caught:
-        run(STUDIO, providers(Segmentation(product=tiny, box=(10, 10, 40, 40))))
+        run(STUDIO, providers(Segmentation(product=tiny, box=(400, 500, 430, 530))))
     assert caught.value.code == pipeline.NO_PRODUCT
-    everything = rect((0, 0, SIZE[0], SIZE[1]))
+    everything = rect((20, 20, SIZE[0] - 20, SIZE[1] - 20))
     with pytest.raises(pipeline.SceneError) as caught:
-        run(STUDIO, providers(Segmentation(product=everything, box=(0, 0, *SIZE))))
+        run(STUDIO, providers(Segmentation(product=everything, box=(20, 20, SIZE[0] - 20, SIZE[1] - 20))))
     assert caught.value.code == pipeline.MASK_UNUSABLE
 
 
-def test_edge_and_resolution_warnings() -> None:
+def test_a_product_cut_off_by_the_frame_is_refused_before_any_image_call() -> None:
     small = (0, 300, 140, 600)
+    used = providers(Segmentation(product=rect(small), box=small))
+    with pytest.raises(pipeline.SceneError) as caught:
+        run(MARBLE, used)
+    assert caught.value.code == pipeline.PRODUCT_CUT_OFF
+    assert used.image_model.calls == []  # type: ignore[attr-defined]
+    flagged = providers(segmentation(cut_off=True))
+    with pytest.raises(pipeline.SceneError) as caught:
+        run(STUDIO, flagged)
+    assert caught.value.code == pipeline.PRODUCT_CUT_OFF
+
+
+def test_low_resolution_warning() -> None:
+    small = (300, 300, 440, 600)
     analysis, _result, _usage = run(STUDIO, providers(Segmentation(product=rect(small), box=small)))
-    assert {"product_touches_edge", "low_resolution"} <= set(analysis.warnings)
+    assert analysis.warnings == ["low_resolution"]
 
 
 def test_provider_errors_propagate_with_their_code() -> None:
@@ -327,12 +353,16 @@ def test_scene_spike_keys_and_live_providers(monkeypatch: pytest.MonkeyPatch) ->
     assert isinstance(live.segmenter, GeminiJsonSegmenter) and isinstance(live.image_model, GeminiImageModel)
     assert isinstance(live.content_model, GeminiContentModel)
     matte = scene_spike.build_providers(fake=False, segmenter="matte", api_key=Secret("k"))
-    assert isinstance(matte.segmenter, GeminiMatteSegmenter)
+    assert isinstance(matte.segmenter, CombinedSegmenter)
+    bria = scene_spike.build_providers(
+        fake=False, segmenter="bria", api_key=Secret("k"), bria_key=Secret("b")
+    )
+    assert isinstance(bria.segmenter, CombinedSegmenter)
 
 
 @pytest.mark.django_db
 def test_scene_spike_vault_key_needs_an_active_version() -> None:
-    with pytest.raises(CommandError, match="no active Gemini key"):
+    with pytest.raises(CommandError, match="no active gemini key"):
         scene_spike._key("vault", "X")
 
 
@@ -347,7 +377,7 @@ def test_a_reported_cover_without_a_hand_mask_is_marked_generated() -> None:
     with pytest.raises(pipeline.SceneError) as caught:
         run(
             STUDIO,
-            providers(Segmentation(product=notch, box=BOX, hand_covers_product=True, covered_percent=3.0)),
+            providers(Segmentation(product=notch, box=BOX, hand_present=True, hand_covers_product=True)),
         )
     assert caught.value.code == pipeline.OCCLUSION_NEEDS_AI
 

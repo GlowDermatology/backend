@@ -348,6 +348,45 @@ class AssistantImproveGoal(TextChoices):
 
 class AssistantProvider(TextChoices):
     GEMINI = "gemini", "Google Gemini"
+    BRIA = "bria", "Bria (fon olib tashlash)"
+
+
+# --- product scenes and screen-fit renditions (glowderma.assistant.scenes, glowderma.catalog) ---
+
+
+class ProductImageSource(TextChoices):
+    UPLOAD = "upload", "Yuklangan"
+    STUDIO = "studio", "Studiya sahnasi"
+    AI_SCENE = "ai_scene", "AI sahnasi"
+
+
+class RenditionMode(TextChoices):
+    AUTO = "auto", "Avtomatik"
+    MANUAL = "manual", "Qo‘lda"
+
+
+class SceneTemplateKind(TextChoices):
+    STUDIO = "studio", "Studiya"
+    AI_SCENE = "ai_scene", "AI sahnasi"
+
+
+class SceneJobKind(TextChoices):
+    STUDIO = "studio", "Studiya sahnasi"
+    AI_SCENE = "ai_scene", "AI sahnasi"
+    FIT = "fit", "Ekranlarga moslash"
+
+
+class SceneJobOutcome(TextChoices):
+    PENDING = "pending", "Ko‘rib chiqilmoqda"
+    ACCEPTED = "accepted", "Qabul qilindi"
+    DISCARDED = "discarded", "Bekor qilindi"
+    EXPIRED = "expired", "Muddati o‘tdi"
+
+
+class SceneSegmenter(TextChoices):
+    GEMINI_MATTE = "gemini_matte", "Gemini (yashil fon)"
+    BRIA = "bria", "Bria RMBG"
+    GEMINI_JSON = "gemini_json", "Gemini (segmentatsiya JSON)"
 
 
 class PromptPurpose(TextChoices):
@@ -801,6 +840,11 @@ CONTRACT_ENUMS: tuple[type[TextChoices], ...] = (
     AppointmentRangeDetail,
     HomeSpotlightReason,
     HomeRailKey,
+    ProductImageSource,
+    RenditionMode,
+    SceneTemplateKind,
+    SceneJobKind,
+    SceneJobOutcome,
 )
 
 

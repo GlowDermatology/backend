@@ -8,6 +8,7 @@ from rest_framework import serializers
 
 from glowderma.commerce.api.customer.serializers.orders import CustomerOrderDetailSerializer
 from glowderma.core import enums
+from glowderma.core.api.renditions import ImageRenditionsSerializer
 
 QUANTITY_MAX = 99
 
@@ -28,6 +29,9 @@ class CustomerCartLineSerializer(serializers.Serializer[dict[str, Any]]):
     main_image_url = serializers.CharField(allow_null=True)
     main_image_thumbnail_url = serializers.CharField(allow_null=True, help_text="400 px WebP variant.")
     main_image_medium_url = serializers.CharField(allow_null=True, help_text="1000 px WebP variant.")
+    main_image_renditions = ImageRenditionsSerializer(
+        help_text="Screen shapes of the main image (null each = none)."
+    )
     unit_price = serializers.IntegerField()
     promo = serializers.BooleanField()
     quantity = serializers.IntegerField()

@@ -232,6 +232,14 @@ HOME_TABLE: dict[str, list[str]] = {
     "HomeSpotlightReason": ["promo", "new", "bestseller", "low_stock"],
     "HomeRailKey": ["new", "promo", "bestsellers"],
 }
+# Product scenes and screen-fit renditions (admin §2.3 / §2.20).
+SCENES_TABLE: dict[str, list[str]] = {
+    "ProductImageSource": ["upload", "studio", "ai_scene"],
+    "RenditionMode": ["auto", "manual"],
+    "SceneTemplateKind": ["studio", "ai_scene"],
+    "SceneJobKind": ["studio", "ai_scene", "fit"],
+    "SceneJobOutcome": ["pending", "accepted", "discarded", "expired"],
+}
 ALL_TABLES = {
     **CONTRACT_TABLE,
     **CUSTOMER_TABLE,
@@ -240,6 +248,7 @@ ALL_TABLES = {
     **AUDIT_RANGE_TABLE,
     **ASSISTANT_TABLE,
     **HOME_TABLE,
+    **SCENES_TABLE,
 }
 
 

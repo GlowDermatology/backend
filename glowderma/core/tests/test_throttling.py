@@ -46,6 +46,7 @@ def test_defaults_match_contract_1_9() -> None:
         "staff_password_link",
         "mfa_verify",  # feat/admin-ux panel MFA
         "assistant_generate",  # feat/ai-assistant: products/{id}/assistant/jobs/ per staff
+        "scene_generate",  # product scenes: products/{id}/images/{image_id}/scenes/ per staff
     }
     for rate in DEFAULT_THROTTLE_RATES.values():
         validate_throttle_rates({"login": rate})

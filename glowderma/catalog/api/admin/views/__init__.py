@@ -16,6 +16,7 @@ from glowderma.catalog.api.admin.views.categories import (
 )
 from glowderma.catalog.api.admin.views.product_images import (
     ProductImageDetailView,
+    ProductImageRenditionsView,
     ProductImagesOrderView,
     ProductImagesView,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "CategoryViewSet",
     "JobDetailView",
     "ProductImageDetailView",
+    "ProductImageRenditionsView",
     "ProductImagesOrderView",
     "ProductImagesView",
     "ProductStatsView",

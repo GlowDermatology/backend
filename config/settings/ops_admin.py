@@ -182,6 +182,10 @@ SIDEBAR_NAVIGATION: list[dict[str, Any]] = [
                 **_dashboard(_("AI so‘rovlari"), "receipt_long", "admin:assistant_jobs"),
                 "permission": SUPERUSER_ONLY,
             },
+            {
+                **_dashboard(_("Mahsulot sahnalari"), "photo_filter", "admin:assistant_scenes"),
+                "permission": SUPERUSER_ONLY,
+            },
         ],
     },
     {
@@ -303,5 +307,7 @@ UNFOLD: dict[str, Any] = {
         ),
         ("ai/jobs/", "assistant_jobs", f"{AI_VIEWS}.JobsView"),
         ("ai/jobs/<int:pk>/", "assistant_job", f"{AI_VIEWS}.JobView"),
+        ("ai/scenes/", "assistant_scenes", f"{AI_VIEWS}.ScenesView"),
+        ("ai/scenes/templates/<int:pk>/", "assistant_scene_template", f"{AI_VIEWS}.SceneTemplateView"),
     ],
 }

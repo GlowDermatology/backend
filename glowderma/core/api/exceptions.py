@@ -113,6 +113,9 @@ ENDPOINT_FIELD_CODES = frozenset(
         "push_token_missing",
         "latlng_pair",
         "address_incomplete",
+        # product image renditions (admin §2.3): a staff crop
+        "invalid_crop",
+        "crop_too_small",
     }
 )
 # View ``audience`` values whose errors use the customer envelope (``details``) and the i18n catalog.

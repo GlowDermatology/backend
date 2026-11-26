@@ -33,9 +33,11 @@ from glowderma.integrations.llm.gemini import GeminiContentModel
 from glowderma.integrations.llm.gemini_image import GeminiImageModel
 from glowderma.integrations.llm.ports import LLMError
 from glowderma.integrations.secret import Secret
+from glowderma.integrations.segmentation.bria import BriaCutter
+from glowderma.integrations.segmentation.combined import CombinedSegmenter
 from glowderma.integrations.segmentation.fake import FakeSegmenter
 from glowderma.integrations.segmentation.gemini_json import GeminiJsonSegmenter
-from glowderma.integrations.segmentation.gemini_matte import GeminiMatteSegmenter
+from glowderma.integrations.segmentation.gemini_matte import GeminiMatteCutter
 from glowderma.integrations.segmentation.ports import Segmenter
 
 STYLE = (
@@ -49,7 +51,7 @@ PHOTO_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
 PROXY_PLACEHOLDER = "proxy-injected"  # noqa: S105 - not a key: the proxy replaces the header
 
 
-def _key(source: str, env_name: str) -> Secret:
+def _key(source: str, env_name: str, provider: str = "gemini") -> Secret:
     if source == "proxy":
         return Secret(PROXY_PLACEHOLDER)
     if source == "env":
@@ -60,18 +62,34 @@ def _key(source: str, env_name: str) -> Secret:
     from glowderma.assistant import credentials
 
     try:
-        return credentials.active_key("gemini")
+        return credentials.active_key(provider)
     except Exception as exc:  # noqa: BLE001 - Vault or a missing key: the message names no secret
-        raise CommandError(f"no active Gemini key in Vault ({type(exc).__name__})") from None
+        raise CommandError(f"no active {provider} key in Vault ({type(exc).__name__})") from None
 
 
-def build_providers(*, fake: bool, segmenter: str, api_key: Secret) -> pipeline.Providers:
+def build_providers(
+    *,
+    fake: bool,
+    segmenter: str,
+    api_key: Secret,
+    image_model: str = pipeline.Config.image_model,
+    bria_key: Secret | None = None,
+) -> pipeline.Providers:
     if fake:
         return pipeline.Providers(
             segmenter=FakeSegmenter(), image_model=FakeImageModel(), content_model=FakeQA(), api_key=api_key
         )
     content, image = GeminiContentModel(), GeminiImageModel()
-    chosen: Segmenter = GeminiMatteSegmenter(image) if segmenter == "matte" else GeminiJsonSegmenter(content)
+    chosen: Segmenter
+    if segmenter == "json":
+        chosen = GeminiJsonSegmenter(content)
+    else:
+        analyst = GeminiJsonSegmenter(content, require_mask=False)
+        if segmenter == "bria":
+            chosen = CombinedSegmenter(analyst, BriaCutter(), cutter_key=bria_key or Secret(""))
+        else:
+            cutter = GeminiMatteCutter(image, model=image_model)
+            chosen = CombinedSegmenter(analyst, cutter, cutter_key=api_key)
     return pipeline.Providers(segmenter=chosen, image_model=image, content_model=content, api_key=api_key)
 
 
@@ -271,7 +289,7 @@ class Command(BaseCommand):
             "--templates", default="studio-ivory,marble", help="comma-separated template keys"
         )
         parser.add_argument("--fake", action="store_true", help="offline fakes, no network")
-        parser.add_argument("--segmenter", choices=("json", "matte"), default="json")
+        parser.add_argument("--segmenter", choices=("json", "matte", "bria"), default="matte")
         parser.add_argument("--segment-model", default=pipeline.Config.segment_model)
         parser.add_argument("--image-model", default=pipeline.Config.image_model)
         parser.add_argument("--qa-model", default=pipeline.Config.qa_model)
@@ -282,6 +300,7 @@ class Command(BaseCommand):
         parser.add_argument("--no-straighten", action="store_true")
         parser.add_argument("--key-source", choices=("env", "vault", "proxy"), default="env")
         parser.add_argument("--key-env", default="GEMINI_API_KEY")
+        parser.add_argument("--bria-key-env", default="BRIA_API_KEY")
 
     def handle(self, *args: Any, **options: Any) -> None:
         source: Path = options["input"]
@@ -294,7 +313,16 @@ class Command(BaseCommand):
             raise CommandError(f"unknown templates {unknown}; known: {sorted(BY_KEY)}")
         templates = [BY_KEY[key] for key in keys]
         api_key = Secret("fake-key") if options["fake"] else _key(options["key_source"], options["key_env"])
-        providers = build_providers(fake=options["fake"], segmenter=options["segmenter"], api_key=api_key)
+        bria_key = None
+        if options["segmenter"] == "bria" and not options["fake"]:
+            bria_key = _key(options["key_source"], options["bria_key_env"], "bria")
+        providers = build_providers(
+            fake=options["fake"],
+            segmenter=options["segmenter"],
+            api_key=api_key,
+            image_model=options["image_model"],
+            bria_key=bria_key,
+        )
         config = pipeline.Config(
             segment_model=options["segment_model"],
             image_model=options["image_model"],

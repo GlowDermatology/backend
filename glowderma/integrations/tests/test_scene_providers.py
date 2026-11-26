@@ -30,10 +30,17 @@ from glowderma.integrations.llm.ports import (
 from glowderma.integrations.llm.registry import fake_image_model, get_image_model
 from glowderma.integrations.secret import Secret
 from glowderma.integrations.segmentation import gemini_json
+from glowderma.integrations.segmentation.bria import BriaCutter
+from glowderma.integrations.segmentation.combined import CombinedSegmenter, iou
 from glowderma.integrations.segmentation.fake import FakeSegmenter
 from glowderma.integrations.segmentation.gemini_json import GeminiJsonSegmenter
-from glowderma.integrations.segmentation.gemini_matte import GeminiMatteSegmenter, _closest_ratio, key_green
-from glowderma.integrations.segmentation.ports import NoProduct, SegmentationRequest
+from glowderma.integrations.segmentation.gemini_matte import GeminiMatteCutter, _closest_ratio, key_green
+from glowderma.integrations.segmentation.ports import (
+    CutOut,
+    MaskUnusable,
+    NoProduct,
+    SegmentationRequest,
+)
 from glowderma.integrations.segmentation.registry import fake_segmenter, get_segmenter
 from glowderma.integrations.tests.test_llm import Recorder
 
@@ -262,7 +269,7 @@ def answer(**overrides: Any) -> dict[str, Any]:
     return {
         "product": {"box_2d": [250, 250, 750, 750], "mask": mask_png((64, 64))},
         "outline": [[250, 250], [750, 250], [750, 750], [250, 750]],
-        "hands": [{"box_2d": [500, 0, 600, 1000], "mask": mask_png((32, 8))}],
+        "hands": [{"box_2d": [500, 0, 600, 1000], "mask": mask_png((32, 16))}],
         "hand_present": True,
         "hand_covers_product": True,
         "covered_percent": 4.5,
@@ -311,7 +318,7 @@ def test_box_and_polygon_helpers() -> None:
     assert gemini_json.polygon_mask([[0, 0], [1, 1]], 10, 10) is None
     assert gemini_json.polygon_mask([[0, 0], [1000, 0], "x"], 10, 10) is None
     assert gemini_json.region_mask("nope", 10, 10) is None
-    raw = base64.b64encode(png(Image.new("L", (4, 4), 255))).decode()
+    raw = base64.b64encode(png(Image.new("L", (16, 16), 255))).decode()
     mask = gemini_json.decode_png_mask(raw, (2, 2, 6, 6), 10, 10)
     assert mask is not None and mask.getbbox() == (2, 2, 6, 6)
 
@@ -328,22 +335,170 @@ def test_key_green_keeps_the_non_green_product() -> None:
     assert _closest_ratio(800, 1000) == "4:5" and _closest_ratio(1000, 1000) == "1:1"
 
 
-def test_matte_segmenter_uses_the_image_model(fake_image: FakeImageModel) -> None:
-    green = Image.new("RGB", (100, 100), (0, 255, 0))
-    ImageDraw.Draw(green).rectangle([30, 20, 69, 89], fill=(240, 240, 240))
-    fake_image.push(ImageGenerationResult(png(green), "image/png", 500, 10, 1120, "nb"))
-    request = SegmentationRequest(image=ImagePart(b"x", "image/jpeg"), width=100, height=100, model="nb")
-    result = GeminiMatteSegmenter(fake_image).segment(request, api_key=KEY)
-    assert result.box[0] >= 28 and result.output_image_tokens == 1120 and result.hands is None
+def scene_photo(shift: int = 0, background: tuple[int, int, int] = (0, 255, 0)) -> Image.Image:
+    photo = Image.new("RGB", (100, 100), background)
+    draw = ImageDraw.Draw(photo)
+    draw.rectangle([30 + shift, 20, 69 + shift, 89], fill=(240, 240, 240))
+    for y in range(25, 85, 6):  # a label: something to register on
+        draw.line([(34 + shift, y), (64 + shift, y)], fill=(30, 40, 120), width=2)
+    return photo
+
+
+def cut_request(photo: Image.Image | None = None) -> SegmentationRequest:
+    sent = photo or scene_photo(background=(150, 140, 130))
+    return SegmentationRequest(image=ImagePart(png(sent), "image/png"), width=200, height=200, model="m")
+
+
+def test_matte_cutter_keys_an_aligned_repaint(fake_image: FakeImageModel) -> None:
+    fake_image.push(ImageGenerationResult(png(scene_photo()), "image/png", 500, 10, 1120, "nb"))
+    cut = GeminiMatteCutter(fake_image, model="nb").cut(cut_request(), api_key=KEY)
+    box = cut.mask.getbbox()
+    assert box is not None and abs(box[0] - 60) <= 4 and cut.output_image_tokens == 1120
     assert fake_image.calls[-1].aspect_ratio == "1:1" and "#00FF00" in fake_image.calls[-1].prompt
+
+
+def test_matte_cutter_refuses_a_repaint_that_moved_the_product(fake_image: FakeImageModel) -> None:
+    fake_image.push(ImageGenerationResult(png(scene_photo(shift=6)), "image/png", 500, 10, 1120, "nb"))
+    with pytest.raises(MaskUnusable) as caught:
+        GeminiMatteCutter(fake_image, model="nb").cut(cut_request(), api_key=KEY)
+    assert caught.value.code == "scene_mask_unusable" and caught.value.output_tokens == 1130
+
+
+def test_matte_cutter_refusals(fake_image: FakeImageModel) -> None:
     fake_image.push(
         ImageGenerationResult(png(Image.new("RGB", (50, 50), (0, 255, 0))), "image/png", 1, 1, 1, "nb")
     )
     with pytest.raises(NoProduct):
-        GeminiMatteSegmenter(fake_image).segment(request, api_key=KEY)
+        GeminiMatteCutter(fake_image, model="nb").cut(cut_request(), api_key=KEY)
     fake_image.push(ImageGenerationResult(b"not an image", "image/png", 1, 1, 1, "nb"))
     with pytest.raises(LLMBadOutput):
-        GeminiMatteSegmenter(fake_image).segment(request, api_key=KEY)
+        GeminiMatteCutter(fake_image, model="nb").cut(cut_request(), api_key=KEY)
+
+
+def rgba_cutout() -> bytes:
+    image = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
+    ImageDraw.Draw(image).rectangle([30, 20, 69, 89], fill=(240, 240, 240, 255))
+    return png(image)
+
+
+def bria(*responders: Any) -> tuple[BriaCutter, Recorder]:
+    recorder = Recorder(*responders)
+    return BriaCutter(httpx_client=httpx.Client(transport=httpx.MockTransport(recorder))), recorder
+
+
+def test_bria_cutter_sends_base64_and_reads_the_alpha() -> None:
+    cutter, recorder = bria(
+        httpx.Response(
+            200, json={"result": {"image_url": "https://cdn.bria.example/r.png"}, "request_id": "1"}
+        ),
+        httpx.Response(200, content=rgba_cutout()),
+    )
+    cut = cutter.cut(cut_request(), api_key=Secret("bria-key"))
+    assert cut.mask.getbbox() == (60, 40, 140, 180) and cut.calls == 1
+    sent, download = recorder.requests
+    assert str(sent.url) == "https://engine.prod.bria-api.com/v2/image/edit/remove_background"
+    assert sent.headers["api_token"] == "bria-key" and "bria-key" not in str(sent.url)  # noqa: S105
+    body = json.loads(sent.content)
+    assert body["sync"] is True and body["model"] == "RMBG2" and base64.b64decode(body["image"])
+    assert "api_token" not in download.headers  # the key never goes to the result host
+
+
+@pytest.mark.parametrize(
+    ("status", "error"),
+    [
+        (401, LLMNotConfigured),
+        (403, LLMNotConfigured),
+        (422, LLMRefused),
+        (429, LLMUnavailable),
+        (503, LLMUnavailable),
+    ],
+)
+def test_bria_cutter_maps_errors(status: int, error: type[Exception]) -> None:
+    cutter, _ = bria(httpx.Response(status, json={"error": {"code": status}}))
+    with pytest.raises(error):
+        cutter.cut(cut_request(), api_key=Secret("bria-key"))
+
+
+def test_bria_cutter_bad_answers() -> None:
+    cutter, _ = bria(httpx.Response(200, json={"result": {}}))
+    with pytest.raises(LLMBadOutput):
+        cutter.cut(cut_request(), api_key=Secret("k"))
+    opaque = png(Image.new("RGBA", (10, 10), (1, 2, 3, 255)))
+    cutter, _ = bria(
+        httpx.Response(200, json={"result": {"image_url": "https://x.example/r.png"}}),
+        httpx.Response(200, content=opaque),
+    )
+    with pytest.raises(LLMBadOutput):
+        cutter.cut(cut_request(), api_key=Secret("k"))
+    with pytest.raises(LLMNotConfigured):
+        BriaCutter().cut(cut_request(), api_key=Secret(""))
+
+
+def test_bria_key_check() -> None:
+    cutter, recorder = bria(httpx.Response(404, json={}))
+    cutter.check(api_key=Secret("k"))
+    assert "/v2/status/" in str(recorder.requests[0].url)
+    cutter, _ = bria(httpx.Response(401, json={}))
+    with pytest.raises(LLMNotConfigured):
+        cutter.check(api_key=Secret("bad"))
+
+
+class ScriptedCutter:
+    name = "scripted"
+
+    def __init__(self, mask: Image.Image) -> None:
+        self.mask = mask
+        self.calls = 0
+
+    def cut(self, request: SegmentationRequest, *, api_key: Secret) -> CutOut:
+        self.calls += 1
+        return CutOut(mask=self.mask, input_tokens=10, output_tokens=2, output_image_tokens=100)
+
+
+def test_combined_segmenter_takes_pixels_from_the_cutter() -> None:
+    mask = Image.new("L", (200, 400), 0)
+    ImageDraw.Draw(mask).ellipse([60, 110, 140, 290], fill=255)
+    cutter = ScriptedCutter(mask)
+    analyst = GeminiJsonSegmenter(
+        ScriptedContent(answer(product={"box_2d": [250, 250, 750, 750]})), require_mask=False
+    )
+    request = SegmentationRequest(image=ImagePart(b"j", "image/jpeg"), width=200, height=400, model="m")
+    result = CombinedSegmenter(analyst, cutter, cutter_key=Secret("c")).segment(request, api_key=KEY)
+    assert result.exact and result.product is mask and result.cutter == "scripted"
+    assert (result.cutter_input_tokens, result.output_image_tokens) == (10, 100)
+    assert result.hand_covers_product and result.covered_percent == 4.5  # the analyst's flags stay
+
+
+def test_combined_segmenter_refuses_a_cut_out_elsewhere_and_skips_cut_off_photos() -> None:
+    elsewhere = Image.new("L", (200, 400), 0)
+    ImageDraw.Draw(elsewhere).rectangle([0, 0, 40, 40], fill=255)
+    analyst = GeminiJsonSegmenter(
+        ScriptedContent(answer(product={"box_2d": [250, 250, 750, 750]})), require_mask=False
+    )
+    request = SegmentationRequest(image=ImagePart(b"j", "image/jpeg"), width=200, height=400, model="m")
+    with pytest.raises(MaskUnusable):
+        CombinedSegmenter(analyst, ScriptedCutter(elsewhere), cutter_key=Secret("c")).segment(
+            request, api_key=KEY
+        )
+    cut_off = GeminiJsonSegmenter(ScriptedContent(answer(product_cut_off=True)), require_mask=False)
+    cutter = ScriptedCutter(elsewhere)
+    result = CombinedSegmenter(cut_off, cutter, cutter_key=Secret("c")).segment(request, api_key=KEY)
+    assert result.cut_off and not result.exact and cutter.calls == 0
+    assert iou((0, 0, 10, 10), (0, 0, 10, 10)) == 1.0 and iou((0, 0, 1, 1), (5, 5, 6, 6)) == 0.0
+
+
+def test_a_placeholder_mask_keeps_only_the_box() -> None:
+    tiny = "data:image/png;base64," + base64.b64encode(png(Image.new("L", (8, 8), 255))).decode()
+    analyst = GeminiJsonSegmenter(
+        ScriptedContent(answer(product={"box_2d": [250, 250, 750, 750], "mask": tiny})), require_mask=False
+    )
+    request = SegmentationRequest(image=ImagePart(b"j", "image/jpeg"), width=200, height=400, model="m")
+    result = analyst.segment(request, api_key=KEY)
+    assert not result.exact and result.box == (50, 100, 150, 300)
+    with pytest.raises(LLMBadOutput):
+        GeminiJsonSegmenter(
+            ScriptedContent(answer(product={"box_2d": [250, 250, 750, 750], "mask": tiny}))
+        ).segment(request, api_key=KEY)
 
 
 def test_fake_segmenter_keys_the_corner_colour() -> None:
@@ -371,10 +526,13 @@ def test_segmenter_registry(settings: Any) -> None:
     settings.AI_MODE = "fake"
     assert get_segmenter() is fake_segmenter()
     settings.AI_MODE = "live"
-    assert isinstance(get_segmenter(), GeminiJsonSegmenter)
-    assert isinstance(get_segmenter("gemini_matte"), GeminiMatteSegmenter)
+    assert isinstance(get_segmenter("gemini_json"), GeminiJsonSegmenter)
+    assert isinstance(get_segmenter("gemini_matte"), CombinedSegmenter)
+    assert isinstance(get_segmenter("bria", cutter_key=Secret("b")), CombinedSegmenter)
     with pytest.raises(LLMNotConfigured):
         get_segmenter("bria")
+    with pytest.raises(LLMNotConfigured):
+        get_segmenter("other")
     settings.AI_MODE = "other"
     with pytest.raises(ImproperlyConfigured):
         get_segmenter()
@@ -383,9 +541,3 @@ def test_segmenter_registry(settings: Any) -> None:
     settings.SETTINGS_MODULE = "config.settings.production"
     with pytest.raises(LLMNotConfigured):
         get_segmenter()
-
-
-def test_the_raw_answer_is_kept_without_mask_payloads() -> None:
-    result, _ = segment(answer())
-    assert result.raw["product"]["mask"].startswith("<") and result.raw["background"] == "office"
-    assert result.raw["hands"][0]["mask"].endswith("chars>")

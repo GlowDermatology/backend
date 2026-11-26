@@ -7461,6 +7461,81 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/products/{id}/images/{image_id}/renditions/:
+    put:
+      operationId: admin_product_images_renditions
+      description: 'Set the screen shapes of an image: a 4:5 `portrait` and a `square`
+        crop, stored as WebP copies (the image itself is never changed). `invalid_crop`
+        / `crop_too_small` per shape.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: image_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImageRenditionsPutRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductImage'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/products/{id}/images/order/:
     put:
       operationId: admin_product_images_reorder
@@ -7605,6 +7680,91 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/products/{product_id}/images/{image_id}/scenes/:
+    post:
+      operationId: admin_scene_jobs_create
+      description: 'Build a scene around a saved image''s product (`studio` / `ai_scene`
+        with `template_id`) or propose its 4:5 and square crops (`fit`). 202 with
+        a new job, 200 with the image''s queued/running job. The product itself is
+        never redrawn: the photo''s own pixels are pasted back. Refusals (as the job''s
+        `error.code`): `scene_product_cut_off`, `scene_hand_covers_product`, `scene_occlusion_needs_ai`,
+        `scene_no_product`, `scene_mask_unusable`, `scene_product_drift`, `scene_result_rejected`.'
+      parameters:
+      - in: path
+        name: image_id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SceneJobCreateRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SceneJob'
+          description: ''
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SceneJob'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/products/stats/:
     get:
       operationId: admin_products_stats
@@ -7618,6 +7778,316 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProductStats'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/scenes/jobs/{id}/:
+    get:
+      operationId: admin_scene_jobs_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SceneJob'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/scenes/jobs/{id}/accept/:
+    post:
+      operationId: admin_scene_jobs_accept_create
+      description: 'Accept a finished job: a scene becomes a new gallery image (the
+        source stays; `make_main` puts it first), a `fit` writes the proposed renditions
+        on the source image. `acknowledge_generated` must be true when part of the
+        product was drawn by AI. 409 `scene_job_not_ready` / `scene_source_changed`.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SceneAcceptRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SceneAcceptResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/scenes/jobs/{id}/discard/:
+    post:
+      operationId: admin_scene_jobs_discard_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SceneJob'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/scenes/status/:
+    get:
+      operationId: admin_scenes_status_retrieve
+      description: Whether the product editor offers scenes and screen fitting, and
+        which kinds.
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SceneStatus'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/scenes/templates/:
+    get:
+      operationId: admin_scene_templates_list
+      description: The enabled scene templates, in their console order.
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SceneTemplates'
           description: ''
         '400':
           content:
@@ -19834,10 +20304,55 @@ components:
       - location
       - platform
       - updated_at
+    AdminImageRenditions:
+      type: object
+      properties:
+        portrait:
+          allOf:
+          - $ref: '#/components/schemas/AdminRendition'
+          nullable: true
+        square:
+          allOf:
+          - $ref: '#/components/schemas/AdminRendition'
+          nullable: true
+      required:
+      - portrait
+      - square
     AdminLoginResult:
       oneOf:
       - $ref: '#/components/schemas/LoginResponse'
       - $ref: '#/components/schemas/MfaChallenge'
+    AdminRendition:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Full-size WebP of the shape (long side ≤ 2000 px).
+        medium_url:
+          type: string
+          format: uri
+          description: 1000 px WebP variant.
+        thumbnail_url:
+          type: string
+          format: uri
+          description: 400 px WebP variant.
+        crop:
+          type: array
+          items:
+            type: number
+            format: double
+          description: '[x, y, w, h], 0-1 of the image.'
+          maxItems: 4
+          minItems: 4
+        mode:
+          $ref: '#/components/schemas/RenditionModeEnum'
+      required:
+      - crop
+      - medium_url
+      - mode
+      - thumbnail_url
+      - url
     AllowedActionsEnum:
       enum:
       - confirm
@@ -22307,6 +22822,10 @@ components:
           type: string
           nullable: true
           description: 1000 px WebP variant.
+        main_image_renditions:
+          allOf:
+          - $ref: '#/components/schemas/ImageRenditions'
+          description: Screen shapes of the main image (null each = none).
         unit_price:
           type: integer
         promo:
@@ -22332,6 +22851,7 @@ components:
       - available
       - line_total
       - main_image_medium_url
+      - main_image_renditions
       - main_image_thumbnail_url
       - main_image_url
       - max_quantity
@@ -23251,6 +23771,8 @@ components:
           description: 1000 px WebP variant.
         position:
           type: integer
+        renditions:
+          $ref: '#/components/schemas/ImageRenditions'
         alt:
           type: string
           description: Alt text in this language (else Uzbek); without one, the product
@@ -23260,6 +23782,7 @@ components:
       - id
       - medium_url
       - position
+      - renditions
       - thumbnail_url
       - url
     CustomerProgressStep:
@@ -24456,6 +24979,37 @@ components:
             type: integer
       required:
       - image_ids
+    ImageRenditions:
+      type: object
+      properties:
+        portrait:
+          allOf:
+          - $ref: '#/components/schemas/RenditionUrls'
+          nullable: true
+          description: 4:5 crop (product cards, product page, cart); null = use the
+            image.
+        square:
+          allOf:
+          - $ref: '#/components/schemas/RenditionUrls'
+          nullable: true
+          description: 1:1 crop (home rails, feed, app cards, thumbnails); null =
+            use the image.
+      required:
+      - portrait
+      - square
+    ImageRenditionsPutRequest:
+      type: object
+      description: |-
+        Body of ``PUT products/{id}/images/{image_id}/renditions/``: per shape a crop ``[x, y, w, h]`` (0-1 of
+        the image, the shape's ratio ±2 %, ≥ 200 px on its short side), ``"auto"`` (framed on the product box, or
+        centred) or ``null`` (removed); a shape left out is kept.
+      properties:
+        portrait:
+          nullable: true
+          description: '[x, y, w, h] | "auto" | null (4:5).'
+        square:
+          nullable: true
+          description: '[x, y, w, h] | "auto" | null (1:1).'
     ImageUrl:
       type: object
       properties:
@@ -27658,6 +28212,11 @@ components:
           format: uri
           nullable: true
           description: 1000 px WebP variant.
+        main_image_renditions:
+          allOf:
+          - $ref: '#/components/schemas/ImageRenditions'
+          description: The main image's screen shapes; each null until staff set it
+            (use the image then).
         available:
           type: integer
         stock_status:
@@ -27675,6 +28234,7 @@ components:
       - id
       - in_cart_quantity
       - main_image_medium_url
+      - main_image_renditions
       - main_image_thumbnail_url
       - main_image_url
       - name
@@ -27761,6 +28321,11 @@ components:
           format: uri
           nullable: true
           description: 1000 px WebP variant.
+        main_image_renditions:
+          allOf:
+          - $ref: '#/components/schemas/ImageRenditions'
+          description: The main image's screen shapes; each null until staff set it
+            (use the image then).
         available:
           type: integer
         stock_status:
@@ -27802,6 +28367,7 @@ components:
       - in_cart_quantity
       - ingredients
       - main_image_medium_url
+      - main_image_renditions
       - main_image_thumbnail_url
       - main_image_url
       - max_quantity
@@ -27857,13 +28423,59 @@ components:
           - $ref: '#/components/schemas/ImageAlt'
           readOnly: true
           description: Alt text per language; "" = the product name is used.
+        width:
+          type: integer
+        height:
+          type: integer
+        source:
+          allOf:
+          - $ref: '#/components/schemas/ProductImageSourceEnum'
+          description: |-
+            `upload`, or a scene built around another image.
+
+            * `upload` - upload
+            * `studio` - studio
+            * `ai_scene` - ai_scene
+        derived_from_id:
+          type: integer
+          nullable: true
+          description: The image a scene was built from (null for uploads, or once
+            it is gone).
+        product_box:
+          type: array
+          items:
+            type: number
+            format: double
+          nullable: true
+          description: The product's box [x0, y0, x1, y1] (0-1), when known; frames
+            `auto` renditions.
+        renditions:
+          allOf:
+          - $ref: '#/components/schemas/AdminImageRenditions'
+          readOnly: true
       required:
       - alt
+      - derived_from_id
+      - height
       - id
       - medium_url
       - position
+      - product_box
+      - renditions
+      - source
       - thumbnail_url
       - url
+      - width
+    ProductImageSourceEnum:
+      enum:
+      - upload
+      - studio
+      - ai_scene
+      type: string
+      description: |-
+        * `upload` - upload
+        * `studio` - studio
+        * `ai_scene` - ai_scene
     ProductImageUploadRequest:
       type: object
       properties:
@@ -28607,6 +29219,33 @@ components:
       required:
       - regions
       - updated_at
+    RenditionModeEnum:
+      enum:
+      - auto
+      - manual
+      type: string
+      description: |-
+        * `auto` - auto
+        * `manual` - manual
+    RenditionUrls:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Full-size WebP of the shape (long side ≤ 2000 px).
+        medium_url:
+          type: string
+          format: uri
+          description: 1000 px WebP variant.
+        thumbnail_url:
+          type: string
+          format: uri
+          description: 400 px WebP variant.
+      required:
+      - medium_url
+      - thumbnail_url
+      - url
     RequestedViaEnum:
       enum:
       - app
@@ -28702,6 +29341,255 @@ components:
           minimum: 0
       required:
       - revoked
+    SceneAcceptRequest:
+      type: object
+      properties:
+        make_main:
+          type: boolean
+          default: false
+          description: Put the new image first (scenes only).
+        acknowledge_generated:
+          type: boolean
+          default: false
+          description: 'Required true when `generated_inside_pct` > 0: staff checked
+            the pink parts.'
+    SceneAcceptResponse:
+      type: object
+      properties:
+        job:
+          $ref: '#/components/schemas/SceneJob'
+        image:
+          $ref: '#/components/schemas/ProductImage'
+      required:
+      - image
+      - job
+    SceneCandidate:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+          nullable: true
+          description: The new 4:5 image (null for `fit`).
+        overlay_url:
+          type: string
+          format: uri
+          nullable: true
+          description: The same image with the parts drawn inside the product washed
+            pink.
+        product_box:
+          type: array
+          items:
+            type: number
+            format: double
+          nullable: true
+        crops:
+          allOf:
+          - $ref: '#/components/schemas/SceneCrops'
+          description: 'Proposed shapes: of the candidate (scenes) or of the source
+            (fit).'
+        generated_inside_pct:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+        occluded_pct:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+      required:
+      - crops
+      - generated_inside_pct
+      - occluded_pct
+      - overlay_url
+      - product_box
+      - url
+    SceneCrops:
+      type: object
+      properties:
+        portrait:
+          type: array
+          items:
+            type: number
+            format: double
+          description: '[x, y, w, h] 0-1 (4:5).'
+        square:
+          type: array
+          items:
+            type: number
+            format: double
+          description: '[x, y, w, h] 0-1 (1:1).'
+      required:
+      - portrait
+      - square
+    SceneJob:
+      type: object
+      description: 'The poller-compatible scene job: ``state`` / ``error`` like ``Job``
+        (§2.14) and the candidate.'
+      properties:
+        id:
+          type: integer
+        product_id:
+          type: integer
+          nullable: true
+        source_image_id:
+          type: integer
+          nullable: true
+        kind:
+          $ref: '#/components/schemas/SceneJobKindEnum'
+        template:
+          nullable: true
+          readOnly: true
+        state:
+          $ref: '#/components/schemas/JobStateEnum'
+        outcome:
+          $ref: '#/components/schemas/SceneJobOutcomeEnum'
+        progress:
+          nullable: true
+          description: Always null (no progress steps).
+          readOnly: true
+        result:
+          allOf:
+          - $ref: '#/components/schemas/SceneCandidate'
+          nullable: true
+          readOnly: true
+        error:
+          allOf:
+          - $ref: '#/components/schemas/AssistantJobError'
+          nullable: true
+          readOnly: true
+        warnings:
+          type: array
+          items:
+            type: string
+        accepted_image_id:
+          type: integer
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_by:
+          $ref: '#/components/schemas/Actor'
+      required:
+      - accepted_image_id
+      - created_at
+      - created_by
+      - error
+      - expires_at
+      - finished_at
+      - id
+      - kind
+      - outcome
+      - product_id
+      - progress
+      - result
+      - source_image_id
+      - state
+      - template
+      - warnings
+    SceneJobCreateRequest:
+      type: object
+      properties:
+        kind:
+          $ref: '#/components/schemas/SceneJobKindEnum'
+        template_id:
+          type: integer
+          nullable: true
+          description: Required unless `fit`.
+      required:
+      - kind
+    SceneJobKindEnum:
+      enum:
+      - studio
+      - ai_scene
+      - fit
+      type: string
+      description: |-
+        * `studio` - studio
+        * `ai_scene` - ai_scene
+        * `fit` - fit
+    SceneJobOutcomeEnum:
+      enum:
+      - pending
+      - accepted
+      - discarded
+      - expired
+      type: string
+      description: |-
+        * `pending` - pending
+        * `accepted` - accepted
+        * `discarded` - discarded
+        * `expired` - expired
+    SceneStatus:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Scenes and screen fitting are switched on.
+        ai_enabled:
+          type: boolean
+          description: AI scene templates may be used (studio ones need only `enabled`).
+        max_occluded_pct:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+          description: Share of the product a hand may hide for an AI scene to fill.
+        segmenter:
+          $ref: '#/components/schemas/SegmenterEnum'
+      required:
+      - ai_enabled
+      - enabled
+      - max_occluded_pct
+      - segmenter
+    SceneTemplate:
+      type: object
+      properties:
+        id:
+          type: integer
+        key:
+          type: string
+        kind:
+          $ref: '#/components/schemas/SceneTemplateKindEnum'
+        name:
+          type: string
+          readOnly: true
+          description: In the request's language (else Uzbek).
+        colours:
+          type: array
+          items:
+            type: string
+          readOnly: true
+          description: A studio template's colours (#rrggbb) for a swatch.
+      required:
+      - colours
+      - id
+      - key
+      - kind
+      - name
+    SceneTemplateKindEnum:
+      enum:
+      - studio
+      - ai_scene
+      type: string
+      description: |-
+        * `studio` - studio
+        * `ai_scene` - ai_scene
+    SceneTemplates:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SceneTemplate'
+      required:
+      - results
     ScheduleConflicts:
       type: object
       description: '``GET specialists/{id}/conflicts/``: open future appointments
@@ -28803,6 +29691,16 @@ components:
           $ref: '#/components/schemas/SegmentRulesRequest'
       required:
       - name
+    SegmenterEnum:
+      enum:
+      - gemini_matte
+      - bria
+      - gemini_json
+      type: string
+      description: |-
+        * `gemini_matte` - gemini_matte
+        * `bria` - bria
+        * `gemini_json` - gemini_json
     SendCodeRequest:
       type: object
       description: |-

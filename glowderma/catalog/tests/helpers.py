@@ -45,3 +45,18 @@ def jpeg_with_exif(size: tuple[int, int] = (60, 40)) -> bytes:
     output = BytesIO()
     Image.new("RGB", size, "#d6b2c4").save(output, format="JPEG", exif=exif.tobytes())
     return output.getvalue()
+
+
+NO_RENDITIONS = {"portrait": None, "square": None}
+
+
+def image_extras(image: Any) -> dict[str, Any]:
+    """The admin image fields beyond ``{id, urls, position, alt}`` for a plain upload."""
+    return {
+        "width": image.width,
+        "height": image.height,
+        "source": "upload",
+        "derived_from_id": None,
+        "product_box": None,
+        "renditions": NO_RENDITIONS,
+    }

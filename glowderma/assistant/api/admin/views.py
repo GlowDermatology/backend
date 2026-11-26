@@ -23,14 +23,27 @@ from glowderma.assistant.api.admin.schemas import (
     ASSISTANT_JOB_DISCARD_POST,
     ASSISTANT_JOB_START_POST,
     ASSISTANT_STATUS_GET,
+    SCENE_JOB_ACCEPT_POST,
+    SCENE_JOB_DETAIL_GET,
+    SCENE_JOB_DISCARD_POST,
+    SCENE_JOB_START_POST,
+    SCENE_TEMPLATES_GET,
+    SCENES_STATUS_GET,
 )
 from glowderma.assistant.api.admin.serializers import (
     AssistantAcceptSerializer,
     AssistantApplySerializer,
     AssistantJobCreateSerializer,
     AssistantJobSerializer,
+    SceneAcceptSerializer,
+    SceneJobCreateSerializer,
+    SceneJobSerializer,
+    SceneStatusSerializer,
+    SceneTemplateSerializer,
 )
-from glowderma.catalog.api.admin.serializers import ProductSerializer
+from glowderma.assistant.models import SceneJob, SceneTemplate
+from glowderma.assistant.scenes import services as scene_services
+from glowderma.catalog.api.admin.serializers import ProductImageSerializer, ProductSerializer
 from glowderma.core import enums
 from glowderma.core.idempotency import idempotent
 
@@ -124,3 +137,85 @@ class AssistantJobDiscardView(AdminAPIView):
         job = services.discard_job(pk, actor=request.user, request=request)
         job = selectors.get_job(job.pk) or job
         return Response(AssistantJobSerializer(job, context={"request": request}).data)
+
+
+# --- product scenes (contract §2.20) ------------------------------------------------------------------------
+
+
+class SceneGenerateThrottle(StaffRateThrottle):
+    """``products/{id}/images/{image_id}/scenes/`` per staff member (paid providers)."""
+
+    scope = "scene_generate"
+
+
+class ScenesStatusView(AdminAPIView):
+    @SCENES_STATUS_GET
+    def get(self, request: Request) -> Response:
+        return Response(SceneStatusSerializer(scene_services.status()).data)
+
+
+class SceneTemplatesView(AdminAPIView):
+    @SCENE_TEMPLATES_GET
+    def get(self, request: Request) -> Response:
+        templates = SceneTemplate.objects.filter(enabled=True).order_by("position", "id")
+        return Response(
+            {"results": SceneTemplateSerializer(templates, many=True, context={"request": request}).data}
+        )
+
+
+class SceneJobStartView(AdminAPIView):
+    throttle_classes = [StaffRateThrottle, SceneGenerateThrottle]
+
+    @SCENE_JOB_START_POST
+    @idempotent(required=False)
+    def post(self, request: Request, product_id: int, image_id: int) -> Response:
+        serializer = SceneJobCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        result = scene_services.start_job(
+            product_id, image_id, kind=data["kind"], template_id=data.get("template_id"), actor=request.user
+        )
+        body = SceneJobSerializer(result.job, context={"request": request}).data
+        return Response(body, status=202 if result.created else 200)
+
+
+def _scene_job(pk: int) -> SceneJob:
+    job = SceneJob.objects.select_related("created_by").filter(pk=pk).first()
+    if job is None:
+        raise NotFound
+    return job
+
+
+class SceneJobDetailView(AdminAPIView):
+    @SCENE_JOB_DETAIL_GET
+    def get(self, request: Request, pk: int) -> Response:
+        return Response(SceneJobSerializer(_scene_job(pk), context={"request": request}).data)
+
+
+class SceneJobAcceptView(AdminAPIView):
+    @SCENE_JOB_ACCEPT_POST
+    @idempotent(required=False)
+    def post(self, request: Request, pk: int) -> Response:
+        serializer = SceneAcceptSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        job, image = scene_services.accept(
+            pk,
+            make_main=serializer.validated_data["make_main"],
+            acknowledge_generated=serializer.validated_data["acknowledge_generated"],
+            actor=request.user,
+            request=request,
+        )
+        return Response(
+            {
+                "job": SceneJobSerializer(_scene_job(job.pk), context={"request": request}).data,
+                "image": ProductImageSerializer(image).data,
+            }
+        )
+
+
+class SceneJobDiscardView(AdminAPIView):
+    @SCENE_JOB_DISCARD_POST
+    @idempotent(required=False)
+    def post(self, request: Request, pk: int) -> Response:
+        job = scene_services.discard(pk, actor=request.user, request=request)
+        return Response(SceneJobSerializer(_scene_job(job.pk), context={"request": request}).data)

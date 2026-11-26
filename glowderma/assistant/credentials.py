@@ -43,8 +43,9 @@ from glowderma.assistant import topics
 from glowderma.assistant.models import ProviderConfig
 from glowderma.core import audit, enums, outbox, timeutils
 from glowderma.integrations.llm import registry as llm_registry
-from glowderma.integrations.llm.ports import LLMError
+from glowderma.integrations.llm.ports import LLMError, LLMNotConfigured
 from glowderma.integrations.secret import Secret
+from glowderma.integrations.segmentation.bria import BriaCutter
 from glowderma.integrations.vault import registry as vault_registry
 from glowderma.integrations.vault.ports import VaultError, VaultNotFound
 
@@ -250,8 +251,15 @@ def check_version(config: ProviderConfig, version: int) -> str:
     """Read ``version`` and ask the provider whether it accepts it: ``""`` or the error code."""
     try:
         key = read_version(config, version)
-        model = llm_registry.get_content_model(config.provider)
-        model.check(api_key=key, model=config.model_id, timeout_seconds=min(int(config.timeout_seconds), 30))
+        timeout = min(int(config.timeout_seconds), 30)
+        if config.provider == enums.AssistantProvider.BRIA:
+            if settings.AI_MODE == "live":
+                BriaCutter().check(api_key=key, timeout_seconds=timeout)
+            elif not key:
+                raise LLMNotConfigured("empty key")
+        else:
+            model = llm_registry.get_content_model(config.provider)
+            model.check(api_key=key, model=config.model_id, timeout_seconds=timeout)
     except (LLMError, VaultError) as exc:
         return str(getattr(exc, "code", "") or "provider_unavailable")
     return ""
