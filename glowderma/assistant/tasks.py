@@ -14,7 +14,8 @@ from celery import shared_task  # type: ignore[import-untyped]
 from celery.exceptions import SoftTimeLimitExceeded  # type: ignore[import-untyped]
 
 from glowderma.assistant import credential_tasks, services, topics
-from glowderma.assistant.models import GenerationJob
+from glowderma.assistant.models import GenerationJob, SceneJob
+from glowderma.assistant.scenes import services as scene_services
 from glowderma.core import outbox
 from glowderma.core.models import OutboxMessage
 
@@ -22,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 RUN_SOFT_TIME_LIMIT = 90
 RUN_TIME_LIMIT = 120
+# a scene: analyst + cutter + up to two image generations + QA, each bounded by its own timeout
+SCENE_SOFT_TIME_LIMIT = 270
+SCENE_TIME_LIMIT = 300
 
 
 @outbox.register(topics.JOB_QUEUED)
@@ -65,3 +69,35 @@ def run_generation(job_id: int) -> None:
 @shared_task(name="assistant.reap_stale_jobs")  # type: ignore[untyped-decorator]
 def reap_stale_jobs() -> int:
     return len(services.reap_stale_jobs())
+
+
+@outbox.register(topics.SCENE_QUEUED)
+def on_scene_queued(message: OutboxMessage) -> None:
+    payload: dict[str, Any] = message.payload if isinstance(message.payload, dict) else {}
+    job_id = int(payload["job_id"])
+    result = run_scene.delay(job_id)
+    SceneJob.objects.filter(pk=job_id).update(celery_task_id=str(result.id)[:64])
+
+
+@shared_task(  # type: ignore[untyped-decorator]
+    name="assistant.run_scene", soft_time_limit=SCENE_SOFT_TIME_LIMIT, time_limit=SCENE_TIME_LIMIT
+)
+def run_scene(job_id: int) -> None:
+    try:
+        scene_services.run(job_id)
+    except SoftTimeLimitExceeded:
+        logger.error("scene job %s ran out of time (%s s)", job_id, SCENE_SOFT_TIME_LIMIT)
+        job = SceneJob.objects.filter(pk=job_id).first()
+        if job is not None:
+            scene_services.fail(job, "provider_unavailable")
+    except Exception:
+        logger.exception("scene job %s crashed", job_id)
+        job = SceneJob.objects.filter(pk=job_id).first()
+        if job is not None:
+            scene_services.fail(job, scene_services.SERVER_ERROR)
+
+
+@shared_task(name="assistant.scenes_housekeeping")  # type: ignore[untyped-decorator]
+def scenes_housekeeping() -> dict[str, int]:
+    """Hourly: fail scene jobs whose worker was lost; expire unreviewed candidates (their files go)."""
+    return {"reaped": len(scene_services.reap_stale()), "expired": scene_services.expire_candidates()}

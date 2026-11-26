@@ -9,12 +9,14 @@ from rest_framework import serializers
 
 from glowderma.assistant import services
 from glowderma.assistant.models import GenerationJob
-from glowderma.catalog.api.admin.serializers import ProductSerializer
+from glowderma.assistant.scenes import services as scene_services
+from glowderma.catalog.api.admin.serializers import ProductImageSerializer, ProductSerializer
 from glowderma.core import enums
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import BoundedListField
 from glowderma.core.api.language import admin_language
 from glowderma.core.api.serializers import ActorSerializer
+from glowderma.core.media import absolute_media_url
 from glowderma.core.uzsource import tr
 
 MAX_KEYS = 120  # 3 languages x (5 texts + 2 SEO + 8 images' alt) = 45; generous
@@ -177,3 +179,144 @@ class AssistantApplyResultSerializer(serializers.Serializer[Any]):
     applied = serializers.ListField(child=serializers.CharField())
     conflicts = serializers.ListField(child=serializers.CharField())
     product = ProductSerializer()
+
+
+# --- product scenes (contract §2.20) ------------------------------------------------------------------------
+
+
+class SceneStatusSerializer(serializers.Serializer[Any]):
+    enabled = serializers.BooleanField(help_text="Scenes and screen fitting are switched on.")
+    ai_enabled = serializers.BooleanField(
+        help_text="AI scene templates may be used (studio ones need only `enabled`)."
+    )
+    max_occluded_pct = serializers.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        help_text="Share of the product a hand may hide for an AI scene to fill.",
+    )
+    segmenter = serializers.ChoiceField(choices=enums.SceneSegmenter.values)
+
+
+class SceneTemplateSerializer(serializers.Serializer[Any]):
+    id = serializers.IntegerField()
+    key = serializers.CharField()
+    kind = serializers.ChoiceField(choices=enums.SceneTemplateKind.values)
+    name = serializers.SerializerMethodField(help_text="In the request's language (else Uzbek).")
+    colours = serializers.SerializerMethodField(
+        help_text="A studio template's colours (#rrggbb) for a swatch."
+    )
+
+    def get_name(self, obj: Any) -> str:
+        request = self.context.get("request")
+        language = admin_language(request) if request else "uz"
+        return str(getattr(obj, f"name_{language}", "") or obj.name_uz)
+
+    @extend_schema_field(serializers.ListField(child=serializers.CharField()))
+    def get_colours(self, obj: Any) -> list[str]:
+        params = obj.params if isinstance(obj.params, dict) else {}
+        colours = [str(c) for c in params.get("colours") or []]
+        if params.get("floor"):
+            colours.append(str(params["floor"]))
+        return colours
+
+
+class SceneTemplatesSerializer(serializers.Serializer[Any]):
+    results = SceneTemplateSerializer(many=True)
+
+
+class SceneJobCreateSerializer(serializers.Serializer[dict[str, Any]]):
+    kind = serializers.ChoiceField(choices=enums.SceneJobKind.values)
+    template_id = serializers.IntegerField(
+        required=False, allow_null=True, help_text="Required unless `fit`."
+    )
+
+
+class SceneCropsSerializer(serializers.Serializer[Any]):
+    portrait = serializers.ListField(child=serializers.FloatField(), help_text="[x, y, w, h] 0-1 (4:5).")
+    square = serializers.ListField(child=serializers.FloatField(), help_text="[x, y, w, h] 0-1 (1:1).")
+
+
+class SceneCandidateSerializer(serializers.Serializer[Any]):
+    url = serializers.URLField(allow_null=True, help_text="The new 4:5 image (null for `fit`).")
+    overlay_url = serializers.URLField(
+        allow_null=True, help_text="The same image with the parts drawn inside the product washed pink."
+    )
+    product_box = serializers.ListField(child=serializers.FloatField(), allow_null=True)
+    crops = SceneCropsSerializer(
+        help_text="Proposed shapes: of the candidate (scenes) or of the source (fit)."
+    )
+    generated_inside_pct = serializers.DecimalField(max_digits=5, decimal_places=2)
+    occluded_pct = serializers.DecimalField(max_digits=5, decimal_places=2)
+
+
+class SceneJobSerializer(serializers.Serializer[Any]):
+    """The poller-compatible scene job: ``state`` / ``error`` like ``Job`` (§2.14) and the candidate."""
+
+    id = serializers.IntegerField()
+    product_id = serializers.IntegerField(allow_null=True)
+    source_image_id = serializers.IntegerField(allow_null=True)
+    kind = serializers.ChoiceField(choices=enums.SceneJobKind.values)
+    template = serializers.SerializerMethodField()
+    state = serializers.ChoiceField(choices=enums.JobState.values)
+    outcome = serializers.ChoiceField(choices=enums.SceneJobOutcome.values)
+    progress = serializers.SerializerMethodField()
+    result = serializers.SerializerMethodField()
+    error = serializers.SerializerMethodField()
+    warnings = serializers.ListField(child=serializers.CharField())
+    accepted_image_id = serializers.IntegerField(allow_null=True)
+    created_at = serializers.DateTimeField()
+    finished_at = serializers.DateTimeField(allow_null=True)
+    expires_at = serializers.DateTimeField(allow_null=True)
+    created_by = ActorSerializer()
+
+    @extend_schema_field(serializers.JSONField(allow_null=True))
+    def get_template(self, obj: Any) -> dict[str, Any] | None:
+        snapshot = obj.template_snapshot or {}
+        if not snapshot:
+            return None
+        request = self.context.get("request")
+        language = admin_language(request) if request else "uz"
+        names = snapshot.get("name") or {}
+        return {"key": snapshot.get("key"), "name": names.get(language) or names.get("uz") or ""}
+
+    @extend_schema_field(serializers.JSONField(allow_null=True, help_text="Always null (no progress steps)."))
+    def get_progress(self, obj: Any) -> None:
+        return None
+
+    @extend_schema_field(SceneCandidateSerializer(allow_null=True))
+    def get_result(self, obj: Any) -> dict[str, Any] | None:
+        if obj.state != enums.JobState.SUCCEEDED or obj.outcome == enums.SceneJobOutcome.EXPIRED:
+            return None
+        crops = obj.crops or {}
+        return {
+            "url": absolute_media_url(str(obj.candidate.name)) if obj.candidate else None,
+            "overlay_url": absolute_media_url(str(obj.overlay.name)) if obj.overlay else None,
+            "product_box": obj.product_box,
+            "crops": {"portrait": crops.get("4:5") or [], "square": crops.get("1:1") or []},
+            "generated_inside_pct": obj.generated_inside_pct,
+            "occluded_pct": obj.occluded_pct,
+        }
+
+    @extend_schema_field(AssistantJobErrorSerializer(allow_null=True))
+    def get_error(self, obj: Any) -> dict[str, str] | None:
+        if obj.state != enums.JobState.FAILED:
+            return None
+        request = self.context.get("request")
+        message = scene_services.message_of(obj.error_code)
+        return {
+            "code": obj.error_code,
+            "message": tr(message, admin_language(request)) if request else message,
+        }
+
+
+class SceneAcceptSerializer(serializers.Serializer[dict[str, Any]]):
+    make_main = serializers.BooleanField(default=False, help_text="Put the new image first (scenes only).")
+    acknowledge_generated = serializers.BooleanField(
+        default=False,
+        help_text="Required true when `generated_inside_pct` > 0: staff checked the pink parts.",
+    )
+
+
+class SceneAcceptResponseSerializer(serializers.Serializer[Any]):
+    job = SceneJobSerializer()
+    image = ProductImageSerializer()

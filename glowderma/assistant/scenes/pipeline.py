@@ -178,6 +178,7 @@ class Result:
     kind: str
     final: Image.Image = field(repr=False)  # the 4:5 master, not yet encoded
     square: compose.Box
+    product_box: compose.Box = (0, 0, 0, 0)  # where the product stands in the master
     canvas: Image.Image | None = field(default=None, repr=False)  # what the image model received
     generated: Image.Image | None = field(default=None, repr=False)  # what it returned (resized)
     generated_inside: Image.Image | None = field(default=None, repr=False)
@@ -338,6 +339,7 @@ def studio(analysis: Analysis, template: Template, config: Config) -> Result:
         kind="studio",
         final=final,
         square=compose.square_box(prepared.layout),
+        product_box=prepared.layout.box,
         warnings=list(analysis.warnings),
     )
     result.seconds = round(time.monotonic() - started, 2)
@@ -434,6 +436,7 @@ def ai_scene(
             kind="ai_scene",
             final=final,
             square=compose.square_box(prepared.layout),
+            product_box=prepared.layout.box,
             canvas=sent,
             generated=generated,
             generated_inside=inside if inside_pct > 0 else None,

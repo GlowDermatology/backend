@@ -6,3 +6,5 @@ JOB_QUEUED = "assistant.job_queued"
 # ``{"config_id", "version", "actor_id"}`` (ids only, ``version`` None = the active key). Through the outbox,
 # so a broker outage after the commit never leaves a pending test without its task.
 CREDENTIAL_TEST = "assistant.credential_test"
+# A product scene / fit job was queued (``scenes.services.start_job``): payload ``{"job_id"}`` only.
+SCENE_QUEUED = "assistant.scene_queued"

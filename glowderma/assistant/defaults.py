@@ -88,6 +88,41 @@ INSTRUCTIONS: dict[str, str] = {
 }
 
 
+BRIA = "bria"
+BRIA_DEFAULTS: dict[str, Any] = {
+    # Bria is billed per call (SceneSettings.price_bria_call); the token prices stay 0
+    "model_id": "rmbg2",
+    "price_input_per_mtok_usd": Decimal("0"),
+    "price_output_per_mtok_usd": Decimal("0"),
+    "vault_path": BRIA,
+}
+
+
+def ensure_scene_rows(apps: Any, using: str = "default") -> None:
+    """The scenes' settings singleton (with the default style), Bria's provider row (its key lives in Vault
+    like Gemini's) and the starter templates; existing rows are never changed."""
+    from glowderma.assistant.scenes.prompts import DEFAULT_STYLE
+    from glowderma.assistant.scenes.templates import STARTER
+
+    SceneSettings = apps.get_model("assistant", "SceneSettings")
+    SceneTemplate = apps.get_model("assistant", "SceneTemplate")
+    ProviderConfig = apps.get_model("assistant", "ProviderConfig")
+    SceneSettings.objects.using(using).get_or_create(pk=SETTINGS_PK, defaults={"style": DEFAULT_STYLE})
+    ProviderConfig.objects.using(using).get_or_create(provider=BRIA, defaults=BRIA_DEFAULTS)
+    if not SceneTemplate.objects.using(using).exists():
+        for position, template in enumerate(STARTER):
+            SceneTemplate.objects.using(using).create(
+                key=template.key,
+                kind=template.kind,
+                name_uz=template.name["uz"],
+                name_ru=template.name["ru"],
+                name_en=template.name["en"],
+                position=position,
+                params=dict(template.params),
+                prompt=template.prompt,
+            )
+
+
 def ensure_rows(apps: Any, using: str = "default") -> None:
     """Insert the missing rows (``apps`` = a migration state's registry or the global one)."""
     AssistantSettings = apps.get_model("assistant", "AssistantSettings")
@@ -102,3 +137,5 @@ def ensure_rows(apps: Any, using: str = "default") -> None:
             PromptVersion.objects.using(using).create(
                 template=template, number=1, instructions=text, status="active"
             )
+    if "scenesettings" in {model._meta.model_name for model in apps.get_app_config("assistant").get_models()}:
+        ensure_scene_rows(apps, using)

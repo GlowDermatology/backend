@@ -28,4 +28,16 @@ urlpatterns: list[URLPattern | URLResolver] = [
         views.AssistantJobDiscardView.as_view(),
         name="admin-assistant-job-discard",
     ),
+    path("scenes/status/", views.ScenesStatusView.as_view(), name="admin-scenes-status"),
+    path("scenes/templates/", views.SceneTemplatesView.as_view(), name="admin-scene-templates"),
+    path(
+        "products/<int:product_id>/images/<int:image_id>/scenes/",
+        views.SceneJobStartView.as_view(),
+        name="admin-scene-jobs-start",
+    ),
+    path("scenes/jobs/<int:pk>/", views.SceneJobDetailView.as_view(), name="admin-scene-job"),
+    path("scenes/jobs/<int:pk>/accept/", views.SceneJobAcceptView.as_view(), name="admin-scene-job-accept"),
+    path(
+        "scenes/jobs/<int:pk>/discard/", views.SceneJobDiscardView.as_view(), name="admin-scene-job-discard"
+    ),
 ]

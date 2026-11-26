@@ -27,9 +27,9 @@ from glowderma.integrations.llm.ports import (
     LLMUnavailable,
 )
 from glowderma.integrations.secret import Secret
+from glowderma.integrations.segmentation.combined import CombinedSegmenter
 from glowderma.integrations.segmentation.fake import FakeSegmenter
 from glowderma.integrations.segmentation.gemini_json import GeminiJsonSegmenter
-from glowderma.integrations.segmentation.combined import CombinedSegmenter
 from glowderma.integrations.segmentation.ports import Segmentation
 
 SIZE = (900, 1200)

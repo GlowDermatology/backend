@@ -77,4 +77,6 @@ app.conf.beat_schedule = {
     "billz-sync-full": {"task": "catalog.billz_sync_full", "schedule": crontab(hour=4, minute=23)},
     # Storefront landing page: the 30-day revenue bestsellers are cached for the home/ rail (hourly).
     "commerce-refresh-bestsellers": {"task": "commerce.refresh_bestsellers", "schedule": 3600.0},
+    # Product scenes: lost scene jobs fail, unreviewed candidates expire and their files are removed (hourly).
+    "assistant-scenes-housekeeping": {"task": "assistant.scenes_housekeeping", "schedule": 3600.0},
 }
