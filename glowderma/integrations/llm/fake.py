@@ -19,9 +19,13 @@ never hands this adapter out under the production settings (``ai_not_configured`
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections import deque
+from io import BytesIO
 from typing import Any
+
+from PIL import Image, ImageChops
 
 from glowderma.core import integration_modes
 from glowderma.integrations.secret import Secret
@@ -29,6 +33,8 @@ from glowderma.integrations.secret import Secret
 from .ports import (
     GenerationRequest,
     GenerationResult,
+    ImageGenerationRequest,
+    ImageGenerationResult,
     LLMBadOutput,
     LLMNotConfigured,
     LLMRefused,
@@ -148,6 +154,89 @@ class FakeContentModel:
         if integration_modes.dev_features_allowed():
             self.checks.append(model)
         if api_key.reveal().startswith(INVALID_KEY_PREFIX) or not api_key:
+            raise LLMNotConfigured("fake: key rejected")
+        if model.startswith(UNKNOWN_MODEL_PREFIX):
+            raise LLMNotConfigured("fake: unknown model")
+
+
+DRIFT_MARKER = "[fake-drift]"
+NO_IMAGE_MARKER = "[fake-no-image]"
+PLACEHOLDER_TOLERANCE = 24
+
+
+class FakeImageModel:
+    """Deterministic image model (``AI_MODE=fake``): paints the flat placeholder of the first input image.
+
+    Pixels within :data:`PLACEHOLDER_TOLERANCE` of the placeholder grey become a vertical gradient whose
+    colours come from a hash of the prompt; everything else (the product) is returned unchanged, so the
+    result lines up with the canvas the way a well-behaved model's would. Markers in the prompt:
+    ``[fake-drift]`` shifts the whole image right by 8 % of its width (a model that moved the product),
+    ``[fake-no-image]`` → :class:`LLMBadOutput`, plus the content model's ``[fake-unavailable]`` and
+    ``[fake-refused]``. :meth:`push` queues a result or an exception. Output is PNG at the input's size.
+    """
+
+    name = "fake"
+
+    def __init__(self) -> None:
+        self.calls: list[ImageGenerationRequest] = []
+        self._queue: deque[ImageGenerationResult | Exception] = deque()
+
+    def is_configured(self) -> bool:
+        return True
+
+    def push(self, outcome: ImageGenerationResult | Exception) -> None:
+        self._queue.append(outcome)
+
+    def reset(self) -> None:
+        self.calls.clear()
+        self._queue.clear()
+
+    def generate_image(self, request: ImageGenerationRequest, *, api_key: Secret) -> ImageGenerationResult:
+        if integration_modes.dev_features_allowed():
+            self.calls.append(request)
+        if self._queue:
+            outcome = self._queue.popleft()
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+        if api_key.reveal().startswith(INVALID_KEY_PREFIX):
+            raise LLMNotConfigured("fake: key rejected")
+        if UNAVAILABLE_MARKER in request.prompt:
+            raise LLMUnavailable("fake: provider down")
+        if REFUSED_MARKER in request.prompt:
+            raise LLMRefused("fake: request refused")
+        if NO_IMAGE_MARKER in request.prompt or not request.images:
+            raise LLMBadOutput("fake: no image in the answer", input_tokens=100, output_tokens=20)
+        with Image.open(BytesIO(request.images[0].data)) as source:
+            source.load()
+            sent = source.convert("RGB")
+        digest = hashlib.sha256(request.prompt.encode()).digest()
+        top, bottom = (digest[0], digest[1], digest[2]), (digest[3], digest[4], digest[5])
+        gradient = Image.linear_gradient("L").resize(sent.size)
+        scene = Image.composite(
+            Image.new("RGB", sent.size, bottom), Image.new("RGB", sent.size, top), gradient
+        )
+        grey = Image.new("RGB", sent.size, (128, 128, 128))
+        red, green, blue = ImageChops.difference(sent, grey).split()
+        near = ImageChops.lighter(ImageChops.lighter(red, green), blue).point(
+            lambda v: 255 if v <= PLACEHOLDER_TOLERANCE else 0
+        )
+        result = Image.composite(scene, sent, near)
+        if DRIFT_MARKER in request.prompt:
+            result = ImageChops.offset(result, round(0.08 * result.width), 0)
+        output = BytesIO()
+        result.save(output, format="PNG")
+        return ImageGenerationResult(
+            image=output.getvalue(),
+            mime_type="image/png",
+            input_tokens=258 * len(request.images) + len(request.prompt) // 4,
+            output_text_tokens=0,
+            output_image_tokens=1120,
+            model=request.model,
+        )
+
+    def check(self, *, api_key: Secret, model: str, timeout_seconds: int = 10) -> None:
+        if not api_key or api_key.reveal().startswith(INVALID_KEY_PREFIX):
             raise LLMNotConfigured("fake: key rejected")
         if model.startswith(UNKNOWN_MODEL_PREFIX):
             raise LLMNotConfigured("fake: unknown model")

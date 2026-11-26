@@ -12,7 +12,11 @@ its message is ours, never the provider's text, and never contains the key):
 * :class:`LLMRefused` with ``code`` ``ai_not_configured`` (key rejected, permission denied, unknown model,
   or a fake adapter under the production settings) or ``ai_refused`` (the request was refused: safety block,
   invalid argument) — never retried;
-* :class:`LLMBadOutput` (``ai_bad_output``): the answer is not a JSON object (truncated, not JSON, empty).
+* :class:`LLMBadOutput` (``ai_bad_output``): the answer is not a JSON object (truncated, not JSON, empty),
+  or an image request answered without an image.
+
+The image port (:class:`ImageModel`) is the same contract for one image out: prompt + input images in,
+one encoded image and the token usage (input, text/thinking output and image output billed apart) back.
 """
 
 from __future__ import annotations
@@ -97,5 +101,39 @@ class ContentModel(Protocol):
     def check(self, *, api_key: Secret, model: str, timeout_seconds: int = 10) -> None:
         """A cheap credential + model check (no tokens generated); raises an :class:`LLMError` subclass."""
         ...
+
+    def is_configured(self) -> bool: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ImageGenerationRequest:
+    model: str  # provider model id of an image model, e.g. "gemini-nano-banana-2.1"
+    prompt: str
+    images: tuple[ImagePart, ...] = ()
+    aspect_ratio: str = "4:5"
+    image_size: str = "1K"  # "1K" | "2K" | "4K"
+    thinking_level: str = "minimal"  # "minimal" | "low" | "medium" | "high"
+    timeout_seconds: int = 60  # per HTTP attempt: image models take 10-40 s
+    max_retries: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class ImageGenerationResult:
+    image: bytes = field(repr=False)
+    mime_type: str
+    input_tokens: int
+    output_text_tokens: int  # text and thinking output (billed at the text rate)
+    output_image_tokens: int  # billed at the image rate
+    model: str
+
+
+class ImageModel(Protocol):
+    name: str
+
+    def generate_image(self, request: ImageGenerationRequest, *, api_key: Secret) -> ImageGenerationResult:
+        """One image generation; raises an :class:`LLMError` subclass."""
+        ...
+
+    def check(self, *, api_key: Secret, model: str, timeout_seconds: int = 10) -> None: ...
 
     def is_configured(self) -> bool: ...
