@@ -237,7 +237,7 @@ def start_job(
         if active is None:  # pragma: no cover - it finished between the two statements
             raise
         return StartResult(job=active, created=False)
-    logger.info("scene job %s queued (product %s, image %s, %s)", job.pk, job.product_id, image.pk, job.kind)
+    logger.info("scene job %s queued", job.pk)  # ids only: the row holds the rest
     return StartResult(job=job, created=True)
 
 
