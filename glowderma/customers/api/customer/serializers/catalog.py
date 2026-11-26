@@ -10,6 +10,7 @@ from rest_framework import serializers
 from glowderma.core import enums
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import AwareDateTimeField, QueryBooleanField
+from glowderma.core.api.renditions import ImageRenditionsSerializer
 from glowderma.customers import selectors
 
 SEARCH_MAX_LENGTH = 64
@@ -89,6 +90,9 @@ class ProductCardSerializer(serializers.Serializer[dict[str, Any]]):
     main_image_url = serializers.URLField(allow_null=True)
     main_image_thumbnail_url = serializers.URLField(allow_null=True, help_text="400 px WebP variant.")
     main_image_medium_url = serializers.URLField(allow_null=True, help_text="1000 px WebP variant.")
+    main_image_renditions = ImageRenditionsSerializer(
+        help_text="The main image's screen shapes; each null until staff set it (use the image then)."
+    )
     available = serializers.IntegerField()
     stock_status = serializers.ChoiceField(choices=enums.StockStatus.values)
     in_cart_quantity = serializers.IntegerField()
@@ -106,6 +110,7 @@ class CustomerProductImageSerializer(serializers.Serializer[dict[str, Any]]):
     thumbnail_url = serializers.URLField(help_text="400 px WebP variant.")
     medium_url = serializers.URLField(help_text="1000 px WebP variant.")
     position = serializers.IntegerField()
+    renditions = ImageRenditionsSerializer()
     alt = serializers.CharField(
         help_text="Alt text in this language (else Uzbek); without one, the product name."
     )

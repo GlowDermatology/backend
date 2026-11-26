@@ -15,7 +15,7 @@ from glowderma.accounts.models import StaffUser
 from glowderma.catalog import services
 from glowderma.catalog.models import Product, ProductImage
 from glowderma.catalog.tests.factories import ProductFactory, ProductImageFactory
-from glowderma.catalog.tests.helpers import errors_of, jpeg_with_exif, upload
+from glowderma.catalog.tests.helpers import errors_of, image_extras, jpeg_with_exif, upload
 from glowderma.core.images import MAX_BYTES
 from glowderma.core.media import url_fields
 from glowderma.core.models import AuditEntry
@@ -53,6 +53,7 @@ def test_upload_stores_reencoded_file_under_media_root(
         **url_fields("", image.file.name),
         "position": 0,
         "alt": NO_ALT,
+        **image_extras(image),
     }
     assert image.file.name == f"products/{product.pk}/{image.sha256[:16]}.{extension}"
     assert image.content_type == content_type and (image.width, image.height) == (24, 16)
@@ -194,9 +195,9 @@ def test_reorder_exact_set(staff_client: APIClient) -> None:
     assert response.status_code == 200, response.json()
     assert response.json() == {
         "images": [
-            {"id": c.pk, **url_fields("", c.file.name), "position": 0, "alt": NO_ALT},
-            {"id": a.pk, **url_fields("", a.file.name), "position": 1, "alt": NO_ALT},
-            {"id": b.pk, **url_fields("", b.file.name), "position": 2, "alt": NO_ALT},
+            {"id": c.pk, **url_fields("", c.file.name), "position": 0, "alt": NO_ALT, **image_extras(c)},
+            {"id": a.pk, **url_fields("", a.file.name), "position": 1, "alt": NO_ALT, **image_extras(a)},
+            {"id": b.pk, **url_fields("", b.file.name), "position": 2, "alt": NO_ALT, **image_extras(b)},
         ]
     }
     entry = AuditEntry.objects.get(action="product.images_reordered")

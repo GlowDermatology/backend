@@ -23,7 +23,7 @@ from glowderma.catalog.tests.factories import (
     ProductImageFactory,
     ProductStockFactory,
 )
-from glowderma.catalog.tests.helpers import errors_of
+from glowderma.catalog.tests.helpers import errors_of, image_extras
 from glowderma.core import enums, timeutils
 from glowderma.core.media import variant_url
 from glowderma.core.models import AuditEntry
@@ -133,6 +133,7 @@ def test_list_item_shape(staff_client: APIClient, staff: StaffUser) -> None:
                 "medium_url": variant_url(str(image.file.name), "medium"),
                 "position": 0,
                 "alt": {"uz": "", "ru": "", "en": ""},
+                **image_extras(image),
             }
         ],
         "last_change": {

@@ -7461,6 +7461,81 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/products/{id}/images/{image_id}/renditions/:
+    put:
+      operationId: admin_product_images_renditions
+      description: 'Set the screen shapes of an image: a 4:5 `portrait` and a `square`
+        crop, stored as WebP copies (the image itself is never changed). `invalid_crop`
+        / `crop_too_small` per shape.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: image_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImageRenditionsPutRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductImage'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/products/{id}/images/order/:
     put:
       operationId: admin_product_images_reorder
@@ -19834,10 +19909,55 @@ components:
       - location
       - platform
       - updated_at
+    AdminImageRenditions:
+      type: object
+      properties:
+        portrait:
+          allOf:
+          - $ref: '#/components/schemas/AdminRendition'
+          nullable: true
+        square:
+          allOf:
+          - $ref: '#/components/schemas/AdminRendition'
+          nullable: true
+      required:
+      - portrait
+      - square
     AdminLoginResult:
       oneOf:
       - $ref: '#/components/schemas/LoginResponse'
       - $ref: '#/components/schemas/MfaChallenge'
+    AdminRendition:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Full-size WebP of the shape (long side ≤ 2000 px).
+        medium_url:
+          type: string
+          format: uri
+          description: 1000 px WebP variant.
+        thumbnail_url:
+          type: string
+          format: uri
+          description: 400 px WebP variant.
+        crop:
+          type: array
+          items:
+            type: number
+            format: double
+          description: '[x, y, w, h], 0-1 of the image.'
+          maxItems: 4
+          minItems: 4
+        mode:
+          $ref: '#/components/schemas/RenditionModeEnum'
+      required:
+      - crop
+      - medium_url
+      - mode
+      - thumbnail_url
+      - url
     AllowedActionsEnum:
       enum:
       - confirm
@@ -22307,6 +22427,10 @@ components:
           type: string
           nullable: true
           description: 1000 px WebP variant.
+        main_image_renditions:
+          allOf:
+          - $ref: '#/components/schemas/ImageRenditions'
+          description: Screen shapes of the main image (null each = none).
         unit_price:
           type: integer
         promo:
@@ -22332,6 +22456,7 @@ components:
       - available
       - line_total
       - main_image_medium_url
+      - main_image_renditions
       - main_image_thumbnail_url
       - main_image_url
       - max_quantity
@@ -23251,6 +23376,8 @@ components:
           description: 1000 px WebP variant.
         position:
           type: integer
+        renditions:
+          $ref: '#/components/schemas/ImageRenditions'
         alt:
           type: string
           description: Alt text in this language (else Uzbek); without one, the product
@@ -23260,6 +23387,7 @@ components:
       - id
       - medium_url
       - position
+      - renditions
       - thumbnail_url
       - url
     CustomerProgressStep:
@@ -24456,6 +24584,37 @@ components:
             type: integer
       required:
       - image_ids
+    ImageRenditions:
+      type: object
+      properties:
+        portrait:
+          allOf:
+          - $ref: '#/components/schemas/RenditionUrls'
+          nullable: true
+          description: 4:5 crop (product cards, product page, cart); null = use the
+            image.
+        square:
+          allOf:
+          - $ref: '#/components/schemas/RenditionUrls'
+          nullable: true
+          description: 1:1 crop (home rails, feed, app cards, thumbnails); null =
+            use the image.
+      required:
+      - portrait
+      - square
+    ImageRenditionsPutRequest:
+      type: object
+      description: |-
+        Body of ``PUT products/{id}/images/{image_id}/renditions/``: per shape a crop ``[x, y, w, h]`` (0-1 of
+        the image, the shape's ratio ±2 %, ≥ 200 px on its short side), ``"auto"`` (framed on the product box, or
+        centred) or ``null`` (removed); a shape left out is kept.
+      properties:
+        portrait:
+          nullable: true
+          description: '[x, y, w, h] | "auto" | null (4:5).'
+        square:
+          nullable: true
+          description: '[x, y, w, h] | "auto" | null (1:1).'
     ImageUrl:
       type: object
       properties:
@@ -27658,6 +27817,11 @@ components:
           format: uri
           nullable: true
           description: 1000 px WebP variant.
+        main_image_renditions:
+          allOf:
+          - $ref: '#/components/schemas/ImageRenditions'
+          description: The main image's screen shapes; each null until staff set it
+            (use the image then).
         available:
           type: integer
         stock_status:
@@ -27675,6 +27839,7 @@ components:
       - id
       - in_cart_quantity
       - main_image_medium_url
+      - main_image_renditions
       - main_image_thumbnail_url
       - main_image_url
       - name
@@ -27761,6 +27926,11 @@ components:
           format: uri
           nullable: true
           description: 1000 px WebP variant.
+        main_image_renditions:
+          allOf:
+          - $ref: '#/components/schemas/ImageRenditions'
+          description: The main image's screen shapes; each null until staff set it
+            (use the image then).
         available:
           type: integer
         stock_status:
@@ -27802,6 +27972,7 @@ components:
       - in_cart_quantity
       - ingredients
       - main_image_medium_url
+      - main_image_renditions
       - main_image_thumbnail_url
       - main_image_url
       - max_quantity
@@ -27857,13 +28028,59 @@ components:
           - $ref: '#/components/schemas/ImageAlt'
           readOnly: true
           description: Alt text per language; "" = the product name is used.
+        width:
+          type: integer
+        height:
+          type: integer
+        source:
+          allOf:
+          - $ref: '#/components/schemas/ProductImageSourceEnum'
+          description: |-
+            `upload`, or a scene built around another image.
+
+            * `upload` - upload
+            * `studio` - studio
+            * `ai_scene` - ai_scene
+        derived_from_id:
+          type: integer
+          nullable: true
+          description: The image a scene was built from (null for uploads, or once
+            it is gone).
+        product_box:
+          type: array
+          items:
+            type: number
+            format: double
+          nullable: true
+          description: The product's box [x0, y0, x1, y1] (0-1), when known; frames
+            `auto` renditions.
+        renditions:
+          allOf:
+          - $ref: '#/components/schemas/AdminImageRenditions'
+          readOnly: true
       required:
       - alt
+      - derived_from_id
+      - height
       - id
       - medium_url
       - position
+      - product_box
+      - renditions
+      - source
       - thumbnail_url
       - url
+      - width
+    ProductImageSourceEnum:
+      enum:
+      - upload
+      - studio
+      - ai_scene
+      type: string
+      description: |-
+        * `upload` - upload
+        * `studio` - studio
+        * `ai_scene` - ai_scene
     ProductImageUploadRequest:
       type: object
       properties:
@@ -28607,6 +28824,33 @@ components:
       required:
       - regions
       - updated_at
+    RenditionModeEnum:
+      enum:
+      - auto
+      - manual
+      type: string
+      description: |-
+        * `auto` - auto
+        * `manual` - manual
+    RenditionUrls:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Full-size WebP of the shape (long side ≤ 2000 px).
+        medium_url:
+          type: string
+          format: uri
+          description: 1000 px WebP variant.
+        thumbnail_url:
+          type: string
+          format: uri
+          description: 400 px WebP variant.
+      required:
+      - medium_url
+      - thumbnail_url
+      - url
     RequestedViaEnum:
       enum:
       - app

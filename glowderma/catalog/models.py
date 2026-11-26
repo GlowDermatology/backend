@@ -352,6 +352,22 @@ class ProductImage(TimeStampedModel):
     alt_en = models.CharField(
         max_length=160, blank=True, default="", db_default="", verbose_name="alt matni (en)"
     )
+    # how the image came to be: a staff upload, or a scene built around another image's product
+    source = models.CharField(
+        max_length=16,
+        choices=enums.ProductImageSource.choices,
+        default=enums.ProductImageSource.UPLOAD,
+        db_default=enums.ProductImageSource.UPLOAD,
+        verbose_name="manba",
+    )
+    derived_from = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="+", verbose_name="asl rasm"
+    )
+    # the product's box in the image, normalised [x0, y0, x1, y1] (null = unknown): frames the renditions
+    product_box = models.JSONField(null=True, blank=True, verbose_name="mahsulot chegarasi")
+    # screen shapes (core.renditions): {"4:5" | "1:1": {"crop": [x, y, w, h], "mode": "auto" | "manual",
+    # "name": "<storage name>"}}; a missing shape = the website and the app use the image itself
+    renditions = models.JSONField(default=dict, blank=True, verbose_name="ekran nusxalari")
 
     class Meta:
         verbose_name = "mahsulot rasmi"

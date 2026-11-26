@@ -12,16 +12,19 @@ from glowderma.catalog import services
 from glowderma.catalog.api.admin.schemas.product_images import (
     PRODUCT_IMAGE_DETAIL_DELETE,
     PRODUCT_IMAGE_DETAIL_PATCH,
+    PRODUCT_IMAGE_RENDITIONS_PUT,
     PRODUCT_IMAGES_ORDER_PUT,
     PRODUCT_IMAGES_POST,
 )
 from glowderma.catalog.api.admin.serializers import (
     ImageOrderSerializer,
     ImagePatchSerializer,
+    ImageRenditionsPutSerializer,
     ImagesResponseSerializer,
     ProductImageSerializer,
 )
 from glowderma.catalog.models import Product
+from glowderma.core import renditions
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.idempotency import idempotent
 
@@ -65,6 +68,21 @@ class ProductImageDetailView(AdminAPIView):
         return Response(status=204)
 
 
+class ProductImageRenditionsView(AdminAPIView):
+    @PRODUCT_IMAGE_RENDITIONS_PUT
+    @idempotent(required=False)
+    def put(self, request: Request, pk: int, image_id: int) -> Response:
+        serializer = ImageRenditionsPutSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        changes: dict[str, object] = {
+            renditions.FROM_API[name]: value
+            for name, value in serializer.validated_data.items()
+            if name in renditions.FROM_API
+        }
+        image = services.set_image_renditions(pk, image_id, changes, actor=request.user, request=request)
+        return Response(ProductImageSerializer(image).data)
+
+
 class ProductImagesOrderView(AdminAPIView):
     @PRODUCT_IMAGES_ORDER_PUT
     @idempotent(required=False)
@@ -80,6 +98,7 @@ class ProductImagesOrderView(AdminAPIView):
 
 __all__ = [
     "ProductImageDetailView",
+    "ProductImageRenditionsView",
     "ProductImagesOrderView",
     "ProductImagesView",
     "product_or_404",

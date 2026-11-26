@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Collection, Iterable, Iterator, Sequence
+from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -32,7 +32,7 @@ from glowderma.catalog.models import (
     ProductImage,
     ProductStock,
 )
-from glowderma.core import audit, enums, integration_modes, timeutils
+from glowderma.core import audit, enums, integration_modes, renditions, timeutils
 from glowderma.core.api.exceptions import Conflict, field_error
 from glowderma.core.images import ImageError, ProcessedImage, process_image
 from glowderma.core.media import media_name
@@ -59,6 +59,10 @@ SEO_MAX_LENGTHS = {"title": 120, "description": 300}
 ALT_MAX_LENGTH = 160
 PRODUCT_CHANGED = N_("Mahsulot boshqa joyda o‘zgartirildi: sahifani yangilab, qayta urinib ko‘ring.")
 PRODUCT_CHANGED_CODE = "product_changed"
+CROP_MESSAGES = {
+    "invalid_crop": N_("Kesish chegarasi rasm ichida va kerakli shaklda bo‘lishi kerak."),
+    "crop_too_small": N_("Kesilgan qism juda kichik: kamida 200 piksel bo‘lsin."),
+}
 LAST_IMAGE_OF_ACTIVE = N_("Faol mahsulotda kamida bitta rasm bo‘lsin.")
 CATEGORY_HAS_PRODUCTS = N_("Kategoriyada mahsulotlar bor.")
 CATEGORY_LOCK = "catalog_category_position"
@@ -96,6 +100,12 @@ def _delete_file_on_commit(field: Any) -> None:
 def _delete_name_on_commit(storage: Any, name: str) -> None:
     if name:
         transaction.on_commit(lambda: delete_with_variants(storage, name))
+
+
+def _delete_renditions_on_commit(storage: Any, current: Any) -> None:
+    if isinstance(current, dict) and current:
+        snapshot = dict(current)
+        transaction.on_commit(lambda: renditions.delete(storage, snapshot))
 
 
 def _diff(before: dict[str, Any], after: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -531,6 +541,7 @@ def delete_image(product_id: int, image_id: int, *, actor: Any, request: Any = N
         remaining = [candidate for candidate in images if candidate.pk != image_id]
         position = image.position
         _delete_file_on_commit(image.file)
+        _delete_renditions_on_commit(image.file.storage, image.renditions)
         image.delete()  # nulls ``image.pk``: the remaining list is computed above
         _compact_positions(remaining)
         _touch_product(product.pk)
@@ -542,6 +553,170 @@ def delete_image(product_id: int, image_id: int, *, actor: Any, request: Any = N
             request=request,
             before={"image_id": image_id, "position": position},
         )
+
+
+def _image_content(image: ProductImage) -> bytes:
+    with image.file.storage.open(str(image.file.name), "rb") as handle:
+        return bytes(handle.read())
+
+
+def _rendition_entry(
+    image: ProductImage, content: bytes, ratio: str, crop: renditions.Crop, mode: str
+) -> dict[str, Any]:
+    name = renditions.store(
+        image.file.storage, str(image.file.name), content, renditions.as_ratio(ratio), crop, image.sha256
+    )
+    return {"crop": list(crop), "mode": mode, "name": name}
+
+
+def set_image_renditions(
+    product_id: int,
+    image_id: int,
+    changes: Mapping[str, Any],
+    *,
+    actor: Any,
+    request: Any = None,
+    mode: str = enums.RenditionMode.MANUAL,
+    product_box: Any = None,
+) -> ProductImage:
+    """``PUT products/{id}/images/{image_id}/renditions/``: per shape a crop ``[x, y, w, h]`` (normalised),
+    ``"auto"`` (framed on the known product box) or ``None`` (removed); a shape not named stays. 404 for
+    another product's image; ``invalid_crop`` / ``crop_too_small`` per shape. The files are written before
+    the row changes; replaced files are removed after commit. Audit ``product.image_renditions``."""
+    image = ProductImage.objects.filter(pk=image_id, product_id=product_id).first()
+    if image is None:
+        raise NotFound
+    content = _image_content(image)
+    box = product_box if product_box is not None else image.product_box
+    prepared: dict[str, Any] = {}
+    errors: dict[str, list[Any]] = {}
+    for ratio, value in changes.items():
+        if ratio not in renditions.RATIOS:
+            errors[ratio] = [field_error("invalid")]
+            continue
+        key = renditions.API_NAMES[renditions.as_ratio(ratio)]  # errors use the API's shape names
+        if value is None:
+            prepared[ratio] = None
+            continue
+        try:
+            shape = renditions.as_ratio(ratio)
+            entry_mode: str = mode
+            if value == "auto":
+                crop = renditions.auto_crop(shape, image.width, image.height, box)
+                entry_mode = enums.RenditionMode.AUTO
+            else:
+                crop = renditions.check_crop(shape, value, image.width, image.height)
+        except renditions.CropError as exc:
+            errors[key] = [field_error(exc.code, str(CROP_MESSAGES[exc.code]))]
+            continue
+        prepared[ratio] = (crop, entry_mode)
+    if errors:
+        raise ValidationError(errors)
+    written: dict[str, Any] = {}
+    for ratio, value in prepared.items():
+        written[ratio] = (
+            None if value is None else _rendition_entry(image, content, ratio, value[0], value[1])
+        )
+    with transaction.atomic():
+        _locked_product(product_id)
+        image = ProductImage.objects.select_for_update().filter(pk=image_id, product_id=product_id).first()
+        if image is None:
+            raise NotFound
+        before = dict(image.renditions or {})
+        after = dict(before)
+        for ratio, entry in written.items():
+            if entry is None:
+                after.pop(ratio, None)
+            else:
+                after[ratio] = entry
+        stale = renditions.names(before) - renditions.names(after)
+        image.renditions = after
+        fields = ["renditions", "updated_at"]
+        if product_box is not None:
+            image.product_box = list(product_box)
+            fields.append("product_box")
+        image.save(update_fields=fields)
+        for name in stale:
+            _delete_name_on_commit(image.file.storage, name)
+        _touch_product(product_id)
+        audit.record(
+            action="product.image_renditions",
+            entity_type="product",
+            entity_id=str(product_id),
+            actor=actor,
+            request=request,
+            before={"image_id": image.pk, "renditions": {k: v.get("crop") for k, v in before.items()}},
+            after={"image_id": image.pk, "renditions": {k: v.get("crop") for k, v in after.items()}},
+        )
+    return image
+
+
+def add_generated_image(
+    product_id: int,
+    content: bytes,
+    *,
+    source: str,
+    derived_from_id: int | None,
+    product_box: list[float] | None,
+    crops: dict[str, renditions.Crop],
+    make_main: bool,
+    actor: Any,
+    request: Any = None,
+) -> ProductImage:
+    """A scene accepted by staff becomes a new gallery image (the original stays): re-encoded like an
+    upload, appended last or made the main image, with its renditions (``crops``) and the product box.
+    ``max_items`` at 8 images. Audit ``product.image_added`` with ``source``."""
+    processed = _process(content, "image")
+    with transaction.atomic():
+        product = _locked_product(product_id)
+        images = _ordered_images(product)
+        if len(images) >= MAX_PRODUCT_IMAGES:
+            raise ValidationError({"images": [field_error("max_items", N_("Ko‘pi bilan 8 ta rasm."))]})
+        name = media_name("products", product.pk, processed.content, processed.extension)
+        image = ProductImage(
+            product=product,
+            position=len(images),
+            width=processed.width,
+            height=processed.height,
+            content_type=processed.content_type,
+            size_bytes=len(processed.content),
+            sha256=sha256(processed.content).hexdigest(),
+            uploaded_by=actor,
+            source=source,
+            derived_from_id=derived_from_id,
+            product_box=product_box,
+        )
+        image.file = ContentFile(processed.content, name=_basename(name))
+        image.save()
+        storage = image.file.storage
+        try:
+            store_variants(storage, image.file.name, processed.content)
+            image.renditions = {
+                ratio: _rendition_entry(image, processed.content, ratio, crop, enums.RenditionMode.AUTO)
+                for ratio, crop in crops.items()
+            }
+        except BaseException:
+            renditions.delete(storage, image.renditions or {})
+            delete_with_variants(storage, str(image.file.name))
+            raise
+        image.save(update_fields=["renditions"])
+        if make_main:
+            _compact_positions([image, *images])
+        _touch_product(product.pk)
+        audit.record(
+            action="product.image_added",
+            entity_type="product",
+            entity_id=str(product.pk),
+            actor=actor,
+            request=request,
+            after={
+                "image_id": image.pk,
+                "position": image.position,
+                "sha256": image.sha256,
+                "source": source,
+            },
+        )
+    return image
 
 
 def reorder_images(

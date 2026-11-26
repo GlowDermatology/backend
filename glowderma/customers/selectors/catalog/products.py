@@ -13,7 +13,7 @@ from glowderma.catalog import selectors as catalog_selectors
 from glowderma.catalog.models import Product, ProductImage
 from glowderma.commerce import selectors as commerce_selectors
 from glowderma.commerce.models import CartItem
-from glowderma.core import enums, i18n
+from glowderma.core import enums, i18n, renditions
 from glowderma.customers.selectors import common
 
 
@@ -98,6 +98,7 @@ def product_cards(products: list[Product], lang: str, customer_id: int | None = 
                 if category is not None
                 else None,
                 **common.media_urls("main_image", image.file if image is not None else None),
+                "main_image_renditions": renditions.api_urls(image.renditions if image is not None else None),
                 "available": quantity,
                 "stock_status": (
                     enums.StockStatus.IN_STOCK if quantity > 0 else enums.StockStatus.OUT_OF_STOCK
@@ -123,6 +124,7 @@ def product_detail(product: Product, lang: str, customer_id: int | None = None) 
                 "id": image.pk,
                 **common.media_urls("", image.file),
                 "position": image.position,
+                "renditions": renditions.api_urls(image.renditions),
                 # the image's own alt text (this language, else Uzbek), else the product name
                 "alt": common.localized_field(image, "alt", lang) or card["name"],
             }

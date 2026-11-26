@@ -40,7 +40,7 @@ from glowderma.catalog import selectors as catalog_selectors
 from glowderma.catalog.models import Product, ProductStock
 from glowderma.commerce import delivery_admin, state, topics
 from glowderma.commerce.models import Cart, CartItem, Order, OrderEvent, OrderItem, StockReservation
-from glowderma.core import enums, i18n, integration_modes, timeutils
+from glowderma.core import enums, i18n, integration_modes, renditions, timeutils
 from glowderma.core.consistency import Finding, finding
 from glowderma.core.media import absolute_media_url, optional_variant_url, url_fields
 from glowderma.core.models import OutboxMessage
@@ -883,6 +883,12 @@ def product_image_name(product: Product) -> str:
     return (images[0].file.name or "") if images and images[0].file else ""
 
 
+def main_image_renditions(product: Product) -> dict[str, Any] | None:
+    """The ``renditions`` of the product's first image (``core.renditions``), None when it has none."""
+    images = sorted(product.images.all(), key=lambda image: (image.position, image.pk))
+    return images[0].renditions if images else None
+
+
 def product_image(product: Product) -> str | None:
     name = product_image_name(product)
     return absolute_media_url(name) if name else None
@@ -1003,6 +1009,7 @@ def cart_view(customer_id: int, lang: str, *, last_change: dict[str, Any] | None
                 "name": product_name(product, lang),
                 "volume": product.volume,
                 **url_fields("main_image", product_image_name(product)),
+                "main_image_renditions": renditions.api_urls(main_image_renditions(product)),
                 "unit_price": product.price,
                 "promo": product.promo,
                 "quantity": item.quantity,
