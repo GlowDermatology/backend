@@ -20,7 +20,7 @@ from typing import Any, Final, Literal
 
 from django.core.files.base import ContentFile
 from django.core.files.storage import Storage
-from PIL import Image
+from PIL import Image, ImageFilter
 
 from glowderma.core.media import url_fields
 from glowderma.core.variants import delete_with_variants, store_variants
@@ -34,6 +34,7 @@ MAX_SIDE: Final[int] = 2000  # long side of the stored rendition (its variants: 
 MIN_SIDE: Final[int] = 200  # px of the source a crop must keep on its short side
 RATIO_TOLERANCE: Final[float] = 0.02
 MARGIN: Final[float] = 0.14  # space kept around the product box on each side (share of the box)
+MAX_PADDING: Final[float] = 0.5  # how far past the photo an automatic crop may reach (share of a side)
 
 
 class CropError(ValueError):
@@ -59,7 +60,13 @@ def _clamp(value: float, low: float, high: float) -> float:
 
 def auto_crop(ratio: Ratio, width: int, height: int, box: Any = None) -> Crop:
     """The crop of a ``width × height`` image for ``ratio``: the product box with :data:`MARGIN` around it,
-    centred on the box and kept inside the image (the largest centred crop without a box)."""
+    centred on the box (the largest centred crop without a box).
+
+    When the product with its margin does not fit the shape inside the photo (a tall bottle in a square),
+    the crop reaches past the photo's edges rather than cutting the product: :func:`render` fills the
+    outside with a blurred copy of the photo. Along an axis where the crop is smaller than the photo it
+    stays inside; where it is larger it covers the whole photo.
+    """
     target = RATIOS[ratio][0]
     if not _valid_box(box):
         crop_w = min(width, height * target)
@@ -71,14 +78,20 @@ def auto_crop(ratio: Ratio, width: int, height: int, box: Any = None) -> Crop:
     need_h = bh * (1 + 2 * MARGIN)
     crop_w = max(need_w, need_h * target)
     crop_h = crop_w / target
-    if crop_w > width:  # the image is too narrow: the widest crop that fits
-        crop_w, crop_h = width, width / target
-    if crop_h > height:
-        crop_h, crop_w = height, height * target
+    if crop_w > width and crop_h > height:  # larger than the photo both ways: no tighter than needed
+        crop_w = max(need_w, need_h * target, min(width, height * target))
+        crop_h = crop_w / target
     cx, cy = (x0 + x1) / 2 * width, (y0 + y1) / 2 * height
-    left = _clamp(cx - crop_w / 2, 0, width - crop_w)
-    top = _clamp(cy - crop_h / 2, 0, height - crop_h)
+    left = _place(cx - crop_w / 2, crop_w, width)
+    top = _place(cy - crop_h / 2, crop_h, height)
     return _normalised(left, top, crop_w, crop_h, width, height)
+
+
+def _place(start: float, size: float, total: float) -> float:
+    """Keep a crop inside the photo along one axis, or covering it when the crop is larger."""
+    if size <= total:
+        return _clamp(start, 0, total - size)
+    return _clamp(start, total - size, 0)
 
 
 def _valid_box(box: Any) -> bool:
@@ -99,8 +112,9 @@ def _normalised(left: float, top: float, crop_w: float, crop_h: float, width: in
     )
 
 
-def check_crop(ratio: Ratio, crop: Any, width: int, height: int) -> Crop:
-    """A staff crop: inside the image, the ratio's shape (±2 %), at least :data:`MIN_SIDE` px."""
+def check_crop(ratio: Ratio, crop: Any, width: int, height: int, *, allow_padding: bool = False) -> Crop:
+    """A crop: the ratio's shape (±2 %), at least :data:`MIN_SIDE` px of the photo, inside the image (a staff
+    crop) or reaching at most :data:`MAX_PADDING` past it (``allow_padding``: an :func:`auto_crop` crop)."""
     if (
         not isinstance(crop, list | tuple)
         or len(crop) != 4
@@ -108,7 +122,7 @@ def check_crop(ratio: Ratio, crop: Any, width: int, height: int) -> Crop:
     ):
         raise CropError("invalid_crop")
     x, y, w, h = (float(v) for v in crop)
-    slack = 0.002
+    slack = MAX_PADDING if allow_padding else 0.002
     if w <= 0 or h <= 0 or x < -slack or y < -slack or x + w > 1 + slack or y + h > 1 + slack:
         raise CropError("invalid_crop")
     pixel_w, pixel_h = w * width, h * height
@@ -116,29 +130,44 @@ def check_crop(ratio: Ratio, crop: Any, width: int, height: int) -> Crop:
         raise CropError("invalid_crop")
     if min(pixel_w, pixel_h) < MIN_SIDE:
         raise CropError("crop_too_small")
+    if allow_padding:
+        return (round(x, 5), round(y, 5), round(w, 5), round(h, 5))
     x, y = _clamp(x, 0, 1 - w), _clamp(y, 0, 1 - h)
     return (round(x, 5), round(y, 5), round(min(w, 1.0), 5), round(min(h, 1.0), 5))
 
 
 def render(content: bytes, ratio: Ratio, crop: Crop) -> bytes:
     """The WebP (q88) of ``crop`` of the image ``content``, exactly the ratio's shape, long side ≤
-    :data:`MAX_SIDE`."""
+    :data:`MAX_SIDE`. A crop reaching past the photo is filled there with a blurred, enlarged copy of it."""
     with Image.open(BytesIO(content)) as source:
         source.load()
         image = source.convert("RGB")
     width, height = image.size
-    x, y, w, h = crop
+    x, y, w, _h = crop
     left, top = round(x * width), round(y * height)
     crop_w = max(1, round(w * width))
     crop_h = max(1, round(crop_w / RATIOS[ratio][0]))
-    crop_h = min(crop_h, height - top)
-    piece = image.crop((left, top, left + crop_w, top + crop_h))
+    if left >= 0 and top >= 0 and left + crop_w <= width and top + crop_h <= height:
+        piece = image.crop((left, top, left + crop_w, top + crop_h))
+    else:
+        piece = _blur_fill(image, crop_w, crop_h)
+        piece.paste(image, (-left, -top))
     target_w = min(crop_w, round(MAX_SIDE * RATIOS[ratio][0]) if RATIOS[ratio][0] < 1 else MAX_SIDE)
     target_h = round(target_w / RATIOS[ratio][0])
     piece = piece.resize((target_w, target_h), Image.Resampling.LANCZOS)
     output = BytesIO()
     piece.save(output, format="WEBP", quality=88, method=5)
     return output.getvalue()
+
+
+def _blur_fill(image: Image.Image, width: int, height: int) -> Image.Image:
+    """The photo scaled to cover ``width × height`` and blurred: the background beyond its edges."""
+    scale = max(width / image.width, height / image.height)
+    small = image.resize((max(1, image.width // 8), max(1, image.height // 8)), Image.Resampling.BILINEAR)
+    small = small.filter(ImageFilter.GaussianBlur(6))
+    cover = small.resize((round(image.width * scale), round(image.height * scale)), Image.Resampling.BICUBIC)
+    left, top = (cover.width - width) // 2, (cover.height - height) // 2
+    return cover.crop((left, top, left + width, top + height))
 
 
 def rendition_name(original: str, ratio: Ratio, crop: Crop, digest: str) -> str:

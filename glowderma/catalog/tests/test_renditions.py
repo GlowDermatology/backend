@@ -60,8 +60,12 @@ def test_auto_crop_frames_the_product_box_and_stays_inside() -> None:
     # a product at the edge: the crop is pushed back inside the image
     x, y, w, h = renditions.auto_crop("1:1", 1200, 1600, [0.0, 0.0, 0.2, 0.2])
     assert (x, y) == (0.0, 0.0) and w <= 1 and h <= 1
-    # a box wider than the image allows: the widest crop
-    assert renditions.auto_crop("1:1", 1000, 2000, [0.0, 0.4, 1.0, 0.6])[2] == 1.0
+    # a product that cannot fit the shape inside the photo: the crop reaches past the edges, never cuts it
+    x, y, w, h = renditions.auto_crop("1:1", 1500, 2000, [0.32, 0.08, 0.64, 0.95])
+    assert y < 0.08 and y + h > 0.95 and x < 0 and x + w > 1
+    assert renditions.check_crop("1:1", [x, y, w, h], 1500, 2000, allow_padding=True)
+    with pytest.raises(renditions.CropError):
+        renditions.check_crop("1:1", [x, y, w, h], 1500, 2000)
 
 
 @pytest.mark.parametrize(
@@ -86,6 +90,13 @@ def test_render_has_the_exact_shape_and_a_bounded_size() -> None:
     data = renditions.render(png((600, 600)), "1:1", (0.0, 0.0, 1.0, 1.0))
     with Image.open(BytesIO(data)) as image:
         assert image.size == (600, 600)  # never enlarged
+
+
+def test_render_fills_past_the_edges_with_a_blurred_copy() -> None:
+    data = renditions.render(png((300, 400), (10, 200, 30)), "1:1", (-0.25, 0.0, 1.5, 1.0))
+    with Image.open(BytesIO(data)) as image:
+        assert image.size == (450, 450)
+        assert image.convert("RGB").getpixel((5, 225))[1] > 150  # the fill continues the photo's colours
 
 
 def test_api_shapes() -> None:

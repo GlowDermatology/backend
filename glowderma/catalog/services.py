@@ -605,7 +605,9 @@ def set_image_renditions(
                 crop = renditions.auto_crop(shape, image.width, image.height, box)
                 entry_mode = enums.RenditionMode.AUTO
             else:
-                crop = renditions.check_crop(shape, value, image.width, image.height)
+                crop = renditions.check_crop(
+                    shape, value, image.width, image.height, allow_padding=mode == enums.RenditionMode.AUTO
+                )
         except renditions.CropError as exc:
             errors[key] = [field_error(exc.code, str(CROP_MESSAGES[exc.code]))]
             continue
