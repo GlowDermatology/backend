@@ -1,8 +1,12 @@
 """Bria RMBG cutter (``POST https://engine.prod.bria-api.com/v2/image/edit/remove_background``).
 
-A dedicated background remover: the photo goes up as base64 JSON (``sync: true``), the answer's
-``result.image_url`` is a PNG whose alpha channel is the product (fingers and the office removed); its alpha
-thresholded at 128 is the mask. The key travels in the ``api_token`` header and is never logged. Results are
+A dedicated background remover. The photo goes up as base64 JSON with a ``prompt`` that keeps only the
+product: without it Bria keeps the whole foreground, the hand holding the product included. Prompted
+requests run asynchronously (about 15 s): the answer is a ``status_url`` polled every
+:data:`POLL_SECONDS` until ``COMPLETED`` (or the request's timeout). ``result.image_url`` is a PNG whose alpha
+channel is the product; its alpha thresholded at 128 is the mask. The result file is served from
+``temp.bria.ai`` (the worker needs outbound HTTPS to it as well). The key travels in the ``api_token``
+header (never to the result host) and is never logged. Results are
 kept by Bria for 3 days; we download the PNG at once and keep nothing else.
 
 Errors become :mod:`glowderma.integrations.llm.ports` errors: 401/403 → ``ai_not_configured``; 400, 406, 413,
@@ -14,7 +18,9 @@ from __future__ import annotations
 
 import base64
 import logging
+import time
 import uuid
+from collections.abc import Callable
 from io import BytesIO
 from typing import Any
 
@@ -40,6 +46,8 @@ REMOVE_PATH = "/image/edit/remove_background"
 NOT_CONFIGURED = frozenset({401, 403})
 REFUSED = frozenset({400, 404, 406, 413, 415, 422, 460})
 MAX_DOWNLOAD_BYTES = 40 * 1024 * 1024
+POLL_SECONDS = 1.5
+PROMPT = "only the skincare product (bottle, tube, jar or box), not the hand or fingers"
 
 
 def _mapped(response: httpx.Response) -> LLMError:
@@ -52,12 +60,32 @@ def _mapped(response: httpx.Response) -> LLMError:
     return LLMUnavailable(detail)
 
 
+def _json(response: httpx.Response) -> dict[str, Any]:
+    try:
+        data = response.json()
+    except ValueError:
+        raise LLMBadOutput("bria: the answer is not JSON") from None
+    return data if isinstance(data, dict) else {}
+
+
 class BriaCutter:
     name = "bria"
 
-    def __init__(self, *, model: str = "RMBG2", httpx_client: httpx.Client | None = None) -> None:
-        self._model = model
+    def __init__(
+        self,
+        *,
+        model: str = "RMBG2",
+        prompt: str = PROMPT,
+        httpx_client: httpx.Client | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        # a prompt cannot be combined with RMBG 3.0 (Bria answers 422)
+        self._model = "RMBG2" if prompt else model
+        self._prompt = prompt
         self._client = httpx_client
+        self._sleep = sleep
+        self._clock = clock
 
     def _http(self, timeout: float) -> httpx.Client:
         return self._client or httpx.Client(timeout=timeout)
@@ -76,27 +104,29 @@ class BriaCutter:
     def cut(self, request: SegmentationRequest, *, api_key: Secret) -> CutOut:
         if not api_key:
             raise LLMNotConfigured("bria: empty key")
-        body = {
-            "image": base64.b64encode(request.image.data).decode(),
+        body: dict[str, Any] = {
+            "image": base64.b64encode((request.full_image or request.image).data).decode(),
             "model": self._model,
-            "sync": True,
+            "sync": not self._prompt,
             "preserve_alpha": True,
         }
+        if self._prompt:
+            body["prompt"] = self._prompt
+        headers = {"api_token": api_key.reveal(), "Accept": "application/json"}
+        deadline = self._clock() + max(30.0, float(request.timeout_seconds))
         response = self._send(
-            "POST",
-            BASE_URL + REMOVE_PATH,
-            timeout=float(request.timeout_seconds),
-            json=body,
-            headers={"api_token": api_key.reveal(), "Accept": "application/json"},
+            "POST", BASE_URL + REMOVE_PATH, timeout=float(request.timeout_seconds), json=body, headers=headers
         )
-        if response.status_code != 200:
+        if response.status_code not in (200, 202):
             error = _mapped(response)
             logger.warning("segmentation.bria_failed code=%s detail=%s", error.code, error)
             raise error
-        try:
-            url = response.json()["result"]["image_url"]
-        except ValueError, KeyError, TypeError:
-            raise LLMBadOutput("bria: no result image") from None
+        answer = _json(response)
+        if response.status_code == 202:
+            answer = self._poll(answer, headers, deadline, float(request.timeout_seconds))
+        url = (
+            (answer.get("result") or {}).get("image_url") if isinstance(answer.get("result"), dict) else None
+        )
         if not isinstance(url, str) or not url.startswith("https://"):
             raise LLMBadOutput("bria: no result image")
         image = self._send("GET", url, timeout=float(request.timeout_seconds))
@@ -115,6 +145,29 @@ class BriaCutter:
         if mask.getbbox() is None:
             raise NoProduct("bria: nothing kept")
         return CutOut(mask=mask)
+
+    def _poll(
+        self, accepted: dict[str, Any], headers: dict[str, str], deadline: float, timeout: float
+    ) -> dict[str, Any]:
+        """Poll an asynchronous request's ``status_url`` (on Bria's own host) until it is done."""
+        status_url = accepted.get("status_url")
+        if not isinstance(status_url, str) or not status_url.startswith(BASE_URL + "/status/"):
+            raise LLMBadOutput("bria: no status url")
+        while True:
+            self._sleep(POLL_SECONDS)
+            response = self._send("GET", status_url, timeout=timeout, headers=headers)
+            if response.status_code != 200:
+                raise _mapped(response)
+            state = _json(response)
+            status = state.get("status")
+            if status == "COMPLETED":
+                return state
+            if status == "ERROR":
+                raise LLMRefused("bria: the request failed")
+            if status != "IN_PROGRESS":
+                raise LLMUnavailable(f"bria: status {status}")
+            if self._clock() > deadline:
+                raise LLMUnavailable("bria: no result in time")
 
     def check(self, *, api_key: Secret, timeout_seconds: int = 10) -> None:
         """A key check that processes nothing: the status of an unknown request is 404 for a valid key,

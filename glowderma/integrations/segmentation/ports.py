@@ -61,6 +61,8 @@ class SegmentationRequest:
     model: str
     timeout_seconds: int = 45
     max_retries: int = 1
+    # a larger copy for a pixel cutter (sharper edges than the analyst's 1024 px copy); None = ``image``
+    full_image: ImagePart | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True, slots=True)

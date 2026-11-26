@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from io import BytesIO
 
-from PIL import Image, ImageChops, ImageOps
+from PIL import Image, ImageOps
 
 from glowderma.core import compose
 from glowderma.integrations.llm.ports import (
@@ -40,9 +40,13 @@ from . import prompts
 from .templates import Template
 
 SEND_SIDE = 1024  # long side of the photo sent for segmentation
+CUT_SIDE = 2048  # long side of the copy a pixel cutter (Bria) receives: sharper edges
 MIN_PRODUCT_SHARE = 0.03
 MAX_PRODUCT_SHARE = 0.85
 OCCLUSION_FLOOR = 0.3  # percent: below this a hand only touches the product
+# A finger's bite is narrower than ~10 % of the product's long side. Live: a thumb's bite (BB cream)
+# reads 0.67 % hidden at 5 %, a bottle's neck 0 % at 5 % but 0.9 % at 6 % and 5.2 % at 8 %.
+NOTCH_REACH = 0.05
 LOW_RESOLUTION_SIDE = 500  # product box long side, px
 EDGE_MARGIN = 0.01  # a product box this close to the photo's border (share of the side) is cut off
 
@@ -213,6 +217,7 @@ def analyse(
         segmentation = providers.segmenter.segment(
             SegmentationRequest(
                 image=image_part(photo),
+                full_image=image_part(photo, CUT_SIDE),
                 width=photo.width,
                 height=photo.height,
                 model=config.segment_model,
@@ -253,15 +258,12 @@ def analyse(
     # The analyst's outline polygon is coarse (a few points live): it is not trusted for any measurement.
     occlusion = compose.occlusion(mask, segmentation.hands, None)
     if segmentation.exact and segmentation.hands is None and segmentation.hand_present:
-        # A held product with a pixel mask but no hand mask (the cutters remove fingers with the
-        # background): the notches fingers leave in the silhouette are measured as hull minus visible.
-        # The analyst's own "covered_percent" is only a flag here: live it is a rough guess.
-        hidden = ImageChops.subtract(occlusion.hull, mask)
-        sliver = max(2, round(0.006 * max(box[2] - box[0], box[3] - box[1])))
-        hidden = compose.dilate(compose.erode(hidden, sliver), sliver)  # hull rounding is not a finger
-        total = compose.area(occlusion.hull)
-        percent = round(100.0 * compose.area(hidden) / total, 2) if total else 0.0
-        occlusion = compose.Occlusion(hull=occlusion.hull, hidden=hidden, percent=percent)
+        # A held product cut by a cutter that drops fingers with the background: what a finger hid shows
+        # as a bite in the silhouette. Live, the analyst's "covers" flag changed between two runs of the
+        # same photo and the convex hull counted a bottle's neck as 4.8 % hidden, so the bite is measured
+        # by shape alone. The analyst's "covered_percent" (live: 15-18 % for every photo) is not used.
+        side = max(box[2] - box[0], box[3] - box[1])
+        occlusion = compose.notches(mask, max(2, round(NOTCH_REACH * side)), max(2, round(0.006 * side)))
     occluded = occlusion.percent
     if not segmentation.exact and segmentation.hand_covers_product:
         occluded = max(occluded, round(segmentation.covered_percent, 2))  # box only (fit): the estimate

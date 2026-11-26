@@ -381,26 +381,70 @@ def rgba_cutout() -> bytes:
     return png(image)
 
 
-def bria(*responders: Any) -> tuple[BriaCutter, Recorder]:
+def bria(*responders: Any, prompt: str | None = None) -> tuple[BriaCutter, Recorder]:
     recorder = Recorder(*responders)
-    return BriaCutter(httpx_client=httpx.Client(transport=httpx.MockTransport(recorder))), recorder
+    client = httpx.Client(transport=httpx.MockTransport(recorder))
+    extra: dict[str, Any] = {} if prompt is None else {"prompt": prompt}
+    return BriaCutter(httpx_client=client, sleep=lambda _seconds: None, **extra), recorder
 
 
-def test_bria_cutter_sends_base64_and_reads_the_alpha() -> None:
+STATUS = "https://engine.prod.bria-api.com/v2/status/abc"
+
+
+def test_bria_cutter_asks_for_the_product_only_and_polls() -> None:
     cutter, recorder = bria(
+        httpx.Response(202, json={"request_id": "abc", "status_url": STATUS}),
+        httpx.Response(200, json={"status": "IN_PROGRESS", "request_id": "abc"}),
         httpx.Response(
-            200, json={"result": {"image_url": "https://cdn.bria.example/r.png"}, "request_id": "1"}
+            200, json={"status": "COMPLETED", "result": {"image_url": "https://temp.bria.ai/r.png"}}
         ),
         httpx.Response(200, content=rgba_cutout()),
     )
-    cut = cutter.cut(cut_request(), api_key=Secret("bria-key"))
+    big = ImagePart(png(scene_photo(background=(150, 140, 130)).resize((400, 400))), "image/png")
+    request = SegmentationRequest(
+        image=ImagePart(b"small", "image/jpeg"), full_image=big, width=200, height=200, model="m"
+    )
+    cut = cutter.cut(request, api_key=Secret("bria-key"))
     assert cut.mask.getbbox() == (60, 40, 140, 180) and cut.calls == 1
-    sent, download = recorder.requests
+    sent, first, second, download = recorder.requests
     assert str(sent.url) == "https://engine.prod.bria-api.com/v2/image/edit/remove_background"
-    assert sent.headers["api_token"] == "bria-key" and "bria-key" not in str(sent.url)  # noqa: S105
     body = json.loads(sent.content)
-    assert body["sync"] is True and body["model"] == "RMBG2" and base64.b64decode(body["image"])
+    assert body["sync"] is False and body["model"] == "RMBG2" and "not the hand" in body["prompt"]
+    assert base64.b64decode(body["image"]) == big.data  # the larger copy goes to the cutter
+    assert sent.headers["api_token"] == "bria-key" and str(first.url) == STATUS  # noqa: S105
+    assert first.headers["api_token"] == "bria-key"  # noqa: S105 - the status lives on Bria's host
     assert "api_token" not in download.headers  # the key never goes to the result host
+
+
+def test_bria_cutter_without_a_prompt_answers_at_once() -> None:
+    cutter, recorder = bria(
+        httpx.Response(200, json={"result": {"image_url": "https://temp.bria.ai/r.png"}, "request_id": "1"}),
+        httpx.Response(200, content=rgba_cutout()),
+        prompt="",
+    )
+    cut = cutter.cut(cut_request(), api_key=Secret("bria-key"))
+    assert cut.mask.getbbox() == (60, 40, 140, 180)
+    body = json.loads(recorder.requests[0].content)
+    assert body["sync"] is True and "prompt" not in body
+
+
+def test_bria_cutter_polling_failures() -> None:
+    accepted = httpx.Response(202, json={"request_id": "abc", "status_url": STATUS})
+    cutter, _ = bria(accepted, httpx.Response(200, json={"status": "ERROR", "error": {"code": 422}}))
+    with pytest.raises(LLMRefused):
+        cutter.cut(cut_request(), api_key=Secret("k"))
+    cutter, _ = bria(httpx.Response(202, json={"status_url": "https://evil.example/status"}))
+    with pytest.raises(LLMBadOutput):
+        cutter.cut(cut_request(), api_key=Secret("k"))
+    ticks = iter([0.0, 0.0, 100.0, 200.0])
+    recorder = Recorder(accepted, httpx.Response(200, json={"status": "IN_PROGRESS"}))
+    slow = BriaCutter(
+        httpx_client=httpx.Client(transport=httpx.MockTransport(recorder)),
+        sleep=lambda _seconds: None,
+        clock=lambda: next(ticks),
+    )
+    with pytest.raises(LLMUnavailable):
+        slow.cut(cut_request(), api_key=Secret("k"))
 
 
 @pytest.mark.parametrize(
@@ -420,13 +464,14 @@ def test_bria_cutter_maps_errors(status: int, error: type[Exception]) -> None:
 
 
 def test_bria_cutter_bad_answers() -> None:
-    cutter, _ = bria(httpx.Response(200, json={"result": {}}))
+    cutter, _ = bria(httpx.Response(200, json={"result": {}}), prompt="")
     with pytest.raises(LLMBadOutput):
         cutter.cut(cut_request(), api_key=Secret("k"))
     opaque = png(Image.new("RGBA", (10, 10), (1, 2, 3, 255)))
     cutter, _ = bria(
         httpx.Response(200, json={"result": {"image_url": "https://x.example/r.png"}}),
         httpx.Response(200, content=opaque),
+        prompt="",
     )
     with pytest.raises(LLMBadOutput):
         cutter.cut(cut_request(), api_key=Secret("k"))
@@ -467,6 +512,16 @@ def test_combined_segmenter_takes_pixels_from_the_cutter() -> None:
     assert result.exact and result.product is mask and result.cutter == "scripted"
     assert (result.cutter_input_tokens, result.output_image_tokens) == (10, 100)
     assert result.hand_covers_product and result.covered_percent == 4.5  # the analyst's flags stay
+
+
+def test_the_analyst_asks_for_boxes_only() -> None:
+    """The analyst never asks for masks: a lite model writing base64 masks ran out of tokens live."""
+    model = ScriptedContent(answer(product={"box_2d": [250, 250, 750, 750]}))
+    request = SegmentationRequest(image=ImagePart(b"j", "image/jpeg"), width=200, height=400, model="m")
+    result = GeminiJsonSegmenter(model, require_mask=False).segment(request, api_key=KEY)
+    sent = model.requests[0]
+    assert "no masks" in sent.prompt and "mask" not in str(sent.response_schema)
+    assert sent.max_output_tokens <= 1024 and result.box == (50, 100, 150, 300) and not result.exact
 
 
 def test_combined_segmenter_refuses_a_cut_out_elsewhere_and_skips_cut_off_photos() -> None:

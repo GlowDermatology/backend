@@ -18,14 +18,19 @@ reviews expire after 72 h.
 
 ## Cut-out sources (console: "mahsulotni kesib olish")
 
-- **Analyst:** Gemini Flash Lite (`analyst_model`) always reads the photo for the product's box, hands, how
-  much a hand hides, and whether the product is cut off by the frame. Gemini 2.5 models are closed to new
-  API keys, and current text models return placeholder masks, so the pixels come from a cutter.
+- **Analyst:** Gemini Flash Lite (`analyst_model`) always reads the photo for the product's box, hands,
+  whether a finger covers it, and whether the frame cuts it off. It is asked for JSON only, never masks:
+  a lite model writing masks ran out of tokens after 90 s (`ai_bad_output`). Live it answers in 2-3 s.
+  Gemini 2.5 models are closed to new API keys, and current text models cannot draw masks, so the pixels
+  come from a cutter.
 - **`gemini_matte`** (default): Nano Banana repaints everything but the product green. We key the green and
   refuse the result if the repaint does not line up with the photo. Needs billing on the Google project.
-- **`bria`**: Bria RMBG background removal, about $0.018 per photo. Its key goes in Vault through
-  **AI provayderlar → Bria** like the Gemini key. The worker needs outbound HTTPS to
-  `engine.prod.bria-api.com` and to the host of Bria's result URLs.
+- **`bria`**: Bria RMBG background removal, about $0.018 per photo (one call). Its key goes in Vault
+  through **AI provayderlar → Bria** like the Gemini key. Plain RMBG keeps a holding hand as foreground, so
+  the call carries a prompt ("only the product, not the hand"); with a prompt Bria works asynchronously, and
+  the worker polls its status URL (about 15 s). The worker needs outbound HTTPS to
+  `engine.prod.bria-api.com` (API and status) and `temp.bria.ai` (the result image, fetched without the
+  key). The cutter gets a copy of up to 2048 px.
 - **`gemini_json`**: only for keys that still have a segmenting model.
 
 The cutter's mask must agree with the analyst's box, or the job fails with `scene_mask_unusable`.
@@ -40,7 +45,8 @@ Staff photograph products on a phone, often in an office and sometimes holding t
    - whether a hand covers the product.
 
    Hands, sleeves, desks, monitors and the background are excluded from the mask. Enclosed holes in the mask, such as label letters, are filled, except where a hand is.
-2. **Occlusion.** The server measures the part of the product a hand hides: the convex hull of the visible mask, intersected with the hands, minus the visible part. The model's own estimate counts when it is higher.
+2. **Occlusion.** The server measures the part of the product a hand hides. With a hand mask: the convex hull of the visible mask, intersected with the hands, minus the visible part. With a cutter (it drops the fingers with the background): the bites in the silhouette, i.e. a morphological closing over 5 % of the product's long side minus the visible part. A bottle's neck is wider than a finger's bite, so it is not counted (the convex hull counted 4.8 %). The analyst's own percentage is used only when there is no pixel mask (screen-fit).
+   - Known limit: tuned on the first real photos (a thumb's bite 0.67 %, a neck 0 %). A finger wider than about 10 % of the product's long side, or one lying across the whole product, leaves a gap the closing does not bridge, so it is not counted; staff see it in the review before accepting.
    - At or below 0.3 %, nothing is hidden: the hand is simply cut away (warning `hand_removed`).
    - Up to `max_occluded_pct` (15 %, the owner's decision; console setting), the image model may fill the gap. The result records exactly where (`generated_inside`) for staff to check (warning `product_partly_generated`).
    - Above it, the photo is refused with `scene_hand_covers_product` ("retake the photo").

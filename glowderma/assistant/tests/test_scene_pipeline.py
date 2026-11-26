@@ -382,6 +382,29 @@ def test_a_reported_cover_without_a_hand_mask_is_marked_generated() -> None:
     assert caught.value.code == pipeline.OCCLUSION_NEEDS_AI
 
 
+def test_a_held_product_with_a_narrow_neck_is_not_counted_as_hidden() -> None:
+    """A hand holds the bottle but no finger lies over it: the neck's dip in the hull hides nothing."""
+    neck = rect(BOX)
+    draw = ImageDraw.Draw(neck)
+    draw.rectangle([BOX[0], BOX[1], BOX[0] + 60, BOX[1] + 120], fill=0)
+    draw.rectangle([BOX[2] - 60, BOX[1], BOX[2], BOX[1] + 120], fill=0)
+    held = Segmentation(product=neck, box=BOX, hand_present=True, hand_covers_product=False)
+    _analysis, result, _usage = run(STUDIO, providers(held))
+    assert result.generated_inside_pct == 0 and product_kept(result)
+
+
+def test_a_thumb_bite_counts_even_when_the_analyst_misses_it() -> None:
+    """Live (BB cream): the analyst said no finger covers the tube; the silhouette's bite says otherwise."""
+    bite = rect(BOX)
+    ImageDraw.Draw(bite).ellipse([BOX[2] - 25, 500, BOX[2] + 25, 560], fill=0)
+    held = Segmentation(product=bite, box=BOX, hand_present=True, hand_covers_product=False)
+    with pytest.raises(pipeline.SceneError) as caught:
+        run(STUDIO, providers(held))
+    assert caught.value.code == pipeline.OCCLUSION_NEEDS_AI
+    _analysis, result, _usage = run(MARBLE, providers(held))
+    assert result.generated_inside_pct > 0 and product_kept(result)
+
+
 def test_summary_counts_a_broken_rule() -> None:
     entries = [
         {"photo": "a.jpg", "results": [{"kind": "studio", "error": pipeline.RULE_BROKEN, "cost_usd": "0"}]}

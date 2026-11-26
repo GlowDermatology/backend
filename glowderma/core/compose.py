@@ -209,6 +209,22 @@ def occlusion(
     return Occlusion(hull=hull, hidden=hidden, percent=percent)
 
 
+def notches(visible: Image.Image, radius: int, sliver: int) -> Occlusion:
+    """The bites a finger leaves in the silhouette of a held product (the cutter removed the finger).
+
+    A morphological closing fills every gap narrower than about ``2·radius``: a finger's bite. A bottle's
+    neck or a jar's lid step is wider than that, so it stays open (the convex hull counted the air beside a
+    neck as hidden product). Bits thinner than ``sliver`` are edge noise, not a finger.
+    """
+    visible = binary(visible)
+    closed = erode(dilate(visible, radius), radius)
+    hidden = ImageChops.subtract(closed, visible)
+    hidden = ImageChops.multiply(dilate(erode(hidden, sliver), sliver), closed)
+    total = area(closed)
+    percent = round(100.0 * area(hidden) / total, 2) if total else 0.0
+    return Occlusion(hull=filled_hull(visible), hidden=hidden, percent=percent)
+
+
 # --- layout -------------------------------------------------------------------------------------------------
 
 

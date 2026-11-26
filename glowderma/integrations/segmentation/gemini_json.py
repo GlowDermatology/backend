@@ -84,6 +84,57 @@ SCHEMA: dict[str, Any] = {
 }
 MAX_OUTPUT_TOKENS = 24_576  # a base64 PNG mask is long: the default 4096 would truncate it
 
+# The analyst role (a cutter supplies the pixels): boxes and flags only. Asking a text model for masks it
+# cannot make (current lite models) makes it write until the token limit, ~90 s, and the answer is cut.
+ANALYST_PROMPT = """The photo was taken by shop staff and shows ONE retail skincare product (bottle, tube, \
+jar, box, sachet, pump). It may be held in a hand, and the background may be an office, a desk, a shelf or \
+a table. Answer with JSON only, following the schema; no masks, no polygons.
+1. "product": "box_2d" [y0, x0, y1, x1] on a 0-1000 scale: the tight box of the PRODUCT ONLY (packaging, \
+cap, pump, label), not the hand or anything else. If there are several products take the largest one \
+nearest the centre. If there is no product, set "product" to null.
+2. "hand_present": any hand, finger or arm visible anywhere in the photo.
+3. "hand_covers_product": a finger or hand lies OVER the product's front and hides part of it (not merely \
+holding it from behind or touching its edge).
+4. "covered_percent": your estimate of the product's hidden share, 0-100 (0 when nothing is hidden).
+5. "product_cut_off": the photo's edge cuts through the product (part of it is outside the photo).
+6. "background": one of plain, office, home, shelf, outdoor, other."""
+ANALYST_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "product": {
+            "anyOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "box_2d": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                            "minItems": 4,
+                            "maxItems": 4,
+                        }
+                    },
+                    "required": ["box_2d"],
+                },
+                {"type": "null"},
+            ]
+        },
+        "hand_present": {"type": "boolean"},
+        "hand_covers_product": {"type": "boolean"},
+        "covered_percent": {"type": "number", "minimum": 0, "maximum": 100},
+        "product_cut_off": {"type": "boolean"},
+        "background": {"type": "string", "enum": list(BACKGROUNDS)},
+    },
+    "required": [
+        "product",
+        "hand_present",
+        "hand_covers_product",
+        "covered_percent",
+        "product_cut_off",
+        "background",
+    ],
+}
+ANALYST_MAX_OUTPUT_TOKENS = 1024
+
 
 def without_masks(value: Any) -> Any:
     """The answer with every ``mask`` payload replaced by its length (what a reviewer needs to debug)."""
@@ -235,11 +286,11 @@ class GeminiJsonSegmenter:
             GenerationRequest(
                 model=request.model,
                 system_instruction="You are a precise product segmentation tool for an online shop.",
-                prompt=PROMPT,
-                response_schema=SCHEMA,
+                prompt=PROMPT if self._require_mask else ANALYST_PROMPT,
+                response_schema=SCHEMA if self._require_mask else ANALYST_SCHEMA,
                 images=(request.image,),
                 temperature=0.0,
-                max_output_tokens=MAX_OUTPUT_TOKENS,
+                max_output_tokens=MAX_OUTPUT_TOKENS if self._require_mask else ANALYST_MAX_OUTPUT_TOKENS,
                 timeout_seconds=request.timeout_seconds,
                 max_retries=request.max_retries,
             ),
