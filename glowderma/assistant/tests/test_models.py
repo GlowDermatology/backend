@@ -34,8 +34,10 @@ def test_seeded_rows() -> None:
     settings_row = AssistantSettings.objects.get()
     assert settings_row.pk == 1 and settings_row.enabled is False
     assert settings_row.active_provider == "gemini" and settings_row.max_images == 3
-    provider = ProviderConfig.objects.get()
-    assert provider.provider == "gemini" and provider.model_id == "gemini-2.5-flash-lite"
+    provider = ProviderConfig.objects.get(provider="gemini")
+    assert provider.model_id == "gemini-2.5-flash-lite"
+    bria = ProviderConfig.objects.get(provider="bria")  # product scenes' background remover (key in Vault)
+    assert bria.vault_path == "bria" and bria.active_version is None
     assert provider.price_input_per_mtok_usd == Decimal("0.10")
     assert provider.price_output_per_mtok_usd == Decimal("0.40")
     assert provider.vault_path == "gemini" and provider.active_version is None and not provider.configured
@@ -53,7 +55,7 @@ def test_ensure_rows_is_idempotent_and_keeps_edits() -> None:
     ProviderConfig.objects.filter(provider="gemini").update(model_id="gemini-3.1-flash-lite")
     AssistantSettings.objects.update(enabled=True)
     ensure_rows(global_apps.get_app_config("assistant"), using="default")
-    assert ProviderConfig.objects.get().model_id == "gemini-3.1-flash-lite"
+    assert ProviderConfig.objects.get(provider="gemini").model_id == "gemini-3.1-flash-lite"
     assert AssistantSettings.objects.get().enabled is True
     assert PromptVersion.objects.count() == 5
 
@@ -64,7 +66,7 @@ def test_ensure_rows_refills_after_a_flush() -> None:
     ProviderConfig.objects.all().delete()
     AssistantSettings.objects.all().delete()
     ensure_rows(global_apps.get_app_config("assistant"), using="default")
-    assert AssistantSettings.objects.count() == 1 and ProviderConfig.objects.count() == 1
+    assert AssistantSettings.objects.count() == 1 and ProviderConfig.objects.count() == 2
     assert PromptVersion.objects.filter(status="active").count() == 5
 
 

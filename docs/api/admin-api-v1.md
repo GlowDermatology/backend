@@ -218,6 +218,7 @@ The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses 
 | `staff/{id}/send-password-link/` per manager and account, `auth/password-link/` per caller (`staff_password_link`) | 5/hour |
 | `auth/mfa/verify/` per client IP (feat/admin-ux, `mfa_verify`) | 30/min |
 | `products/{id}/assistant/jobs/` per staff (feat/ai-assistant, `assistant_generate`) | 30/hour |
+| `products/{id}/images/{image_id}/scenes/` per staff (product scenes, `scene_generate`) | 20/hour |
 | Admin panel MFA code checks per account (`verify/`, `confirm/`, `disable/`, `recovery-codes/`; LoginGuard scope `panel_otp`) | 5/min, then exponential lockout (1 → 15 min) |
 
 ---
