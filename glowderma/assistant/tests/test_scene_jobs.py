@@ -264,3 +264,20 @@ def test_the_task_runs_a_job_and_survives_a_crash(
     monkeypatch.setattr(scene_services, "run", boom)
     tasks.run_scene(job.pk)
     assert SceneJob.objects.get(pk=job.pk).error_code == "server_error"
+
+
+def test_one_scene_job_runs_at_a_time(staff_client: APIClient, scenes_on: SceneSettings) -> None:
+    first_product, first = saved_image()
+    second_product, second = saved_image()
+    a = start(staff_client, first_product, first, kind="fit").json()["id"]
+    b = start(staff_client, second_product, second, kind="fit").json()["id"]
+    SceneJob.objects.filter(pk=a).update(
+        state="running", started_at=timeutils.now(), heartbeat_at=timeutils.now()
+    )
+    with pytest.raises(scene_services.SceneBusy):
+        scene_services.claim(b)
+    assert SceneJob.objects.get(pk=b).state == "queued"
+    # a stale running job does not block the queue, and the 120 s reaper fails it
+    SceneJob.objects.filter(pk=a).update(heartbeat_at=timeutils.now() - timedelta(minutes=10))
+    assert tasks.reap_stale_jobs() == 1
+    assert scene_services.claim(b) is not None

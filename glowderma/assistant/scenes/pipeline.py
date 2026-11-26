@@ -250,15 +250,21 @@ def analyse(
     box = mask.getbbox()
     if box is None:
         raise SceneError(NO_PRODUCT, "empty mask", usage=usage)
-    occlusion = compose.occlusion(mask, segmentation.hands, segmentation.outline)
-    occluded = occlusion.percent
-    if segmentation.hand_covers_product:
-        occluded = max(occluded, round(segmentation.covered_percent, 2))
-    if segmentation.exact and occluded > OCCLUSION_FLOOR and compose.area(occlusion.hidden) == 0:
-        # The model says a hand hides part of the product but sent no usable hand mask: whatever the
-        # scene shows inside the product's outline is not the photo's, so all of it is marked generated.
+    # The analyst's outline polygon is coarse (a few points live): it is not trusted for any measurement.
+    occlusion = compose.occlusion(mask, segmentation.hands, None)
+    if segmentation.exact and segmentation.hands is None and segmentation.hand_present:
+        # A held product with a pixel mask but no hand mask (the cutters remove fingers with the
+        # background): the notches fingers leave in the silhouette are measured as hull minus visible.
+        # The analyst's own "covered_percent" is only a flag here: live it is a rough guess.
         hidden = ImageChops.subtract(occlusion.hull, mask)
-        occlusion = compose.Occlusion(hull=occlusion.hull, hidden=hidden, percent=occlusion.percent)
+        sliver = max(2, round(0.006 * max(box[2] - box[0], box[3] - box[1])))
+        hidden = compose.dilate(compose.erode(hidden, sliver), sliver)  # hull rounding is not a finger
+        total = compose.area(occlusion.hull)
+        percent = round(100.0 * compose.area(hidden) / total, 2) if total else 0.0
+        occlusion = compose.Occlusion(hull=occlusion.hull, hidden=hidden, percent=percent)
+    occluded = occlusion.percent
+    if not segmentation.exact and segmentation.hand_covers_product:
+        occluded = max(occluded, round(segmentation.covered_percent, 2))  # box only (fit): the estimate
     warnings: list[str] = []
     if segmentation.hand_present and occluded <= OCCLUSION_FLOOR:
         warnings.append("hand_removed")

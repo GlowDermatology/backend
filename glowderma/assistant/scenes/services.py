@@ -53,6 +53,8 @@ from glowderma.integrations.vault.ports import VaultError
 logger = logging.getLogger(__name__)
 
 STALE_AFTER = timedelta(minutes=6)  # longer than the task's hard limit (tasks.SCENE_TIME_LIMIT)
+# a queued job may wait behind another one (one scene at a time): it is lost only after this
+QUEUED_STALE_AFTER = timedelta(minutes=30)
 FAKE_KEY = "fake-key"
 COST_QUANT = Decimal("0.000001")
 SERVER_ERROR = "server_error"
@@ -108,6 +110,11 @@ class SceneDailyLimit(drf_exceptions.APIException):
     status_code = 429
     default_code = "scene_daily_limit"
     default_detail = N_("Bugungi sahna so‘rovlari chegarasiga yetdingiz. Ertaga qayta urinib ko‘ring.")
+
+
+class SceneBusy(Exception):
+    """Another scene job is running: at most one at a time, so a scene never holds both worker slots that
+    orders, payments and messages share. The task retries shortly."""
 
 
 class SceneNotReviewable(Conflict):
@@ -256,6 +263,11 @@ def claim(job_id: int) -> SceneJob | None:
             return None
         instant = timeutils.now()
         if job.state == enums.JobState.QUEUED:
+            running = SceneJob.objects.filter(
+                state=enums.JobState.RUNNING, heartbeat_at__gte=instant - STALE_AFTER
+            ).exclude(pk=job.pk)
+            if running.exists():
+                raise SceneBusy()
             job.started_at = instant
         elif job.state != enums.JobState.RUNNING or not _is_stale(job, instant):
             return None
@@ -565,7 +577,7 @@ def reap_stale(*, now: Any = None) -> list[int]:
     cutoff = instant - STALE_AFTER
     candidates = SceneJob.objects.filter(
         Q(state=enums.JobState.RUNNING, heartbeat_at__lt=cutoff)
-        | Q(state=enums.JobState.QUEUED, created_at__lt=cutoff)
+        | Q(state=enums.JobState.QUEUED, created_at__lt=instant - QUEUED_STALE_AFTER)
     ).values_list("pk", flat=True)
     reaped: list[int] = []
     for job_id in list(candidates):

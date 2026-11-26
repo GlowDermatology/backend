@@ -205,10 +205,20 @@ def test_a_hand_over_too_much_of_the_product_is_refused() -> None:
     assert caught.value.code == pipeline.HAND_COVERS_PRODUCT
 
 
-def test_the_models_own_estimate_counts_when_higher() -> None:
-    with pytest.raises(pipeline.SceneError) as caught:
-        run(MARBLE, providers(segmentation(None, hand_covers_product=True, covered_percent=19.0)))
-    assert caught.value.code == pipeline.HAND_COVERS_PRODUCT
+def test_a_measured_mask_wins_over_the_models_guess() -> None:
+    # live, the analyst answered "18 % hidden" for every hand-held photo: with a pixel mask we measure
+    guess = segmentation(None, hand_present=True, hand_covers_product=True, covered_percent=19.0)
+    analysis, result, _usage = run(MARBLE, providers(guess))
+    assert analysis.occluded_pct < 0.3 and result.generated_inside_pct == 0.0
+    assert "hand_removed" in result.warnings
+
+
+def test_a_box_only_answer_keeps_the_models_estimate() -> None:
+    box_only = segmentation(None, hand_covers_product=True, covered_percent=19.0, exact=False)
+    analysis = pipeline.analyse(
+        photo(), providers(box_only), pipeline.Config(), pipeline.Usage(), for_scene=False
+    )
+    assert analysis.occluded_pct == 19.0
 
 
 def test_photos_without_a_usable_product_are_refused() -> None:
@@ -367,7 +377,7 @@ def test_a_reported_cover_without_a_hand_mask_is_marked_generated() -> None:
     with pytest.raises(pipeline.SceneError) as caught:
         run(
             STUDIO,
-            providers(Segmentation(product=notch, box=BOX, hand_covers_product=True, covered_percent=3.0)),
+            providers(Segmentation(product=notch, box=BOX, hand_present=True, hand_covers_product=True)),
         )
     assert caught.value.code == pipeline.OCCLUSION_NEEDS_AI
 

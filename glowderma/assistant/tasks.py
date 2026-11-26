@@ -26,6 +26,8 @@ RUN_TIME_LIMIT = 120
 # a scene: analyst + cutter + up to two image generations + QA, each bounded by its own timeout
 SCENE_SOFT_TIME_LIMIT = 270
 SCENE_TIME_LIMIT = 300
+SCENE_BUSY_RETRY_SECONDS = 20
+SCENE_BUSY_RETRIES = 90
 
 
 @outbox.register(topics.JOB_QUEUED)
@@ -68,7 +70,8 @@ def run_generation(job_id: int) -> None:
 
 @shared_task(name="assistant.reap_stale_jobs")  # type: ignore[untyped-decorator]
 def reap_stale_jobs() -> int:
-    return len(services.reap_stale_jobs())
+    # every 120 s: lost text jobs and lost scene jobs (a lost scene job would lock its image)
+    return len(services.reap_stale_jobs()) + len(scene_services.reap_stale())
 
 
 @outbox.register(topics.SCENE_QUEUED)
@@ -80,11 +83,18 @@ def on_scene_queued(message: OutboxMessage) -> None:
 
 
 @shared_task(  # type: ignore[untyped-decorator]
-    name="assistant.run_scene", soft_time_limit=SCENE_SOFT_TIME_LIMIT, time_limit=SCENE_TIME_LIMIT
+    bind=True,
+    name="assistant.run_scene",
+    soft_time_limit=SCENE_SOFT_TIME_LIMIT,
+    time_limit=SCENE_TIME_LIMIT,
+    max_retries=SCENE_BUSY_RETRIES,
 )
-def run_scene(job_id: int) -> None:
+def run_scene(self: Any, job_id: int) -> None:
     try:
         scene_services.run(job_id)
+    except scene_services.SceneBusy:
+        # one scene at a time: wait for the running one (a queued job is reaped after 30 min)
+        raise self.retry(countdown=SCENE_BUSY_RETRY_SECONDS) from None
     except SoftTimeLimitExceeded:
         logger.error("scene job %s ran out of time (%s s)", job_id, SCENE_SOFT_TIME_LIMIT)
         job = SceneJob.objects.filter(pk=job_id).first()
