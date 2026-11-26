@@ -42,6 +42,9 @@ from glowderma.assistant.models import (
     PromptTemplate,
     PromptVersion,
     ProviderConfig,
+    SceneJob,
+    SceneSettings,
+    SceneTemplate,
 )
 from glowderma.core import enums, timeutils
 from glowderma.integrations.secret import Secret
@@ -95,6 +98,7 @@ def nav(request: HttpRequest, active: str) -> list[dict[str, Any]]:
         ("providers", gettext("Provayderlar"), "hub", reverse("admin:assistant_providers")),
         ("prompts", gettext("Promptlar"), "edit_note", reverse("admin:assistant_prompts")),
         ("jobs", gettext("So‘rovlar va xarajat"), "receipt_long", reverse("admin:assistant_jobs")),
+        ("scenes", gettext("Mahsulot sahnalari"), "photo_filter", reverse("admin:assistant_scenes")),
     ]
     return [
         {"title": title, "icon": icon, "link": link, "active": key == active}
@@ -636,3 +640,83 @@ class JobView(ConsolePage):
                 (gettext("Maydonlar"), json.dumps(job.fields, ensure_ascii=False)),
             ],
         )
+
+
+# --- product scenes -----------------------------------------------------------------------------------------
+
+
+def _scene_row() -> SceneSettings:
+    return SceneSettings.objects.select_related("updated_by").get(pk=SETTINGS_PK)
+
+
+class ScenesView(ConsolePage):
+    """Product scenes: switches, cut-out source, models, limits, prices, style; the templates; spend."""
+
+    title = _("AI yordamchi: mahsulot sahnalari")
+    section = "scenes"
+
+    def get(self, request: HttpRequest) -> HttpResponse:
+        return self._render(request, forms.SceneSettingsForm(instance=_scene_row()))
+
+    def post(self, request: HttpRequest) -> HttpResponse:
+        form = forms.SceneSettingsForm(request.POST, instance=_scene_row())
+        if not form.is_valid():
+            return self._render(request, form, status=400)
+        changes = form.changes()
+        if not changes:
+            messages.info(request, NOTHING_CHANGED)
+        else:
+            writes.update_scene_settings(changes, actor=request.user, request=request)
+            messages.success(request, SAVED)
+        return HttpResponseRedirect(reverse("admin:assistant_scenes"))
+
+    def _render(self, request: HttpRequest, form: forms.SceneSettingsForm, status: int = 200) -> HttpResponse:
+        from glowderma.assistant.scenes import services as scene_services
+
+        row = _scene_row()
+        recent = SceneJob.objects.select_related("created_by").order_by("-created_at")[:20]
+        return self.page(
+            request,
+            "scenes.html",
+            status=status,
+            form=form,
+            row=row,
+            updated_by=_actor(row.updated_by),
+            templates=SceneTemplate.objects.order_by("position", "id"),
+            spent_today=scene_services.spent_today(),
+            spent_month=scene_services.spent_this_month(),
+            recent=recent,
+        )
+
+
+class SceneTemplateView(ConsolePage):
+    title = _("AI yordamchi: sahna shabloni")
+    section = "scenes"
+
+    def _template(self, pk: int) -> SceneTemplate:
+        row = SceneTemplate.objects.filter(pk=pk).first()
+        if row is None:
+            raise Http404
+        return row
+
+    def get(self, request: HttpRequest, pk: int) -> HttpResponse:
+        row = self._template(pk)
+        return self._render(request, row, forms.SceneTemplateForm(instance=row))
+
+    def post(self, request: HttpRequest, pk: int) -> HttpResponse:
+        row = self._template(pk)
+        form = forms.SceneTemplateForm(request.POST, instance=row)
+        if not form.is_valid():
+            return self._render(request, self._template(pk), form, status=400)
+        changes = form.changes()
+        if not changes:
+            messages.info(request, NOTHING_CHANGED)
+        else:
+            writes.update_scene_template(pk, changes, actor=request.user, request=request)
+            messages.success(request, SAVED)
+        return HttpResponseRedirect(reverse("admin:assistant_scene_template", args=[pk]))
+
+    def _render(
+        self, request: HttpRequest, row: SceneTemplate, form: forms.SceneTemplateForm, status: int = 200
+    ) -> HttpResponse:
+        return self.page(request, "scene_template.html", status=status, form=form, row=row)

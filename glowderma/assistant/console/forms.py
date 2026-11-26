@@ -26,7 +26,8 @@ from unfold.widgets import (
 
 from glowderma.assistant.console import writes
 from glowderma.assistant.credentials import MAX_KEY_LENGTH
-from glowderma.assistant.models import AssistantSettings, ProviderConfig
+from glowderma.assistant.models import AssistantSettings, ProviderConfig, SceneSettings, SceneTemplate
+from glowderma.core.compose import hex_colour
 
 MODEL_ID = re.compile(r"^[a-z0-9][a-z0-9.\-]{1,99}$")
 MODEL_ID_INVALID = _(
@@ -105,6 +106,90 @@ class ProviderForm(ChangesMixin, forms.ModelForm):  # type: ignore[type-arg]
         if not MODEL_ID.match(value):
             raise forms.ValidationError(MODEL_ID_INVALID)
         return value
+
+
+class SceneSettingsForm(ChangesMixin, forms.ModelForm):  # type: ignore[type-arg]
+    class Meta:
+        model = SceneSettings
+        fields = writes.SCENE_SETTINGS_FIELDS
+        widgets = {"style": forms.Textarea(attrs={"rows": 5})}
+        help_texts = {
+            "enabled": _("Studiya sahnalari va ekranlarga moslash admin panelda ko‘rinadi."),
+            "ai_enabled": _("AI sahnalari (Nano Banana). Google loyihasida to‘lov yoqilgan bo‘lishi kerak."),
+            "segmenter": _(
+                "Mahsulotni fondan qanday ajratish: Gemini yashil fon (rasm modeli kerak) yoki Bria "
+                "(Provayderlar sahifasida Bria kaliti kerak)."
+            ),
+            "analyst_model": _("Mahsulot chegarasi, qo‘l va kesilganlikni aniqlaydigan arzon model."),
+            "max_occluded_pct": _(
+                "Qo‘l mahsulotning shuncha foizini yopsa ham AI to‘ldiradi (belgilab ko‘rsatiladi); "
+                "ko‘prog‘ida rasm rad etiladi. Studiya shablonlari hech qanday yopilgan joyni to‘ldirmaydi."
+            ),
+            "style": _(
+                "Barcha AI sahnalariga qo‘shiladigan uslub. Mahsulotni o‘zgartirmaslik qoidalari kodda."
+            ),
+            "price_bria_call": _("Bria bitta so‘rov narxi (tokenlarda emas)."),
+        }
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        form: Any = self
+        form.fields["style"].widget = UnfoldAdminTextareaWidget(attrs={"rows": 5})
+        for name, low, high in (("max_attempts", 1, 3), ("candidate_ttl_hours", 1, 720)):
+            field = form.fields[name]
+            field.validators += [MinValueValidator(low), MaxValueValidator(high)]
+
+    def _model(self, name: str) -> str:
+        value = str(self.cleaned_data[name]).strip()
+        if not MODEL_ID.match(value):
+            raise forms.ValidationError(MODEL_ID_INVALID)
+        return value
+
+    def clean_analyst_model(self) -> str:
+        return self._model("analyst_model")
+
+    def clean_image_model(self) -> str:
+        return self._model("image_model")
+
+
+class SceneTemplateForm(ChangesMixin, forms.ModelForm):  # type: ignore[type-arg]
+    class Meta:
+        model = SceneTemplate
+        fields = writes.SCENE_TEMPLATE_FIELDS
+        help_texts = {
+            "params": _(
+                'Studiya: {"fill": "solid" | "linear" | "radial", "colours": ["#rrggbb", …], '
+                '"floor": "#rrggbb", "floor_at": 0.8, "shadow_opacity": 0.35, "shadow_colour": "#rrggbb"}.'
+            ),
+            "prompt": _("AI sahnasi: faqat fon va atrofdagi narsalar tavsifi (mahsulot haqida yozmang)."),
+        }
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        form: Any = self
+        form.fields["prompt"].widget = UnfoldAdminTextareaWidget(attrs={"rows": 5})
+        form.fields["params"].widget = UnfoldAdminTextareaWidget(attrs={"rows": 5, "spellcheck": "false"})
+
+    def clean_params(self) -> dict[str, Any]:
+        value = self.cleaned_data["params"]
+        if not isinstance(value, dict):
+            raise forms.ValidationError(_("JSON obyekt bo‘lishi kerak."))
+        try:
+            for colour in [*list(value.get("colours") or []), value.get("floor"), value.get("shadow_colour")]:
+                if colour:
+                    hex_colour(str(colour))
+        except ValueError:
+            raise forms.ValidationError(_("Ranglar #rrggbb ko‘rinishida bo‘lsin.")) from None
+        if value.get("fill") not in (None, "solid", "linear", "radial"):
+            raise forms.ValidationError(_("fill: solid, linear yoki radial."))
+        return value
+
+    def clean(self) -> dict[str, Any]:
+        data: dict[str, Any] = super().clean() or {}
+        form: Any = self
+        if form.instance.kind == "ai_scene" and not str(data.get("prompt") or "").strip():
+            form.add_error("prompt", _("AI sahnasi uchun tavsif majburiy."))
+        return data
 
 
 class RotateKeyForm(forms.Form):

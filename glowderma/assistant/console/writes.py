@@ -30,6 +30,8 @@ from glowderma.assistant.models import (
     PromptTemplate,
     PromptVersion,
     ProviderConfig,
+    SceneSettings,
+    SceneTemplate,
 )
 from glowderma.core import audit, enums, timeutils
 
@@ -53,6 +55,30 @@ PROVIDER_FIELDS = (
     "price_input_per_mtok_usd",
     "price_output_per_mtok_usd",
 )
+SCENE_SETTINGS_FIELDS = (
+    "enabled",
+    "ai_enabled",
+    "segmenter",
+    "analyst_model",
+    "image_model",
+    "image_size",
+    "bria_model",
+    "qa_check",
+    "max_occluded_pct",
+    "max_attempts",
+    "daily_budget_usd",
+    "monthly_budget_usd",
+    "per_user_daily_jobs",
+    "candidate_ttl_hours",
+    "price_text_input",
+    "price_text_output",
+    "price_image_input",
+    "price_image_text_output",
+    "price_image_output",
+    "price_bria_call",
+    "style",
+)
+SCENE_TEMPLATE_FIELDS = ("name_uz", "name_ru", "name_en", "enabled", "position", "params", "prompt")
 EDITABLE_STATUSES = (Status.DRAFT, Status.TESTED)
 ACTIVATABLE_STATUSES = (Status.TESTED, Status.RETIRED)
 
@@ -116,6 +142,47 @@ def update_provider(
                 action="assistant.provider_updated",
                 entity_type="assistant_provider",
                 entity_id=provider,
+                actor=actor,
+                request=request,
+                before=before,
+                after=after,
+            )
+    return row
+
+
+def update_scene_settings(changes: Mapping[str, Any], *, actor: Any, request: Any = None) -> SceneSettings:
+    with transaction.atomic():
+        row = SceneSettings.objects.select_for_update().get(pk=SETTINGS_PK)
+        before, after = _apply(row, SCENE_SETTINGS_FIELDS, changes)
+        if "style" in after:  # audited as length and digest, like prompt instructions
+            before["style"], after["style"] = digest(str(before["style"] or "")), digest(str(row.style))
+        if after:
+            row.updated_by = actor
+            row.save()
+            audit.record(
+                action="assistant.scene_settings_updated",
+                entity_type="assistant_scene_settings",
+                entity_id=str(SETTINGS_PK),
+                actor=actor,
+                request=request,
+                before=before,
+                after=after,
+            )
+    return row
+
+
+def update_scene_template(
+    template_id: int, changes: Mapping[str, Any], *, actor: Any, request: Any = None
+) -> SceneTemplate:
+    with transaction.atomic():
+        row = SceneTemplate.objects.select_for_update().get(pk=template_id)
+        before, after = _apply(row, SCENE_TEMPLATE_FIELDS, changes)
+        if after:
+            row.save()
+            audit.record(
+                action="assistant.scene_template_updated",
+                entity_type="assistant_scene_template",
+                entity_id=row.key,
                 actor=actor,
                 request=request,
                 before=before,

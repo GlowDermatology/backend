@@ -26,6 +26,8 @@ from glowderma.assistant.models import (
     PromptTemplate,
     PromptVersion,
     ProviderConfig,
+    SceneSettings,
+    SceneTemplate,
 )
 from glowderma.assistant.tests.factories import GenerationJobFactory
 from glowderma.catalog.tests.factories import ProductFactory
@@ -77,6 +79,9 @@ def urls() -> list[str]:
         reverse("admin:assistant_prompt_version", args=["describe", 1]),
         reverse("admin:assistant_jobs"),
         reverse("admin:assistant_job", args=[job.pk]),
+        reverse("admin:assistant_provider", args=["bria"]),
+        reverse("admin:assistant_scenes"),
+        reverse("admin:assistant_scene_template", args=[SceneTemplate.objects.get(key="marble").pk]),
     ]
 
 
@@ -474,3 +479,70 @@ def test_the_pages_write_no_admin_history(su: Client, django_capture_on_commit_c
     rotate(su, KEY, django_capture_on_commit_callbacks)
     su.post(reverse("admin:assistant_provider", args=["gemini"]), provider_data(max_retries="1"))
     assert not LogEntry.objects.exists()
+
+
+# --- product scenes ----------------------------------------------------------------------------------------
+
+
+def scene_data(**values: str) -> dict[str, str]:
+    data = {
+        "segmenter": "bria",
+        "analyst_model": "gemini-3.5-flash-lite",
+        "image_model": "gemini-nano-banana-2.1",
+        "image_size": "1K",
+        "bria_model": "RMBG2",
+        "qa_check": "on",
+        "max_occluded_pct": "12",
+        "max_attempts": "2",
+        "daily_budget_usd": "3",
+        "monthly_budget_usd": "40",
+        "per_user_daily_jobs": "20",
+        "candidate_ttl_hours": "72",
+        "price_text_input": "0.1",
+        "price_text_output": "0.4",
+        "price_image_input": "1.5",
+        "price_image_text_output": "7.5",
+        "price_image_output": "30",
+        "price_bria_call": "0.018",
+        "style": "Calm ivory light.",
+        "enabled": "on",
+    }
+    data.update(values)
+    return data
+
+
+def test_scene_settings_are_saved_and_audited(su: Client) -> None:
+    response = su.post(reverse("admin:assistant_scenes"), scene_data())
+    assert response.status_code == 302
+    row = SceneSettings.objects.get()
+    assert (row.enabled, row.ai_enabled, row.segmenter, row.max_occluded_pct) == (
+        True,
+        False,
+        "bria",
+        Decimal("12"),
+    )
+    entry = AuditEntry.objects.get(action="assistant.scene_settings_updated")
+    assert entry.after is not None and entry.after["style"]["length"] == len("Calm ivory light.")
+
+
+@pytest.mark.parametrize(("field", "value"), [("image_model", "Bad Model!"), ("max_attempts", "9")])
+def test_invalid_scene_settings_are_refused(field: str, value: str, su: Client) -> None:
+    response = su.post(reverse("admin:assistant_scenes"), scene_data(**{field: value}))
+    assert response.status_code == 400
+    assert not SceneSettings.objects.get().enabled
+
+
+def test_a_scene_template_is_edited_and_validated(su: Client) -> None:
+    ivory = SceneTemplate.objects.get(key="studio-ivory")
+    url = reverse("admin:assistant_scene_template", args=[ivory.pk])
+    base = {"name_uz": "Fil suyagi", "name_ru": "", "name_en": "", "position": "0", "prompt": ""}
+    bad = su.post(url, {**base, "enabled": "on", "params": '{"colours": ["red"]}'})
+    assert bad.status_code == 400
+    ok = su.post(url, {**base, "params": '{"fill": "solid", "colours": ["#ffffff"]}'})
+    assert ok.status_code == 302
+    ivory.refresh_from_db()
+    assert not ivory.enabled and ivory.params == {"fill": "solid", "colours": ["#ffffff"]}
+    marble = SceneTemplate.objects.get(key="marble")
+    url = reverse("admin:assistant_scene_template", args=[marble.pk])
+    assert su.post(url, {**base, "name_uz": "Marmar", "params": "{}", "prompt": " "}).status_code == 400
+    assert AuditEntry.objects.filter(action="assistant.scene_template_updated").count() == 1

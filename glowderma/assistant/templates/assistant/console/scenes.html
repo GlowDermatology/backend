@@ -1,0 +1,62 @@
+{% extends "assistant/console/base.html" %}
+{% load i18n %}
+
+{% block page %}
+<p class="gd-ai-lead">
+    {% blocktranslate trimmed %}
+        Mahsulot rasmlari uchun sahnalar va ekranlarga moslash. Mahsulotning o‘zi hech qachon qayta chizilmaydi:
+        asl rasmdagi piksellar sahna ustiga qaytariladi. Sahnalar o‘chirilgan holda yetkaziladi; har bir
+        o‘zgarish audit jurnaliga yoziladi va keyingi so‘rovdan boshlab ishlaydi.
+    {% endblocktranslate %}
+</p>
+<div class="gd-ai-grid">
+    <section class="gd-ai-card" aria-labelledby="ai-scenes-title">
+        <h2 id="ai-scenes-title" class="gd-ai-card__title">{% translate "Sozlamalar" %}</h2>
+        <form method="post" novalidate data-testid="ai-scenes-form">
+            {% csrf_token %}
+            {% include "assistant/console/_errors.html" %}
+            {% for field in form %}{% include "assistant/console/_field.html" %}{% endfor %}
+            <div class="gd-ai-foot">
+                <span class="gd-ai-muted">{% blocktranslate trimmed with at=row.updated_at|date:"d.m.Y H:i" author=updated_by %}Oxirgi o‘zgarish: {{ at }} · {{ author }}{% endblocktranslate %}</span>
+                <button type="submit" class="gd-ai-button">{% translate "Saqlash" %}</button>
+            </div>
+        </form>
+    </section>
+    <section class="gd-ai-card" aria-labelledby="ai-scenes-spend">
+        <h2 id="ai-scenes-spend" class="gd-ai-card__title">{% translate "Xarajat" %}</h2>
+        <dl class="gd-ai-dl">
+            <dt>{% translate "Bugun" %}</dt><dd>${{ spent_today }} / ${{ row.daily_budget_usd }}</dd>
+            <dt>{% translate "Shu oy" %}</dt><dd>${{ spent_month }} / ${{ row.monthly_budget_usd }}</dd>
+        </dl>
+        <h2 class="gd-ai-card__title">{% translate "Shablonlar" %}</h2>
+        <table class="gd-ai-table">
+            <thead><tr><th>{% translate "Nomi" %}</th><th>{% translate "Turi" %}</th><th>{% translate "Yoqilgan" %}</th></tr></thead>
+            <tbody>
+            {% for template in templates %}
+                <tr>
+                    <td><a class="gd-ai-link" href="{% url 'admin:assistant_scene_template' template.pk %}">{{ template.name_uz }}</a></td>
+                    <td>{{ template.get_kind_display }}</td>
+                    <td>{% if template.enabled %}{% translate "Ha" %}{% else %}{% translate "Yo‘q" %}{% endif %}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <h2 class="gd-ai-card__title">{% translate "Oxirgi so‘rovlar" %}</h2>
+        <table class="gd-ai-table">
+            <thead><tr><th>#</th><th>{% translate "Turi" %}</th><th>{% translate "Holat" %}</th><th>{% translate "Narx" %}</th></tr></thead>
+            <tbody>
+            {% for job in recent %}
+                <tr>
+                    <td>{{ job.pk }}</td>
+                    <td>{{ job.get_kind_display }}</td>
+                    <td>{{ job.get_state_display }}{% if job.error_code %} · <code>{{ job.error_code }}</code>{% endif %}</td>
+                    <td>${{ job.cost_usd }}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="4" class="gd-ai-muted">{% translate "Hali so‘rov yo‘q." %}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </section>
+</div>
+{% endblock %}

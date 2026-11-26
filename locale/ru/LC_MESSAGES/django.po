@@ -429,6 +429,10 @@ msgstr "Не более 1000 символов."
 msgid "180 belgidan oshmasin."
 msgstr "Не более 180 символов."
 
+#: model metadata
+msgid "1K"
+msgstr "1K"
+
 #: glowderma/reporting/dashboards/customers.py
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "24 soat"
@@ -450,6 +454,10 @@ msgstr "Устройства 2FA"
 #: glowderma/accounts/templates/accounts/console/recovery.html
 msgid "2FA yoqilganda berilgan 10 ta zaxira koddan birini kiriting. Har bir kod faqat bir marta ishlaydi."
 msgstr "Введите один из 10 кодов восстановления, выданных при включении 2FA. Каждый код действует только один раз."
+
+#: model metadata
+msgid "2K"
+msgstr "2K"
 
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "30 kun ichida yangi mijoz yo‘q"
@@ -483,13 +491,22 @@ msgstr "7 дней"
 msgid "7 kun ichida kod yuborilmagan"
 msgstr "За 7 дней коды не отправлялись"
 
+#: glowderma/assistant/scenes/services.py
+msgid "AI bu rasmni qayta ishlamadi. Boshqa rasm bilan urinib ko‘ring."
+msgstr "ИИ не обработал это фото. Попробуйте другое фото."
+
 #: glowderma/assistant/services.py
 msgid "AI bu so‘rovni bajarmadi. Ma’lumotlarni tekshirib, qayta urinib ko‘ring."
 msgstr "AI не выполнил этот запрос. Проверьте данные и попробуйте снова."
 
+#: glowderma/assistant/scenes/services.py
 #: glowderma/assistant/services.py
 msgid "AI javobini tushunib bo‘lmadi. Qayta urinib ko‘ring."
 msgstr "Не удалось разобрать ответ AI. Попробуйте снова."
+
+#: glowderma/assistant/scenes/services.py
+msgid "AI mahsulotni o‘zgartirib yubordi, natija rad etildi. Qayta urinib ko‘ring."
+msgstr "ИИ изменил товар, результат отклонён. Попробуйте ещё раз."
 
 #: config/settings/ops_admin.py
 msgid "AI promptlar"
@@ -508,6 +525,30 @@ msgstr "AI-провайдеры"
 #: glowderma/assistant/templates/assistant/console/settings.html
 msgid "AI rejimi"
 msgstr "Режим AI"
+
+#: glowderma/assistant/scenes/services.py
+msgid "AI sahnalar hali yoqilmagan: studiya shablonidan foydalaning."
+msgstr "ИИ-сцены ещё не включены: используйте студийный шаблон."
+
+#: model metadata
+msgid "AI sahnalar yoqilgan"
+msgstr "ИИ-сцены включены"
+
+#: glowderma/assistant/console/forms.py
+msgid "AI sahnalari (Nano Banana). Google loyihasida to‘lov yoqilgan bo‘lishi kerak."
+msgstr "ИИ-сцены (Nano Banana). В проекте Google должна быть включена оплата."
+
+#: model metadata
+msgid "AI sahnasi"
+msgstr "ИИ-сцена"
+
+#: glowderma/assistant/console/forms.py
+msgid "AI sahnasi uchun tavsif majburiy."
+msgstr "Для ИИ-сцены нужно описание."
+
+#: glowderma/assistant/console/forms.py
+msgid "AI sahnasi: faqat fon va atrofdagi narsalar tavsifi (mahsulot haqida yozmang)."
+msgstr "ИИ-сцена: опишите только фон и окружение (не товар)."
 
 #: config/settings/ops_admin.py
 msgid "AI sozlamalari"
@@ -531,6 +572,11 @@ msgstr "AI-запросы и расходы"
 msgid "AI uchun ajratilgan byudjet tugadi. Administratorga murojaat qiling."
 msgstr "Бюджет на AI исчерпан. Обратитесь к администратору."
 
+#: glowderma/assistant/scenes/services.py
+msgid "AI xizmati sozlanmagan. Administratorga murojaat qiling."
+msgstr "ИИ-сервис не настроен. Обратитесь к администратору."
+
+#: glowderma/assistant/scenes/services.py
 #: glowderma/assistant/services.py
 msgid "AI xizmati vaqtincha ishlamayapti. Birozdan so‘ng qayta urinib ko‘ring."
 msgstr "Сервис AI временно недоступен. Попробуйте чуть позже."
@@ -554,12 +600,20 @@ msgid "AI yordamchi sozlamalari"
 msgstr "Настройки AI-помощника"
 
 #: glowderma/assistant/console/views.py
+msgid "AI yordamchi: mahsulot sahnalari"
+msgstr "ИИ-ассистент: сцены товаров"
+
+#: glowderma/assistant/console/views.py
 msgid "AI yordamchi: promptlar"
 msgstr "AI-помощник: промпты"
 
 #: glowderma/assistant/console/views.py
 msgid "AI yordamchi: provayderlar"
 msgstr "AI-помощник: провайдеры"
+
+#: glowderma/assistant/console/views.py
+msgid "AI yordamchi: sahna shabloni"
+msgstr "ИИ-ассистент: шаблон сцены"
 
 #: glowderma/assistant/console/views.py
 msgid "AI yordamchi: sozlamalar"
@@ -669,6 +723,10 @@ msgstr "Apple"
 #: model metadata
 msgid "Arxivda"
 msgstr "В архиве"
+
+#: glowderma/assistant/scenes/services.py
+msgid "Asl rasm o‘zgargan yoki o‘chirilgan: natijani qayta yarating."
+msgstr "Исходное фото изменено или удалено: создайте результат заново."
 
 #: glowderma/professionals/services/common.py
 msgid "Asosiy filial biriktirilgan filiallar orasida bo‘lishi kerak."
@@ -855,6 +913,10 @@ msgstr "Баннер: {obj.title_uz}"
 #: config/settings/ops_admin.py
 msgid "Bannerlar"
 msgstr "Баннеры"
+
+#: glowderma/assistant/console/forms.py
+msgid "Barcha AI sahnalariga qo‘shiladigan uslub. Mahsulotni o‘zgartirmaslik qoidalari kodda."
+msgstr "Стиль, добавляемый ко всем ИИ-сценам. Правила, запрещающие менять товар, заданы в коде."
 
 #: glowderma/site_config/admin_views.py
 msgid "Barcha mijozlardan shartlarni qayta qabul qilish so‘raladi."
@@ -1205,6 +1267,26 @@ msgstr "Заполнить пустые поля"
 msgid "Bo‘shatildi"
 msgstr "Освобождён"
 
+#: model metadata
+msgid "Bria (bitta so‘rov, USD)"
+msgstr "Bria (за запрос, USD)"
+
+#: model metadata
+msgid "Bria (fon olib tashlash)"
+msgstr "Bria (удаление фона)"
+
+#: model metadata
+msgid "Bria RMBG"
+msgstr "Bria RMBG"
+
+#: glowderma/assistant/console/forms.py
+msgid "Bria bitta so‘rov narxi (tokenlarda emas)."
+msgstr "Цена Bria за один запрос (не за токены)."
+
+#: model metadata
+msgid "Bria modeli"
+msgstr "Модель Bria"
+
 #: glowderma/catalog/services.py
 msgid "Bu Billz ID bilan mahsulot allaqachon bor."
 msgstr "Товар с таким Billz ID уже существует."
@@ -1326,6 +1408,10 @@ msgstr "Эта проблема уже решена."
 msgid "Bu mutaxassisda shu nomdagi xizmat allaqachon bor."
 msgstr "У этого специалиста уже есть услуга с таким названием."
 
+#: glowderma/assistant/scenes/services.py
+msgid "Bu natija hali tayyor emas yoki allaqachon ko‘rib chiqilgan."
+msgstr "Этот результат ещё не готов или уже рассмотрен."
+
 #: glowderma/accounts/services/staff/messages.py
 msgid "Bu provayder allaqachon bog‘langan."
 msgstr "Этот провайдер уже привязан."
@@ -1373,6 +1459,10 @@ msgstr "Эта дата уже добавлена."
 #: glowderma/professionals/services/common.py
 msgid "Bu sana uchun alohida jadval allaqachon bor."
 msgstr "Отдельное расписание на эту дату уже есть."
+
+#: glowderma/assistant/scenes/services.py
+msgid "Bu shablon mavjud emas yoki o‘chirilgan."
+msgstr "Этот шаблон не существует или отключён."
 
 #: glowderma/core/api/fields.py
 msgid "Bu slug band."
@@ -1433,6 +1523,7 @@ msgstr "С этой записью связаны другие записи; с�
 
 #: glowderma/assistant/console/views.py
 #: glowderma/assistant/templates/assistant/console/_budgets.html
+#: glowderma/assistant/templates/assistant/console/scenes.html
 msgid "Bugun"
 msgstr "Сегодня"
 
@@ -1455,6 +1546,10 @@ msgstr "Вы достигли дневного лимита AI-запросов.
 #: glowderma/reporting/dashboards/customers.py
 msgid "Bugungi qabullar"
 msgstr "Записи на приём сегодня"
+
+#: glowderma/assistant/scenes/services.py
+msgid "Bugungi sahna so‘rovlari chegarasiga yetdingiz. Ertaga qayta urinib ko‘ring."
+msgstr "Вы достигли дневного лимита запросов сцен. Попробуйте завтра."
 
 #: glowderma/assistant/console/forms.py
 msgid "Bugungi xarajat shu chegaraga yetganda yangi so‘rovlar to‘xtatiladi."
@@ -1809,6 +1904,10 @@ msgid "E-pochtani tasdiqlash"
 msgstr "Подтверждение электронной почты"
 
 #: model metadata
+msgid "Ekranlarga moslash"
+msgstr "Подогнать под экраны"
+
+#: model metadata
 msgid "Ekspress"
 msgstr "Экспресс"
 
@@ -2129,6 +2228,14 @@ msgstr "Условия использования"
 msgid "Foydalanish shartlari va maxfiylik siyosatining o‘zbekcha matnini kiriting, so‘ng e’lon qiling."
 msgstr "Введите узбекский текст условий использования и политики конфиденциальности, затем опубликуйте."
 
+#: model metadata
+msgid "Gemini (segmentatsiya JSON)"
+msgstr "Gemini (JSON-сегментация)"
+
+#: model metadata
+msgid "Gemini (yashil fon)"
+msgstr "Gemini (зелёный фон)"
+
 #: glowderma/accounts/console/views/enrolment.py
 msgid "Glow Derma Ops — zaxira kodlar"
 msgstr "Glow Derma Ops — коды восстановления"
@@ -2151,6 +2258,7 @@ msgstr "HTTP-заголовки"
 
 #: glowderma/assistant/templates/assistant/console/_credential.html
 #: glowderma/assistant/templates/assistant/console/providers.html
+#: glowderma/assistant/templates/assistant/console/scenes.html
 #: glowderma/core/templatetags/ops_admin.py
 #: glowderma/reporting/dashboards/ops.py
 msgid "Ha"
@@ -2184,6 +2292,10 @@ msgstr "Запусков ещё не было"
 #: glowderma/reporting/dashboards/money.py
 msgid "Hali ishlamagan (tungi hisobot bilan ishlaydi)"
 msgstr "Ещё не запускалась (выполняется вместе с ночным отчётом)"
+
+#: glowderma/assistant/templates/assistant/console/scenes.html
+msgid "Hali so‘rov yo‘q."
+msgstr "Запросов пока нет."
 
 #: glowderma/delivery/admin.py
 msgid "Hali tekshirilmagan"
@@ -2320,6 +2432,7 @@ msgstr "События"
 #: glowderma/assistant/templates/assistant/console/job.html
 #: glowderma/assistant/templates/assistant/console/jobs.html
 #: glowderma/assistant/templates/assistant/console/prompt_template.html
+#: glowderma/assistant/templates/assistant/console/scenes.html
 #: glowderma/catalog/admin.py
 #: glowderma/commerce/admin.py
 #: glowderma/core/admin.py
@@ -2578,6 +2691,10 @@ msgstr "Примечание"
 msgid "Izohni kiriting."
 msgstr "Введите комментарий."
 
+#: glowderma/assistant/console/forms.py
+msgid "JSON obyekt bo‘lishi kerak."
+msgstr "Должен быть JSON-объект."
+
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Jadval"
 msgstr "Расписание"
@@ -2596,6 +2713,10 @@ msgstr "Итого"
 #: glowderma.core.labels.SEGMENT_MEMBER_EXPORT_HEADERS
 msgid "Jami xaridlar (so‘m)"
 msgstr "Сумма покупок (сум)"
+
+#: glowderma/assistant/scenes/services.py
+msgid "Jarayon to‘xtab qoldi. Qayta urinib ko‘ring."
+msgstr "Процесс остановился. Попробуйте ещё раз."
 
 #: glowderma/integrations/services/jobs.py
 msgid "Jarayon uzilib qoldi. Qayta urinib ko‘ring."
@@ -2923,6 +3044,14 @@ msgstr "Кеш недоступен: запустить отчёт сейчас 
 msgid "Keshni chetlab o‘tib qayta hisoblash"
 msgstr "Пересчитать в обход кеша"
 
+#: glowderma/catalog/services.py
+msgid "Kesilgan qism juda kichik: kamida 200 piksel bo‘lsin."
+msgstr "Обрезка слишком мала: не меньше 200 пикселей."
+
+#: glowderma/catalog/services.py
+msgid "Kesish chegarasi rasm ichida va kerakli shaklda bo‘lishi kerak."
+msgstr "Обрезка должна быть внутри изображения и нужной формы."
+
 #: glowderma/reporting/dashboards/ops.py
 msgid "Ketma-ket xato yo‘q"
 msgstr "Ошибок подряд нет"
@@ -3205,6 +3334,10 @@ msgstr "Товар зарезервирован"
 msgid "Mahsulot boshqa joyda o‘zgartirildi: sahifani yangilab, qayta urinib ko‘ring."
 msgstr "Товар изменён в другом месте: обновите страницу и попробуйте снова."
 
+#: glowderma/assistant/console/forms.py
+msgid "Mahsulot chegarasi, qo‘l va kesilganlikni aniqlaydigan arzon model."
+msgstr "Недорогая модель, которая определяет границы товара, руки и обрезанные края."
+
 #: glowderma/assistant/templates/assistant/console/settings.html
 msgid "Mahsulot matnlari uchun AI yordamchi: yoqish, byudjetlar va cheklovlar. Har bir o‘zgarish audit jurnaliga yoziladi va keyingi so‘rovdan boshlab ishlaydi (qayta ishga tushirish shart emas)."
 msgstr "AI-помощник для текстов товаров: включение, бюджеты и лимиты. Каждое изменение записывается в журнал аудита и действует со следующего запроса (перезапуск не нужен)."
@@ -3212,6 +3345,19 @@ msgstr "AI-помощник для текстов товаров: включен
 #: glowderma/assistant/services.py
 msgid "Mahsulot ma’lumotlarida yo‘q raqam yoki da’vo bor: matnni tekshiring."
 msgstr "В тексте есть число или утверждение, которого нет в данных товара: проверьте его."
+
+#: glowderma/assistant/scenes/services.py
+msgid "Mahsulot rasmga to‘liq sig‘magan: rasmni mahsulot to‘liq ko‘rinadigan qilib oling."
+msgstr "Товар не помещается в кадр: сделайте фото, где товар виден целиком."
+
+#: glowderma/assistant/templates/assistant/console/scenes.html
+msgid "Mahsulot rasmlari uchun sahnalar va ekranlarga moslash. Mahsulotning o‘zi hech qachon qayta chizilmaydi: asl rasmdagi piksellar sahna ustiga qaytariladi. Sahnalar o‘chirilgan holda yetkaziladi; har bir o‘zgarish audit jurnaliga yoziladi va keyingi so‘rovdan boshlab ishlaydi."
+msgstr "Сцены и подгонка под экраны для фото товаров. Сам товар никогда не перерисовывается: исходные пиксели фото возвращаются поверх сцены. Сцены поставляются выключенными; каждое изменение записывается в журнал аудита и действует со следующего запроса."
+
+#: config/settings/ops_admin.py
+#: glowderma/assistant/console/views.py
+msgid "Mahsulot sahnalari"
+msgstr "Сцены товаров"
 
 #: glowderma/notifications/api/admin/serializers/messages.py
 msgid "Mahsulot topilmadi yoki yashirin."
@@ -3230,6 +3376,18 @@ msgstr "У товара нет фотографий."
 #: glowderma/commerce/admin.py
 msgid "Mahsulotlar"
 msgstr "Товары"
+
+#: glowderma/assistant/scenes/services.py
+msgid "Mahsulotni fondan aniq ajratib bo‘lmadi. Boshqa rasm bilan urinib ko‘ring."
+msgstr "Не удалось чётко отделить товар от фона. Попробуйте другое фото."
+
+#: glowderma/assistant/console/forms.py
+msgid "Mahsulotni fondan qanday ajratish: Gemini yashil fon (rasm modeli kerak) yoki Bria (Provayderlar sahifasida Bria kaliti kerak)."
+msgstr "Как отделять товар от фона: зелёный фон Gemini (нужна модель изображений) или Bria (нужен ключ Bria на странице «Провайдеры»)."
+
+#: glowderma/assistant/scenes/services.py
+msgid "Mahsulotning belgilangan qismi AI tomonidan chizilgan: tekshirib, tasdiqlang."
+msgstr "Отмеченная часть товара дорисована ИИ: проверьте и подтвердите."
 
 #: glowderma.core.api.exceptions.FIELD_MESSAGES
 #: glowderma/core/api/exceptions.py
@@ -3520,6 +3678,10 @@ msgstr "Ориентир (ru)"
 msgid "Mo‘ljal (uz)"
 msgstr "Ориентир (uz)"
 
+#: model metadata
+msgid "Muddati o‘tdi"
+msgstr "Срок истёк"
+
 #: glowderma/delivery/admin.py
 msgid "Muddati o‘tgan"
 msgstr "Срок истёк"
@@ -3638,6 +3800,7 @@ msgstr "Проверить на примере товара"
 
 #: admin history (professionals.Service)
 #: glowderma/appointments/admin.py
+#: glowderma/assistant/templates/assistant/console/scenes.html
 #: glowderma/catalog/admin.py
 #: glowderma/commerce/admin.py
 #: glowderma/customers/admin.py
@@ -3701,6 +3864,10 @@ msgstr "Нужно подтвердить цену"
 msgid "Natija"
 msgstr "Результат"
 
+#: glowderma/assistant/scenes/services.py
+msgid "Natijada begona narsalar qoldi (qo‘l, ofis, yozuv). Qayta urinib ko‘ring."
+msgstr "В результате остались лишние предметы (рука, офис, надписи). Попробуйте ещё раз."
+
 #: glowderma/reporting/dashboards/ops.py
 msgid "Navbat bo‘sh"
 msgstr "Очередь пуста"
@@ -3742,6 +3909,7 @@ msgstr "Неизвестный статус"
 
 #: admin history (professionals.Professional)
 #: glowderma.core.labels.PRODUCT_EXPORT_HEADERS
+#: glowderma/assistant/templates/assistant/console/scenes.html
 msgid "Nomi"
 msgstr "Имя"
 
@@ -3968,6 +4136,10 @@ msgstr "Операционная консоль"
 msgid "Ops holati"
 msgstr "Состояние системы"
 
+#: glowderma/assistant/templates/assistant/console/scene_template.html
+msgid "Orqaga"
+msgstr "Назад"
+
 #: glowderma/reporting/dashboards/money.py
 msgid "Osilib qolgan to‘lovlar"
 msgstr "Зависшие платежи"
@@ -4017,6 +4189,7 @@ msgid "Oxirgi muvaffaqiyatli sinxronlashdan keyingi o‘zgarishlar (delta) Billz
 msgstr "Из Billz загружаются изменения с момента последней успешной синхронизации (дельта): обновляются цены и остатки. Если импорт уже выполняется, новый не запускается."
 
 #: glowderma/assistant/templates/assistant/console/provider.html
+#: glowderma/assistant/templates/assistant/console/scenes.html
 #: glowderma/assistant/templates/assistant/console/settings.html
 #: glowderma/site_config/templates/site_config/console/settings.html
 msgid "Oxirgi o‘zgarish: %(at)s · %(author)s"
@@ -4038,6 +4211,10 @@ msgstr "Последняя синхронизация %(ago)s"
 #: glowderma/reporting/templates/reporting/dashboards/money.html
 msgid "Oxirgi solishtiruv natijasi (audit jurnali)"
 msgstr "Результат последней сверки (журнал действий)"
+
+#: glowderma/assistant/templates/assistant/console/scenes.html
+msgid "Oxirgi so‘rovlar"
+msgstr "Последние запросы"
 
 #: glowderma/reporting/dashboards/money.py
 msgid "Oxirgi tungi hisobot"
@@ -4303,6 +4480,7 @@ msgid "Qabul #%(id)s · %(status)s: mutaxassis #%(professional_id)s %(start)s (%
 msgstr "Запись на приём #%(id)s · %(status)s: специалист #%(professional_id)s %(start)s (%(duration)s мин)"
 
 #: glowderma/integrations/admin.py
+#: model metadata
 msgid "Qabul qilindi"
 msgstr "Принято"
 
@@ -4500,6 +4678,18 @@ msgstr "Черновик не нужно отменять: удалите или
 msgid "Qoralamani saqlash"
 msgstr "Сохранить черновик"
 
+#: glowderma/assistant/scenes/services.py
+msgid "Qo‘l mahsulotning bir qismini yopib turibdi: studiya shabloni buni to‘ldira olmaydi. AI sahnasini tanlang yoki rasmni qayta oling."
+msgstr "Рука закрывает часть товара: студийный шаблон не может её дорисовать. Выберите ИИ-сцену или переснимите фото."
+
+#: glowderma/assistant/scenes/services.py
+msgid "Qo‘l mahsulotning katta qismini yopib turibdi: rasmni qayta oling."
+msgstr "Рука закрывает слишком большую часть товара: переснимите фото."
+
+#: glowderma/assistant/console/forms.py
+msgid "Qo‘l mahsulotning shuncha foizini yopsa ham AI to‘ldiradi (belgilab ko‘rsatiladi); ko‘prog‘ida rasm rad etiladi. Studiya shablonlari hech qanday yopilgan joyni to‘ldirmaydi."
+msgstr "Если рука закрывает не больше этой доли товара, ИИ дорисует её (с отметкой); больше — фото отклоняется. Студийные шаблоны ничего не дорисовывают."
+
 #: model metadata
 msgid "Qo‘lda"
 msgstr "Вручную"
@@ -4557,6 +4747,14 @@ msgstr "У перечисленных ниже сотрудников будут
 msgid "Quyidagi «Hozir» ustuni tekshiruvlarni hozir qayta hisoblaydi."
 msgstr "Столбец «Сейчас» ниже пересчитывает проверки прямо сейчас."
 
+#: model metadata
+msgid "RMBG 2.0"
+msgstr "RMBG 2.0"
+
+#: model metadata
+msgid "RMBG 3.0"
+msgstr "RMBG 3.0"
+
 #: glowderma/integrations/admin.py
 #: model metadata
 msgid "Rad etildi"
@@ -4566,6 +4764,10 @@ msgstr "Отклонено"
 #: model metadata
 msgid "Rad etilgan"
 msgstr "Отклонено"
+
+#: glowderma/assistant/console/forms.py
+msgid "Ranglar #rrggbb ko‘rinishida bo‘lsin."
+msgstr "Цвета должны быть в формате #rrggbb."
 
 #: glowderma.core.labels.CATEGORY_EXPORT_HEADERS
 msgid "Rasm"
@@ -4584,6 +4786,10 @@ msgstr "Сколько фото режим «по фотографиям» от�
 #: glowderma/reporting/dashboards/sales.py
 msgid "Rasm yo‘q"
 msgstr "Нет изображений"
+
+#: glowderma/assistant/scenes/services.py
+msgid "Rasmda mahsulot topilmadi."
+msgstr "На фото не найден товар."
 
 #: model metadata
 msgid "Rasmdan ma’lumot olish"
@@ -4754,6 +4960,14 @@ msgstr "Укажите причину."
 msgid "Sahifa eskirgan yoki sessiya yangilangan, shuning uchun so‘rov qabul qilinmadi. Sahifani qaytadan oching va yana urinib ko‘ring."
 msgstr "Страница устарела или сеанс был обновлён, поэтому запрос не принят. Откройте страницу заново и повторите попытку."
 
+#: glowderma/assistant/scenes/services.py
+msgid "Sahnalar o‘chirilgan."
+msgstr "Сцены отключены."
+
+#: glowderma/assistant/scenes/services.py
+msgid "Sahnalar uchun ajratilgan byudjet tugadi. Administratorga murojaat qiling."
+msgstr "Бюджет на сцены исчерпан. Обратитесь к администратору."
+
 #: admin history (professionals.WorkingHoursOverride)
 #: glowderma.core.labels.NOTIFICATION_EXPORT_HEADERS
 msgid "Sana"
@@ -4792,6 +5006,8 @@ msgid "Saqlanmoqda…"
 msgstr "Сохранение…"
 
 #: glowderma/assistant/templates/assistant/console/provider.html
+#: glowderma/assistant/templates/assistant/console/scene_template.html
+#: glowderma/assistant/templates/assistant/console/scenes.html
 #: glowderma/assistant/templates/assistant/console/settings.html
 #: glowderma/site_config/templates/site_config/console/_save_button.html
 msgid "Saqlash"
@@ -4931,6 +5147,10 @@ msgstr "Сб"
 msgid "Shablon «%(status)s»: %(text)s"
 msgstr "Шаблон «%(status)s»: %(text)s"
 
+#: glowderma/assistant/templates/assistant/console/scenes.html
+msgid "Shablonlar"
+msgstr "Шаблоны"
+
 #: glowderma.core.labels.WEEKDAYS
 #: model metadata
 msgid "Shanba"
@@ -4946,6 +5166,7 @@ msgstr "Опубликовать новую версию условий?"
 
 #: glowderma/assistant/console/views.py
 #: glowderma/assistant/templates/assistant/console/_budgets.html
+#: glowderma/assistant/templates/assistant/console/scenes.html
 msgid "Shu oy"
 msgstr "Этот месяц"
 
@@ -5034,6 +5255,7 @@ msgstr "Переведено в продажу"
 
 #: config/settings/ops_admin.py
 #: glowderma/assistant/console/views.py
+#: glowderma/assistant/templates/assistant/console/scenes.html
 #: glowderma/assistant/templates/assistant/console/settings.html
 #: glowderma/site_config/admin_views.py
 msgid "Sozlamalar"
@@ -5134,6 +5356,22 @@ msgstr "Стандарт: самое позднее (мин)"
 #: model metadata
 msgid "Standart: eng tez (daqiqa)"
 msgstr "Стандарт: самое раннее (мин)"
+
+#: model metadata
+msgid "Studiya"
+msgstr "Студия"
+
+#: glowderma/assistant/console/forms.py
+msgid "Studiya sahnalari va ekranlarga moslash admin panelda ko‘rinadi."
+msgstr "Студийные сцены и подгонка под экраны доступны в админ-панели."
+
+#: model metadata
+msgid "Studiya sahnasi"
+msgstr "Студийная сцена"
+
+#: glowderma/assistant/console/forms.py
+msgid "Studiya: {\"fill\": \"solid\" | \"linear\" | \"radial\", \"colours\": [\"#rrggbb\", …], \"floor\": \"#rrggbb\", \"floor_at\": 0.8, \"shadow_opacity\": 0.35, \"shadow_colour\": \"#rrggbb\"}."
+msgstr "Студия: {\"fill\": \"solid\" | \"linear\" | \"radial\", \"colours\": [\"#rrggbb\", …], \"floor\": \"#rrggbb\", \"floor_at\": 0.8, \"shadow_opacity\": 0.35, \"shadow_colour\": \"#rrggbb\"}."
 
 #: glowderma/commerce/admin.py
 #: glowderma/loyalty/admin.py
@@ -5626,6 +5864,7 @@ msgstr "Тип"
 
 #: admin history (professionals.BlockedPeriod)
 #: glowderma.core.labels.NOTIFICATION_EXPORT_HEADERS
+#: glowderma/assistant/templates/assistant/console/scenes.html
 #: glowderma/loyalty/admin.py
 msgid "Turi"
 msgstr "Тип"
@@ -5846,6 +6085,10 @@ msgstr "Вернуть сообщение в очередь"
 #: model metadata
 msgid "Xabarnomalar"
 msgstr "Уведомления"
+
+#: glowderma/assistant/templates/assistant/console/scenes.html
+msgid "Xarajat"
+msgstr "Расходы"
 
 #: glowderma/loyalty/models.py
 msgid "Xarid #%(id)s %(source)s %(amount)s (Billz %(sale)s)"
@@ -6247,6 +6490,7 @@ msgid "Yopilishdan oldin oxirgi chaqiruv (daqiqa)"
 msgstr "Последний вызов до закрытия (мин)"
 
 #: glowderma/assistant/templates/assistant/console/providers.html
+#: glowderma/assistant/templates/assistant/console/scenes.html
 msgid "Yoqilgan"
 msgstr "Включено"
 
@@ -6268,6 +6512,7 @@ msgstr "В пути"
 
 #: glowderma/assistant/templates/assistant/console/_credential.html
 #: glowderma/assistant/templates/assistant/console/providers.html
+#: glowderma/assistant/templates/assistant/console/scenes.html
 #: glowderma/core/templatetags/ops_admin.py
 #: glowderma/reporting/dashboards/money.py
 #: glowderma/reporting/dashboards/ops.py
@@ -6292,6 +6537,10 @@ msgstr "Отправляется"
 #: glowderma/notifications/state.py
 msgid "Yuborish boshlangan: xabarni bekor qilib bo‘lmaydi."
 msgstr "Отправка уже началась: отменить сообщение нельзя."
+
+#: model metadata
+msgid "Yuklangan"
+msgstr "Загружено"
 
 #: glowderma/loyalty/services.py
 msgid "Yuqori chegara quyi chegaradan katta bo‘lsin."
@@ -6380,6 +6629,14 @@ msgstr "срок действия"
 #: glowderma/reporting/dashboards/money.py
 msgid "amalda"
 msgstr "действует"
+
+#: model metadata
+msgid "asl rasm"
+msgstr "исходное изображение"
+
+#: model metadata
+msgid "asl rasm SHA-256"
+msgstr "SHA-256 исходного изображения"
 
 #: model metadata
 msgid "asos"
@@ -6509,6 +6766,10 @@ msgstr "запись отмены"
 #: model metadata
 msgid "bekor qilish yuborilgan"
 msgstr "отмена отправлена"
+
+#: model metadata
+msgid "belgilar"
+msgstr "отметки"
 
 #: glowderma/notifications/api/admin/views/campaigns.py
 msgid "bildirishnomalar"
@@ -6725,6 +6986,10 @@ msgid "egallash tokeni"
 msgstr "токен захвата"
 
 #: model metadata
+msgid "ekran nusxalari"
+msgstr "копии для экранов"
+
+#: model metadata
 msgid "email"
 msgstr "эл. почта"
 
@@ -6815,6 +7080,10 @@ msgstr "филиал"
 #: model metadata
 msgid "filiallar"
 msgstr "филиалы"
+
+#: glowderma/assistant/console/forms.py
+msgid "fill: solid, linear yoki radial."
+msgstr "fill: solid, linear или radial."
 
 #: model metadata
 msgid "foiz"
@@ -7255,6 +7524,10 @@ msgstr "телефон косметолога"
 msgid "ko‘chirishlar soni"
 msgstr "число переносов"
 
+#: model metadata
+msgid "ko‘rib chiqilgan"
+msgstr "рассмотрено"
+
 #: glowderma/reporting/dashboards/sales.py
 msgid "ko‘rib chiqilmagan"
 msgid_plural "ko‘rib chiqilmagan"
@@ -7262,6 +7535,10 @@ msgstr[0] "нерассмотренный"
 msgstr[1] "нерассмотренных"
 msgstr[2] "нерассмотренных"
 msgstr[3] "нерассмотренных"
+
+#: model metadata
+msgid "ko‘rib chiqqan"
+msgstr "рассмотрел"
 
 #: model metadata
 msgid "ko‘rsatmalar"
@@ -7326,6 +7603,14 @@ msgid "mahsulot #%(id)s"
 msgstr "товар #%(id)s"
 
 #: model metadata
+msgid "mahsulot chegarasi"
+msgstr "границы товара"
+
+#: model metadata
+msgid "mahsulot ichida chizilgan (%)"
+msgstr "дорисовано внутри товара (%)"
+
+#: model metadata
 msgid "mahsulot rasmi"
 msgstr "изображение товара"
 
@@ -7341,6 +7626,10 @@ msgstr "товары"
 #: model metadata
 msgid "mahsulotlar summasi"
 msgstr "сумма товаров"
+
+#: model metadata
+msgid "mahsulotni kesib olish"
+msgstr "вырезание товара"
 
 #: model metadata
 msgid "maks. urinishlar"
@@ -7433,6 +7722,14 @@ msgstr "текст (ru)"
 #: model metadata
 msgid "matn (uz)"
 msgstr "текст (uz)"
+
+#: model metadata
+msgid "matn chiqish (1M token, USD)"
+msgstr "вывод текста (1M токенов, USD)"
+
+#: model metadata
+msgid "matn kirish (1M token, USD)"
+msgstr "ввод текста (1M токенов, USD)"
 
 #: model metadata
 msgid "matn versiyasi"
@@ -7596,6 +7893,22 @@ msgstr "расчёт стоимости"
 #: model metadata
 msgid "natija"
 msgstr "результат"
+
+#: model metadata
+msgid "natija muddati"
+msgstr "срок результата"
+
+#: model metadata
+msgid "natija rasmi"
+msgstr "изображение результата"
+
+#: model metadata
+msgid "natija saqlanadi (soat)"
+msgstr "результат хранится (часов)"
+
+#: model metadata
+msgid "natijani AI bilan tekshirish"
+msgstr "проверять результат с помощью ИИ"
 
 #: model metadata
 msgid "navbatdagi urinish"
@@ -7963,6 +8276,10 @@ msgid "qabul qilingan"
 msgstr "получено"
 
 #: model metadata
+msgid "qabul qilingan rasm"
+msgstr "принятое изображение"
+
+#: model metadata
 msgid "qabul qiluvchi"
 msgstr "получатель"
 
@@ -8076,6 +8393,10 @@ msgid "qoralama %(sale)s"
 msgstr "черновик %(sale)s"
 
 #: model metadata
+msgid "qo‘l yopishi mumkin bo‘lgan ulush (%)"
+msgstr "доля, которую может закрывать рука (%)"
+
+#: model metadata
 msgid "qo‘lda"
 msgstr "вручную"
 
@@ -8148,12 +8469,32 @@ msgid "rasm bo‘yi"
 msgstr "высота изображения"
 
 #: model metadata
+msgid "rasm chiqish (1M, USD)"
+msgstr "вывод изображений (1M, USD)"
+
+#: model metadata
 msgid "rasm eni"
 msgstr "ширина изображения"
 
 #: model metadata
 msgid "rasm havolasi"
 msgstr "ссылка на изображение"
+
+#: model metadata
+msgid "rasm modeli (Gemini)"
+msgstr "модель изображений (Gemini)"
+
+#: model metadata
+msgid "rasm modeli kirish (1M, USD)"
+msgstr "ввод модели изображений (1M, USD)"
+
+#: model metadata
+msgid "rasm modeli matn (1M, USD)"
+msgstr "текст модели изображений (1M, USD)"
+
+#: model metadata
+msgid "rasm o‘lchami"
+msgstr "размер изображения"
 
 #: model metadata
 msgid "rasmlar"
@@ -8204,12 +8545,44 @@ msgid "sabab"
 msgstr "причина"
 
 #: model metadata
+msgid "sahna shabloni"
+msgstr "шаблон сцены"
+
+#: model metadata
+msgid "sahna shablonlari"
+msgstr "шаблоны сцен"
+
+#: model metadata
+msgid "sahna sozlamalari"
+msgstr "настройки сцен"
+
+#: model metadata
+msgid "sahna so‘rovi"
+msgstr "запрос сцены"
+
+#: model metadata
+msgid "sahna so‘rovlari"
+msgstr "запросы сцен"
+
+#: model metadata
+msgid "sahna tavsifi"
+msgstr "описание сцены"
+
+#: model metadata
+msgid "sahnalar yoqilgan"
+msgstr "сцены включены"
+
+#: model metadata
 msgid "sana"
 msgstr "дата"
 
 #: model metadata
 msgid "saqlanmagan qiymatlar"
 msgstr "несохранённые значения"
+
+#: model metadata
+msgid "sarf"
+msgstr "расход"
 
 #: model metadata
 msgid "sarlavha"
@@ -8283,6 +8656,10 @@ msgstr "сеансы"
 #: model metadata
 msgid "shablon"
 msgstr "шаблон"
+
+#: model metadata
+msgid "shablon (o‘sha paytdagi)"
+msgstr "шаблон (на тот момент)"
 
 #: model metadata
 msgid "shablon holati"
@@ -8373,6 +8750,10 @@ msgid "so‘rov xeshi"
 msgstr "хеш запроса"
 
 #: model metadata
+msgid "studiya parametrlari"
+msgstr "параметры студии"
+
+#: model metadata
 msgid "subyekt"
 msgstr "субъект"
 
@@ -8423,6 +8804,10 @@ msgid "tafsilotlar"
 msgstr "подробности"
 
 #: model metadata
+msgid "tahlil modeli (Gemini)"
+msgstr "модель анализа (Gemini)"
+
+#: model metadata
 msgid "tajriba (yil)"
 msgstr "опыт (лет)"
 
@@ -8433,6 +8818,10 @@ msgstr "предложение действует до"
 #: model metadata
 msgid "taklif narxi"
 msgstr "цена предложения"
+
+#: model metadata
+msgid "taklif qilingan kesimlar"
+msgstr "предложенные обрезки"
 
 #: model metadata
 msgid "takliflar"
@@ -8728,8 +9117,16 @@ msgid "urinishlar"
 msgstr "попытки"
 
 #: model metadata
+msgid "urinishlar soni"
+msgstr "число попыток"
+
+#: model metadata
 msgid "user-agent"
 msgstr "user-agent"
+
+#: model metadata
+msgid "uslub ko‘rsatmasi"
+msgstr "указания по стилю"
 
 #: model metadata
 msgid "ustama (%)"
@@ -8970,6 +9367,10 @@ msgstr "история доставки"
 #: model metadata
 msgid "yopiladi"
 msgstr "закрывается"
+
+#: model metadata
+msgid "yopilgan (%)"
+msgstr "закрыто (%)"
 
 #: model metadata
 msgid "yopilishdan oldin oxirgi chaqiruv (daqiqa)"

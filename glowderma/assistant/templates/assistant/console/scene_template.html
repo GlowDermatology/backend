@@ -1,0 +1,17 @@
+{% extends "assistant/console/base.html" %}
+{% load i18n %}
+
+{% block page %}
+<section class="gd-ai-card" aria-labelledby="ai-scene-template-title">
+    <h2 id="ai-scene-template-title" class="gd-ai-card__title">{{ row.name_uz }} · <code>{{ row.key }}</code> · {{ row.get_kind_display }}</h2>
+    <form method="post" novalidate data-testid="ai-scene-template-form">
+        {% csrf_token %}
+        {% include "assistant/console/_errors.html" %}
+        {% for field in form %}{% include "assistant/console/_field.html" %}{% endfor %}
+        <div class="gd-ai-foot">
+            <a class="gd-ai-link" href="{% url 'admin:assistant_scenes' %}">{% translate "Orqaga" %}</a>
+            <button type="submit" class="gd-ai-button">{% translate "Saqlash" %}</button>
+        </div>
+    </form>
+</section>
+{% endblock %}
