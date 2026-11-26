@@ -219,10 +219,23 @@ def test_photos_without_a_usable_product_are_refused() -> None:
     assert caught.value.code == pipeline.MASK_UNUSABLE
 
 
-def test_edge_and_resolution_warnings() -> None:
+def test_a_product_cut_off_by_the_frame_is_refused_before_any_image_call() -> None:
     small = (0, 300, 140, 600)
+    used = providers(Segmentation(product=rect(small), box=small))
+    with pytest.raises(pipeline.SceneError) as caught:
+        run(MARBLE, used)
+    assert caught.value.code == pipeline.PRODUCT_CUT_OFF
+    assert used.image_model.calls == []  # type: ignore[attr-defined]
+    flagged = providers(segmentation(cut_off=True))
+    with pytest.raises(pipeline.SceneError) as caught:
+        run(STUDIO, flagged)
+    assert caught.value.code == pipeline.PRODUCT_CUT_OFF
+
+
+def test_low_resolution_warning() -> None:
+    small = (300, 300, 440, 600)
     analysis, _result, _usage = run(STUDIO, providers(Segmentation(product=rect(small), box=small)))
-    assert {"product_touches_edge", "low_resolution"} <= set(analysis.warnings)
+    assert analysis.warnings == ["low_resolution"]
 
 
 def test_provider_errors_propagate_with_their_code() -> None:

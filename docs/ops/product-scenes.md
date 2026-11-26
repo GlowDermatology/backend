@@ -17,6 +17,7 @@ Staff photograph products on a phone, often in an office and sometimes holding t
    - Up to `max_occluded_pct` (5 %, the owner's decision), the image model may fill the gap. The result records exactly where (`generated_inside`) for staff to check (warning `product_partly_generated`).
    - Above 5 %, the photo is refused with `scene_hand_covers_product` ("retake the photo").
    - Studio templates cannot fill anything, so any real occlusion is refused with `scene_occlusion_needs_ai`.
+   - A product the photo's edge cuts off (the model's flag, or a box within 1 % of a border) is refused with `scene_product_cut_off` before any image call: the missing part does not exist in the photo.
 3. **Layout.** The cut-out goes on a 4:5 master (`core/compose.py`).
    - A product leaning 3–25° is straightened first.
    - The product stands on a fixed baseline (82 % of the height) inside a centred safe zone, so the middle square crop also holds the whole product.

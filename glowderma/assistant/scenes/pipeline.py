@@ -44,6 +44,7 @@ MIN_PRODUCT_SHARE = 0.03
 MAX_PRODUCT_SHARE = 0.85
 OCCLUSION_FLOOR = 0.3  # percent: below this a hand only touches the product
 LOW_RESOLUTION_SIDE = 500  # product box long side, px
+EDGE_MARGIN = 0.01  # a product box this close to the photo's border (share of the side) is cut off
 
 # Stable error codes (scenes release: SceneJob.error_code; console and staff messages map them).
 NO_PRODUCT = "scene_no_product"
@@ -52,6 +53,7 @@ HAND_COVERS_PRODUCT = "scene_hand_covers_product"
 OCCLUSION_NEEDS_AI = "scene_occlusion_needs_ai"
 PRODUCT_DRIFT = "scene_product_drift"
 RESULT_REJECTED = "scene_result_rejected"
+PRODUCT_CUT_OFF = "scene_product_cut_off"
 RULE_BROKEN = "scene_rule_broken"  # interior_difference != 0: a bug, never shown as a scene
 
 
@@ -243,14 +245,10 @@ def analyse(photo: Image.Image, providers: Providers, config: Config, usage: Usa
     warnings: list[str] = []
     if segmentation.hand_present and occluded <= OCCLUSION_FLOOR:
         warnings.append("hand_removed")
-    if (
-        segmentation.cut_off
-        or box[0] <= 1
-        or box[1] <= 1
-        or box[2] >= photo.width - 1
-        or box[3] >= photo.height - 1
-    ):
-        warnings.append("product_touches_edge")
+    if segmentation.cut_off or touches_edge(box, photo.size):
+        # Part of the product is outside the photo: those pixels do not exist and the rule forbids
+        # inventing them, so no scene is made (staff retake the photo with the whole product in frame).
+        raise SceneError(PRODUCT_CUT_OFF, f"product box {box} reaches the photo's edge", usage=usage)
     if max(box[2] - box[0], box[3] - box[1]) < LOW_RESOLUTION_SIDE:
         warnings.append("low_resolution")
     return Analysis(
@@ -262,6 +260,14 @@ def analyse(photo: Image.Image, providers: Providers, config: Config, usage: Usa
         occluded_pct=occluded,
         warnings=warnings,
         seconds=round(time.monotonic() - started, 2),
+    )
+
+
+def touches_edge(box: compose.Box, size: tuple[int, int]) -> bool:
+    width, height = size
+    margin_x, margin_y = max(1, round(EDGE_MARGIN * width)), max(1, round(EDGE_MARGIN * height))
+    return (
+        box[0] <= margin_x or box[1] <= margin_y or box[2] >= width - margin_x or box[3] >= height - margin_y
     )
 
 
