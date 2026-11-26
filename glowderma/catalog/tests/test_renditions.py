@@ -96,7 +96,8 @@ def test_render_fills_past_the_edges_with_a_blurred_copy() -> None:
     data = renditions.render(png((300, 400), (10, 200, 30)), "1:1", (-0.25, 0.0, 1.5, 1.0))
     with Image.open(BytesIO(data)) as image:
         assert image.size == (450, 450)
-        assert image.convert("RGB").getpixel((5, 225))[1] > 150  # the fill continues the photo's colours
+        pixel = image.convert("RGB").getpixel((5, 225))
+        assert isinstance(pixel, tuple) and pixel[1] > 150  # the fill continues the photo's colours
 
 
 def test_api_shapes() -> None:
