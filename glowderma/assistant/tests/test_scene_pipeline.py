@@ -29,7 +29,7 @@ from glowderma.integrations.llm.ports import (
 from glowderma.integrations.secret import Secret
 from glowderma.integrations.segmentation.fake import FakeSegmenter
 from glowderma.integrations.segmentation.gemini_json import GeminiJsonSegmenter
-from glowderma.integrations.segmentation.gemini_matte import GeminiMatteSegmenter
+from glowderma.integrations.segmentation.combined import CombinedSegmenter
 from glowderma.integrations.segmentation.ports import Segmentation
 
 SIZE = (900, 1200)
@@ -195,27 +195,30 @@ def test_the_occlusion_rule_reaches_the_prompt() -> None:
 
 def test_a_hand_over_too_much_of_the_product_is_refused() -> None:
     with pytest.raises(pipeline.SceneError) as caught:
-        run(MARBLE, providers(segmentation(finger(84))))
+        run(MARBLE, providers(segmentation(finger(84))), max_occluded_pct=5.0)
     assert caught.value.code == pipeline.HAND_COVERS_PRODUCT
-    # the owner's threshold is a setting
-    _analysis, result, _usage = run(MARBLE, providers(segmentation(finger(84))), max_occluded_pct=15.0)
-    assert result.generated_inside_pct > 5.0
+    # the owner's limit (15 %) lets a typical grip through, highlighted for staff
+    _analysis, result, _usage = run(MARBLE, providers(segmentation(finger(84))))
+    assert 5.0 < result.generated_inside_pct <= 15.0
+    with pytest.raises(pipeline.SceneError) as caught:
+        run(MARBLE, providers(segmentation(finger(140))))
+    assert caught.value.code == pipeline.HAND_COVERS_PRODUCT
 
 
 def test_the_models_own_estimate_counts_when_higher() -> None:
     with pytest.raises(pipeline.SceneError) as caught:
-        run(MARBLE, providers(segmentation(None, hand_covers_product=True, covered_percent=9.0)))
+        run(MARBLE, providers(segmentation(None, hand_covers_product=True, covered_percent=19.0)))
     assert caught.value.code == pipeline.HAND_COVERS_PRODUCT
 
 
 def test_photos_without_a_usable_product_are_refused() -> None:
-    tiny = rect((10, 10, 40, 40))
+    tiny = rect((400, 500, 430, 530))
     with pytest.raises(pipeline.SceneError) as caught:
-        run(STUDIO, providers(Segmentation(product=tiny, box=(10, 10, 40, 40))))
+        run(STUDIO, providers(Segmentation(product=tiny, box=(400, 500, 430, 530))))
     assert caught.value.code == pipeline.NO_PRODUCT
-    everything = rect((0, 0, SIZE[0], SIZE[1]))
+    everything = rect((20, 20, SIZE[0] - 20, SIZE[1] - 20))
     with pytest.raises(pipeline.SceneError) as caught:
-        run(STUDIO, providers(Segmentation(product=everything, box=(0, 0, *SIZE))))
+        run(STUDIO, providers(Segmentation(product=everything, box=(20, 20, SIZE[0] - 20, SIZE[1] - 20))))
     assert caught.value.code == pipeline.MASK_UNUSABLE
 
 
@@ -340,12 +343,16 @@ def test_scene_spike_keys_and_live_providers(monkeypatch: pytest.MonkeyPatch) ->
     assert isinstance(live.segmenter, GeminiJsonSegmenter) and isinstance(live.image_model, GeminiImageModel)
     assert isinstance(live.content_model, GeminiContentModel)
     matte = scene_spike.build_providers(fake=False, segmenter="matte", api_key=Secret("k"))
-    assert isinstance(matte.segmenter, GeminiMatteSegmenter)
+    assert isinstance(matte.segmenter, CombinedSegmenter)
+    bria = scene_spike.build_providers(
+        fake=False, segmenter="bria", api_key=Secret("k"), bria_key=Secret("b")
+    )
+    assert isinstance(bria.segmenter, CombinedSegmenter)
 
 
 @pytest.mark.django_db
 def test_scene_spike_vault_key_needs_an_active_version() -> None:
-    with pytest.raises(CommandError, match="no active Gemini key"):
+    with pytest.raises(CommandError, match="no active gemini key"):
         scene_spike._key("vault", "X")
 
 

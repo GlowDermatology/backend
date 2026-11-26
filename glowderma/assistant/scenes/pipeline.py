@@ -68,6 +68,7 @@ class Usage:
     image_output: int = 0
     text_calls: int = 0
     image_calls: int = 0
+    bria_calls: int = 0  # billed per call
 
     def add_text(self, input_tokens: int, output_tokens: int) -> None:
         self.text_input += input_tokens
@@ -88,27 +89,28 @@ class Usage:
             + Decimal(self.image_input) * prices.image_input
             + Decimal(self.image_text_output) * prices.image_text_output
             + Decimal(self.image_output) * prices.image_output
-        ) / million
+        ) / million + Decimal(self.bria_calls) * prices.bria_per_call
         return total.quantize(Decimal("0.000001"))
 
 
 @dataclass(frozen=True, slots=True)
 class Prices:
-    """USD per 1M tokens. Defaults: gemini-2.5-flash-lite (text) and Nano Banana 2.1 (image) as reported on
-    third-party pages at the time of writing; the console's values win in production."""
+    """USD per 1M tokens (``bria_per_call``: per call). Defaults are placeholders from third-party pages at
+    the time of writing; the console's values win in production."""
 
     text_input: Decimal = Decimal("0.10")
     text_output: Decimal = Decimal("0.40")
     image_input: Decimal = Decimal("1.50")
     image_text_output: Decimal = Decimal("7.50")
     image_output: Decimal = Decimal("30.00")
+    bria_per_call: Decimal = Decimal("0.018")
 
 
 @dataclass(frozen=True)
 class Config:
-    segment_model: str = "gemini-2.5-flash"
+    segment_model: str = "gemini-3.5-flash-lite"  # the analyst (box, hands, flags); 2.5 is closed to new keys
     image_model: str = "gemini-nano-banana-2.1"
-    qa_model: str = "gemini-2.5-flash-lite"
+    qa_model: str = "gemini-3.5-flash-lite"
     image_size: str = "2K"
     thinking_level: str = "minimal"
     segment_timeout: int = 45
@@ -116,7 +118,7 @@ class Config:
     qa_timeout: int = 20
     max_retries: int = 1
     max_attempts: int = 2
-    max_occluded_pct: float = 5.0
+    max_occluded_pct: float = 15.0  # the owner's limit for AI fills (studio refuses any hidden part)
     max_drift: float = 0.01  # share of the master's width
     max_interior_change: float = 18.0  # mean grey difference inside the core (tuned by the spike)
     qa_check: bool = True
@@ -200,8 +202,11 @@ def image_part(photo: Image.Image, side: int = SEND_SIDE) -> ImagePart:
     return ImagePart(data=compose.encode(copy, "JPEG", 90), mime_type="image/jpeg")
 
 
-def analyse(photo: Image.Image, providers: Providers, config: Config, usage: Usage) -> Analysis:
-    """Segment the photo and measure occlusion; refuses a photo with no usable product mask."""
+def analyse(
+    photo: Image.Image, providers: Providers, config: Config, usage: Usage, *, for_scene: bool = True
+) -> Analysis:
+    """Segment the photo and measure occlusion. For a scene the product must be whole in the frame and have
+    a pixel mask; ``for_scene=False`` (fitting renditions) only needs the product's box."""
     started = time.monotonic()
     try:
         segmentation = providers.segmenter.segment(
@@ -218,12 +223,23 @@ def analyse(photo: Image.Image, providers: Providers, config: Config, usage: Usa
     except LLMError as exc:
         usage.add_text(exc.input_tokens, exc.output_tokens)
         raise
-    if segmentation.output_image_tokens:
+    usage.add_text(segmentation.input_tokens, segmentation.output_tokens)
+    if segmentation.cutter_input_tokens or segmentation.output_image_tokens:
         usage.add_image(
-            segmentation.input_tokens, segmentation.output_tokens, segmentation.output_image_tokens
+            segmentation.cutter_input_tokens,
+            segmentation.cutter_text_tokens,
+            segmentation.output_image_tokens,
         )
-    else:
-        usage.add_text(segmentation.input_tokens, segmentation.output_tokens)
+    if segmentation.cutter == "bria":
+        usage.bria_calls += segmentation.cutter_calls
+    if for_scene and (segmentation.cut_off or touches_edge(segmentation.box, photo.size)):
+        # Part of the product is outside the photo: those pixels do not exist and the rule forbids
+        # inventing them, so no scene is made (staff retake the photo with the whole product in frame).
+        raise SceneError(
+            PRODUCT_CUT_OFF, f"product box {segmentation.box} reaches the photo's edge", usage=usage
+        )
+    if for_scene and not segmentation.exact:
+        raise SceneError(MASK_UNUSABLE, "no pixel mask of the product", usage=usage)
     mask = compose.fill_holes(segmentation.product, segmentation.hands)
     share = compose.area(mask) / (photo.width * photo.height)
     if share < MIN_PRODUCT_SHARE:
@@ -237,7 +253,7 @@ def analyse(photo: Image.Image, providers: Providers, config: Config, usage: Usa
     occluded = occlusion.percent
     if segmentation.hand_covers_product:
         occluded = max(occluded, round(segmentation.covered_percent, 2))
-    if occluded > OCCLUSION_FLOOR and compose.area(occlusion.hidden) == 0:
+    if segmentation.exact and occluded > OCCLUSION_FLOOR and compose.area(occlusion.hidden) == 0:
         # The model says a hand hides part of the product but sent no usable hand mask: whatever the
         # scene shows inside the product's outline is not the photo's, so all of it is marked generated.
         hidden = ImageChops.subtract(occlusion.hull, mask)
@@ -245,9 +261,7 @@ def analyse(photo: Image.Image, providers: Providers, config: Config, usage: Usa
     warnings: list[str] = []
     if segmentation.hand_present and occluded <= OCCLUSION_FLOOR:
         warnings.append("hand_removed")
-    if segmentation.cut_off or touches_edge(box, photo.size):
-        # Part of the product is outside the photo: those pixels do not exist and the rule forbids
-        # inventing them, so no scene is made (staff retake the photo with the whole product in frame).
+    if for_scene and touches_edge(box, photo.size):
         raise SceneError(PRODUCT_CUT_OFF, f"product box {box} reaches the photo's edge", usage=usage)
     if max(box[2] - box[0], box[3] - box[1]) < LOW_RESOLUTION_SIDE:
         warnings.append("low_resolution")

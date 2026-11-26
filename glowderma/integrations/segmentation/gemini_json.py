@@ -115,8 +115,12 @@ def box_pixels(box_2d: Any, width: int, height: int) -> tuple[int, int, int, int
     return box if box[2] - box[0] >= 2 and box[3] - box[1] >= 2 else None
 
 
+MIN_MASK_SIDE = 16  # a smaller "mask" is a placeholder some models return, not a segmentation
+
+
 def decode_png_mask(text: Any, box: tuple[int, int, int, int], width: int, height: int) -> Image.Image | None:
-    """A base64 PNG probability map of ``box`` → a binary mask of the whole photo (threshold 127)."""
+    """A base64 PNG probability map of ``box`` → a binary mask of the whole photo (threshold 127); ``None``
+    when it does not decode or is a placeholder smaller than :data:`MIN_MASK_SIDE`."""
     if not isinstance(text, str) or not text.strip():
         return None
     payload = text.split(",", 1)[1] if text.startswith("data:") else text
@@ -126,6 +130,8 @@ def decode_png_mask(text: Any, box: tuple[int, int, int, int], width: int, heigh
             source.load()
             probability = source.convert("L")
     except binascii.Error, ValueError, OSError:
+        return None
+    if min(probability.size) < MIN_MASK_SIDE:
         return None
     size = (box[2] - box[0], box[3] - box[1])
     probability = probability.resize(size, Image.Resampling.BICUBIC)
@@ -173,12 +179,23 @@ def _union(masks: list[Image.Image], size: tuple[int, int]) -> Image.Image | Non
     return union
 
 
-def parse(data: dict[str, Any], width: int, height: int) -> dict[str, Any]:
-    """The structured answer → :class:`.ports.Segmentation` fields (no token counts)."""
+def box_mask(box: tuple[int, int, int, int], width: int, height: int) -> Image.Image:
+    mask = Image.new("L", (width, height), 0)
+    ImageDraw.Draw(mask).rectangle([box[0], box[1], box[2] - 1, box[3] - 1], fill=255)
+    return mask
+
+
+def parse(data: dict[str, Any], width: int, height: int, *, require_mask: bool = True) -> dict[str, Any]:
+    """The structured answer → :class:`.ports.Segmentation` fields (no token counts). Without
+    ``require_mask`` a product whose mask does not decode keeps its box (``exact=False``)."""
     product = data.get("product")
     if product is None:
         raise NoProduct("segmentation: no product in the photo")
     mask = region_mask(product, width, height)
+    exact = mask is not None
+    if mask is None and not require_mask and isinstance(product, dict):
+        box = box_pixels(product.get("box_2d"), width, height)
+        mask = box_mask(box, width, height) if box is not None else None
     if mask is None:
         raise LLMBadOutput("segmentation: the product mask does not decode")
     box = mask.getbbox()
@@ -199,14 +216,19 @@ def parse(data: dict[str, Any], width: int, height: int) -> dict[str, Any]:
         "covered_percent": float(covered) if isinstance(covered, int | float) else 0.0,
         "cut_off": bool(data.get("product_cut_off")),
         "background": background if background in BACKGROUNDS else "other",
+        "exact": exact,
     }
 
 
 class GeminiJsonSegmenter:
+    """``require_mask=False``: the analyst role of :class:`.combined.CombinedSegmenter` (box, hands and
+    flags; the pixel mask comes from a cutter)."""
+
     name = "gemini_json"
 
-    def __init__(self, content_model: ContentModel) -> None:
+    def __init__(self, content_model: ContentModel, *, require_mask: bool = True) -> None:
         self._model = content_model
+        self._require_mask = require_mask
 
     def segment(self, request: SegmentationRequest, *, api_key: Secret) -> Segmentation:
         result = self._model.generate(
@@ -224,7 +246,7 @@ class GeminiJsonSegmenter:
             api_key=api_key,
         )
         try:
-            fields = parse(result.data, request.width, request.height)
+            fields = parse(result.data, request.width, request.height, require_mask=self._require_mask)
         except LLMError as exc:
             exc.input_tokens, exc.output_tokens = result.input_tokens, result.output_tokens
             raise
