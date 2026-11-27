@@ -111,10 +111,29 @@ class CashbackPolicySerializer(serializers.Serializer[dict[str, Any]]):
     next_effective_from = serializers.DateTimeField()
 
 
+IMMEDIATELY = "now"
+
+
+@extend_schema_field(
+    {
+        "oneOf": [{"type": "string", "format": "date-time"}, {"type": "string", "enum": [IMMEDIATELY]}],
+        "description": 'An aware ISO datetime in the future, or "now": the rules apply at once (the server '
+        "starts them a second after it saves them).",
+    }
+)
+class PolicyStartField(AwareDateTimeField):
+    """``effective_from``: a future aware datetime, or ``"now"`` (→ ``None``, «darhol»)."""
+
+    def to_internal_value(self, value: Any) -> Any:
+        if value == IMMEDIATELY:
+            return None
+        return super().to_internal_value(value)
+
+
 class PolicyVersionCreateSerializer(serializers.Serializer[dict[str, Any]]):
     """``POST cashback/policy-versions/`` body; the §2.7 rules run in ``create_policy_version``."""
 
-    effective_from = AwareDateTimeField()
+    effective_from = PolicyStartField()
     basis = serializers.ChoiceField(choices=enums.RateBasis.values)
     earn_on_cashback_paid = serializers.BooleanField()
     tiers = TierListField(child=CashbackTierInputSerializer())

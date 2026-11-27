@@ -32,7 +32,7 @@ import logging
 import secrets
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -1285,7 +1285,10 @@ def _audit_policy_created(
     author: StaffUser | None,
     superseded_version: int | None,
     request: Any,
+    *,
+    immediately: bool = False,
 ) -> None:
+    extra = {"immediately": True} if immediately else {}
     audit.record(
         action="cashback.policy_version_created",
         entity_type=AUDIT_POLICY_ENTITY,
@@ -1302,12 +1305,16 @@ def _audit_policy_created(
                 for t in sorted(tiers, key=lambda t: t.from_amount)
             ],
             "superseded_version": superseded_version,
+            **extra,
         },
     )
 
 
+IMMEDIATE_START = timedelta(seconds=1)  # «darhol»: after the version's own created_at (the DB check)
+
+
 def create_policy_version(
-    effective_from: datetime,
+    effective_from: datetime | None,
     basis: str,
     earn_on_cashback_paid: bool,
     tiers: Sequence[TierBand],
@@ -1319,14 +1326,19 @@ def create_policy_version(
 
     ``now`` is evaluated once, used for the ``effective_from_in_past`` check and stored as ``created_at`` so
     the DB check ``effective_from > created_at`` is the same comparison (a residual ``IntegrityError`` from
-    clock skew maps to the same field error). A version that was ``scheduled`` becomes ``superseded`` by
+    clock skew maps to the same field error). ``effective_from=None`` («darhol», the API's ``"now"``) starts
+    the version :data:`IMMEDIATE_START` after that ``now``, so both checks hold and it is in force at once.
+    A version that was ``scheduled`` becomes ``superseded`` by
     the derivation rule (audit ``cashback.policy_version_superseded``); the new one is audited as
     ``cashback.policy_version_created``.
     """
     if basis not in enums.RateBasis.values:
         raise ValueError(f"Unknown rate basis {basis!r}")
-    _aware(effective_from, "effective_from")
     now = timeutils.now()
+    immediately = effective_from is None
+    if effective_from is None:
+        effective_from = now + IMMEDIATE_START
+    _aware(effective_from, "effective_from")
     warnings = validate_policy_version(effective_from, tiers, now=now)
     author = _staff(author_id)
     ordered = sorted(tiers, key=lambda t: t.from_amount)
@@ -1363,7 +1375,7 @@ def create_policy_version(
             for tier in ordered
         )
         superseded_version = None if previously_scheduled is None else previously_scheduled.version
-        _audit_policy_created(policy, ordered, author, superseded_version, request)
+        _audit_policy_created(policy, ordered, author, superseded_version, request, immediately=immediately)
         if previously_scheduled is not None:
             audit.record(
                 action="cashback.policy_version_superseded",

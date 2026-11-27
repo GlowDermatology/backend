@@ -28093,8 +28093,14 @@ components:
         ``create_policy_version``.'
       properties:
         effective_from:
-          type: string
-          format: date-time
+          oneOf:
+          - type: string
+            format: date-time
+          - type: string
+            enum:
+            - now
+          description: 'An aware ISO datetime in the future, or "now": the rules apply
+            at once (the server starts them a second after it saves them).'
         basis:
           $ref: '#/components/schemas/RateBasisEnum'
         earn_on_cashback_paid:

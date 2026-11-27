@@ -416,3 +416,48 @@ def test_create_field_errors(
     assert response.status_code == 400, response.data
     assert response.data["message"] == FIELDS
     assert [(field, code) for field, code, _ in errors(response)] == expected
+
+
+# --- «darhol» and a custom start ----------------------------------------------------------------------------
+
+
+def test_now_starts_the_rules_at_once(
+    staff_client: APIClient, staff: StaffUser, seeded: StaffUser, clock: Callable[[datetime], None]
+) -> None:
+    response = post(staff_client, body(tier(0, None, "4.00"), effective_from="now"))
+    assert response.status_code == 201, response.data
+    version = response.json()["version"]
+    # A second after it was saved: the past-date rule and the DB check (start > created_at) both hold.
+    assert version["created_at"] == "2026-10-24T12:05:00+05:00"
+    assert version["effective_from"] == "2026-10-24T12:05:01+05:00"
+    created = AuditEntry.objects.get(action="cashback.policy_version_created")
+    assert created.after is not None and created.after["immediately"] is True
+    assert created.after["effective_from"] == "2026-10-24T12:05:01+05:00"
+    clock(datetime.fromisoformat("2026-10-24T12:05:01+05:00"))
+    policy = client_now(staff).get(POLICY_URL).json()
+    assert policy["active"]["version"] == 4 and policy["scheduled"] is None
+    assert policy["versions"][1]["version"] == 3 and policy["versions"][1]["state"] == "expired"
+
+
+def test_now_replaces_a_scheduled_version(staff_client: APIClient, seeded: StaffUser) -> None:
+    assert post(staff_client, body(tier(0, None, "1.00"))).status_code == 201  # v4 on 1 November
+    response = post(staff_client, body(tier(0, None, "2.00"), effective_from="now"))
+    assert response.status_code == 201, response.data
+    assert response.json()["superseded_version"] == 4  # created before v4 started: v4 never applies
+
+
+def test_a_custom_start_in_the_same_day(staff_client: APIClient, seeded: StaffUser) -> None:
+    response = post(staff_client, body(tier(0, None, "2.50"), effective_from="2026-10-24T18:30:00+05:00"))
+    assert response.status_code == 201, response.data
+    assert response.json()["version"]["effective_from"] == "2026-10-24T18:30:00+05:00"
+    assert response.json()["version"]["state"] == "scheduled"
+    created = AuditEntry.objects.get(action="cashback.policy_version_created")
+    assert created.after is not None and "immediately" not in created.after
+
+
+@pytest.mark.parametrize("value", ["NOW", "now ", "immediately", "", "2026-10-24T12:00:00+05:00"])
+def test_only_now_or_a_future_moment(staff_client: APIClient, seeded: StaffUser, value: str) -> None:
+    response = post(staff_client, body(tier(0, None, "1.00"), effective_from=value))
+    assert response.status_code == 400, response.data
+    assert [e["field"] for e in response.data["errors"]] == ["effective_from"]
+    assert not CashbackPolicy.objects.filter(version=4).exists()
