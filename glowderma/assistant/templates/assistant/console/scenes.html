@@ -34,7 +34,7 @@
             <tbody>
             {% for template in templates %}
                 <tr>
-                    <td>{% if template.preview %}<img src="{{ template.preview_url }}" alt="" width="48" height="60" style="border-radius:4px;object-fit:cover">{% else %}<span class="gd-ai-muted">—</span>{% endif %}</td>
+                    <td>{% if template.preview %}<img src="{% url 'admin:assistant_scene_template_preview' template.pk %}?v={{ template.preview.name|slugify }}" alt="" width="48" height="60" style="border-radius:4px;object-fit:cover">{% else %}<span class="gd-ai-muted">—</span>{% endif %}</td>
                     <td><a class="gd-ai-link" href="{% url 'admin:assistant_scene_template' template.pk %}">{{ template.name_uz }}</a>{% if template.created_by_id %} <span class="gd-ai-muted">· {% translate "xodim saqlagan" %}</span>{% endif %}</td>
                     <td>{{ template.get_kind_display }}</td>
                     <td>{% if template.enabled %}{% translate "Ha" %}{% else %}{% translate "Yo‘q" %}{% endif %}</td>

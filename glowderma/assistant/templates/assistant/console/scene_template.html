@@ -6,7 +6,7 @@
     <h2 id="ai-scene-template-title" class="gd-ai-card__title">{{ row.name_uz }} · <code>{{ row.key }}</code> · {{ row.get_kind_display }}</h2>
     <div class="gd-ai-preview" data-testid="ai-scene-template-preview">
         {% if row.preview %}
-            <img src="{{ row.preview_url }}" alt="{% translate 'Namuna rasmi' %}" width="240" height="300" style="border-radius:8px;object-fit:cover">
+            <img src="{% url 'admin:assistant_scene_template_preview' row.pk %}?v={{ row.preview.name|slugify }}" alt="{% translate 'Namuna rasmi' %}" width="240" height="300" style="border-radius:8px;object-fit:cover">
         {% else %}
             <p class="gd-ai-muted">{% translate "Namuna hali yo‘q: xodimlar shablonni faqat nomidan taniydi." %}</p>
         {% endif %}

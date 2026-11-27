@@ -17,6 +17,7 @@ image model may fill them (AI templates only) and the result records exactly whe
 from __future__ import annotations
 
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from decimal import Decimal
 from io import BytesIO
@@ -509,9 +510,23 @@ def custom_scene(text: str, providers: Providers, config: Config, usage: Usage) 
     scene = " ".join(str(answer.data.get("scene") or "").split())
     if answer.data.get("refused") or not scene:
         raise SceneError(CUSTOM_REFUSED, str(answer.data.get("reason") or "refused")[:120], usage=usage)
-    if not scene.isascii():
+    plain = _plain_english(scene)
+    if plain is None:
         raise LLMBadOutput("the custom scene is not in English")
-    return scene
+    return plain
+
+
+_TYPOGRAPHY = str.maketrans({"‘": "'", "’": "'", "“": '"', "”": '"', "–": "-", "—": "-", "…": "..."})
+
+
+def _plain_english(text: str) -> str | None:
+    """Typographic marks made plain and accents dropped («café» → «cafe»); ``None`` when letters of
+    another script remain (an answer left untranslated)."""
+    folded = unicodedata.normalize("NFKD", text.translate(_TYPOGRAPHY))
+    plain = "".join(char for char in folded if not unicodedata.combining(char))
+    if any(char.isalpha() and not char.isascii() for char in plain):
+        return None
+    return "".join(char for char in plain if char.isascii())
 
 
 PREVIEW_BACKGROUND = (128, 128, 128)  # under a cut-out's soft edge: no dark fringe

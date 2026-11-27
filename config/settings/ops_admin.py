@@ -309,5 +309,10 @@ UNFOLD: dict[str, Any] = {
         ("ai/jobs/<int:pk>/", "assistant_job", f"{AI_VIEWS}.JobView"),
         ("ai/scenes/", "assistant_scenes", f"{AI_VIEWS}.ScenesView"),
         ("ai/scenes/templates/<int:pk>/", "assistant_scene_template", f"{AI_VIEWS}.SceneTemplateView"),
+        (
+            "ai/scenes/templates/<int:pk>/preview/",
+            "assistant_scene_template_preview",
+            f"{AI_VIEWS}.SceneTemplatePreviewView",
+        ),
     ],
 }

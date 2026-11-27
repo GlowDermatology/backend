@@ -19,8 +19,9 @@ from glowderma.assistant.tests.test_console import superuser_client
 from glowderma.assistant.tests.test_scene_jobs import ADMIN, run_and_poll, saved_image, start, template
 from glowderma.core import enums
 from glowderma.core.models import AuditEntry
-from glowderma.integrations.llm.ports import GenerationResult, LLMUnavailable
+from glowderma.integrations.llm.ports import GenerationResult, LLMBadOutput, LLMUnavailable
 from glowderma.integrations.llm.registry import fake_content_model, fake_image_model
+from glowderma.integrations.secret import Secret
 from glowderma.integrations.segmentation.registry import fake_segmenter
 
 pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("clean_fakes")]
@@ -252,3 +253,44 @@ def test_the_console_makes_the_missing_previews(su: Client) -> None:
     clicked = su.post(reverse("admin:assistant_scene_template", args=[marble.pk]), {"action": "preview"})
     assert clicked.status_code == 302
     assert SceneJob.objects.filter(kind=enums.SceneJobKind.PREVIEW, template=marble).count() == 1
+
+
+@pytest.mark.parametrize(
+    ("answer", "kept"),
+    [
+        ("A café table, the light’s warm — calm…", "A cafe table, the light's warm - calm..."),
+        ("Soft “golden” light on marble.", 'Soft "golden" light on marble.'),
+    ],
+)
+def test_a_translation_with_typography_is_kept_plain(answer: str, kept: str) -> None:
+    content = fake_content_model()
+    content.push(translation(answer))
+    used = pipeline.Providers(
+        segmenter=fake_segmenter(), image_model=fake_image_model(), content_model=content, api_key=Secret("k")
+    )
+    assert pipeline.custom_scene("anything", used, pipeline.Config(), pipeline.Usage()) == kept
+
+
+def test_an_untranslated_answer_fails() -> None:
+    content = fake_content_model()
+    content.push(translation("На мраморе с розами"))
+    used = pipeline.Providers(
+        segmenter=fake_segmenter(), image_model=fake_image_model(), content_model=content, api_key=Secret("k")
+    )
+    with pytest.raises(LLMBadOutput):
+        pipeline.custom_scene("на мраморе", used, pipeline.Config(), pipeline.Usage())
+
+
+def test_the_console_serves_previews_from_its_own_origin(su: Client) -> None:
+    """The console's CSP allows images from itself only: its pages point at its own preview route."""
+    ivory = template("studio-ivory")
+    url = reverse("admin:assistant_scene_template_preview", args=[ivory.pk])
+    assert su.get(url).status_code == 404  # no picture yet
+    su.post(reverse("admin:assistant_scene_template", args=[ivory.pk]), {"action": "preview"})
+    picture = su.get(url)
+    assert picture.status_code == 200 and picture["Content-Type"] == "image/webp"
+    assert b"".join(picture.streaming_content)[:4] == b"RIFF"
+    page = su.get(reverse("admin:assistant_scene_template", args=[ivory.pk])).content.decode()
+    assert f'src="{url}?v=' in page and "http" not in page.split(f'src="{url}')[0][-12:]
+    listing = su.get(reverse("admin:assistant_scenes")).content.decode()
+    assert f'src="{url}?v=' in listing

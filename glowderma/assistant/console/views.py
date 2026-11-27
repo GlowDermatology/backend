@@ -21,7 +21,7 @@ from django.conf import settings as django_settings
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.http import Http404, HttpRequest, HttpResponse, HttpResponseRedirect
+from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
 from django.utils.decorators import method_decorator
@@ -706,6 +706,22 @@ class ScenesView(ConsolePage):
             spent_month=scene_services.spent_this_month(),
             recent=recent,
         )
+
+
+class SceneTemplatePreviewView(ConsolePage):
+    """A template's sample picture, served by the console itself: the console's Content-Security-Policy
+    allows images from its own origin only (``img-src 'self'``), and media live on the site's domain."""
+
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, pk: int) -> HttpResponse:
+        row = SceneTemplate.objects.filter(pk=pk).first()
+        if row is None or not row.preview:
+            raise Http404
+        response = FileResponse(row.preview.open("rb"), content_type="image/webp")
+        # The name is content-hashed (a new picture is a new name): cacheable, privately (staff only).
+        response["Cache-Control"] = "private, max-age=86400"
+        return response
 
 
 class SceneTemplateView(ConsolePage):
