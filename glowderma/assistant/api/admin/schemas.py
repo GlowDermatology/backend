@@ -96,7 +96,8 @@ SCENE_JOB_START_POST = extend_schema(
         "its 4:5 and square crops (`fit`). 202 with a new job, 200 with the image's queued/running job. The "
         "product itself is never redrawn: the photo's own pixels are pasted back. Refusals (as the job's "
         "`error.code`): `scene_product_cut_off`, `scene_hand_covers_product`, `scene_occlusion_needs_ai`, "
-        "`scene_occlusion_not_fillable`, `scene_no_product`, `scene_mask_unusable`, `scene_product_drift`, `scene_result_rejected`."
+        "`scene_occlusion_not_fillable`, `scene_no_product`, `scene_mask_unusable`, `scene_product_drift`, "
+        "`scene_result_rejected`."
     ),
     request=SceneJobCreateSerializer,
     responses={200: SceneJobSerializer, 202: SceneJobSerializer, **ADMIN_ERRORS},
