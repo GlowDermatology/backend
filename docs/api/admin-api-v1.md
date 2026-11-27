@@ -830,7 +830,7 @@ e-mail (the phone stays, A1).
  "next_effective_from": "2026-11-01T00:00:00+05:00"}     // start of the next Tashkent calendar month
 ```
 
-**`POST cashback/policy-versions/`** (I). Body `{"effective_from": datetime | "now", "basis": RateBasis, "earn_on_cashback_paid": bool, "tiers": [{"from": int ≥0, "to": int|null, "percent": str}]}`. `"now"` (exactly that string) applies the rules at once: the server sets `effective_from` one second after the version's `created_at` (so both the past-date rule and the `effective_from > created_at` check hold) and the audit entry carries `"immediately": true`. Any future moment may be given (not only month starts; `next_effective_from` is a suggestion).
+**`POST cashback/policy-versions/`** (I). Body `{"effective_from": datetime | "now", "basis": RateBasis, "earn_on_cashback_paid": bool, "tiers": [{"from": int ≥0, "to": int|null, "percent": str}]}`. `"now"` (exactly that string) applies the rules at once: the server sets `effective_from` one microsecond after the version's `created_at` (shown as the same second; any read after the save finds it `active`) (so both the past-date rule and the `effective_from > created_at` check hold) and the audit entry carries `"immediately": true`. Any future moment may be given (not only month starts; `next_effective_from` is a suggestion).
 
 | Rule | Field / code / message | Top-level `message` |
 |---|---|---|

@@ -28100,7 +28100,7 @@ components:
             enum:
             - now
           description: 'An aware ISO datetime in the future, or "now": the rules apply
-            at once (the server starts them a second after it saves them).'
+            at once (the server starts them a microsecond after it saves them).'
         basis:
           $ref: '#/components/schemas/RateBasisEnum'
         earn_on_cashback_paid:

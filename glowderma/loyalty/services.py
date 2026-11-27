@@ -1310,7 +1310,9 @@ def _audit_policy_created(
     )
 
 
-IMMEDIATE_START = timedelta(seconds=1)  # «darhol»: after the version's own created_at (the DB check)
+# «darhol»: just after the version's own created_at (the DB check), so every later read, the save's own
+# answer included, finds it in force (the API shows whole seconds: start and creation read the same)
+IMMEDIATE_START = timedelta(microseconds=1)
 
 
 def create_policy_version(

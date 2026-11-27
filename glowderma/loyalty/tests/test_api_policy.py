@@ -18,6 +18,7 @@ from glowderma.accounts.models import StaffUser
 from glowderma.core import seeding, timeutils
 from glowderma.core.models import AuditEntry
 from glowderma.core.seeding import SeedContext
+from glowderma.loyalty import services
 from glowderma.loyalty.models import CashbackPolicy, CashbackTier
 from glowderma.loyalty.seeds import seed_loyalty
 
@@ -427,13 +428,15 @@ def test_now_starts_the_rules_at_once(
     response = post(staff_client, body(tier(0, None, "4.00"), effective_from="now"))
     assert response.status_code == 201, response.data
     version = response.json()["version"]
-    # A second after it was saved: the past-date rule and the DB check (start > created_at) both hold.
-    assert version["created_at"] == "2026-10-24T12:05:00+05:00"
-    assert version["effective_from"] == "2026-10-24T12:05:01+05:00"
+    # Just after it was saved (a microsecond: the API shows whole seconds): the past-date rule and the
+    # DB check (start > created_at) both hold.
+    assert version["created_at"] == version["effective_from"] == "2026-10-24T12:05:00+05:00"
+    row = CashbackPolicy.objects.get(version=4)
+    assert row.effective_from - row.created_at == services.IMMEDIATE_START
     created = AuditEntry.objects.get(action="cashback.policy_version_created")
     assert created.after is not None and created.after["immediately"] is True
-    assert created.after["effective_from"] == "2026-10-24T12:05:01+05:00"
-    clock(datetime.fromisoformat("2026-10-24T12:05:01+05:00"))
+    # Any later read finds it in force (the frozen test clock moves on by a moment).
+    clock(datetime.fromisoformat("2026-10-24T12:05:00.000002+05:00"))
     policy = client_now(staff).get(POLICY_URL).json()
     assert policy["active"]["version"] == 4 and policy["scheduled"] is None
     assert policy["versions"][1]["version"] == 3 and policy["versions"][1]["state"] == "expired"

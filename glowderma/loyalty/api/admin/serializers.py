@@ -118,7 +118,7 @@ IMMEDIATELY = "now"
     {
         "oneOf": [{"type": "string", "format": "date-time"}, {"type": "string", "enum": [IMMEDIATELY]}],
         "description": 'An aware ISO datetime in the future, or "now": the rules apply at once (the server '
-        "starts them a second after it saves them).",
+        "starts them a microsecond after it saves them).",
     }
 )
 class PolicyStartField(AwareDateTimeField):

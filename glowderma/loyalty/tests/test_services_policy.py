@@ -317,3 +317,17 @@ def test_versions_only_grow_and_the_service_exports_the_policy_reads() -> None:
     assert enums.PolicyVersionState.SUPERSEDED == CashbackPolicy.objects.with_derived().get(
         version=4
     ).state_at(NOW)
+
+
+def test_an_immediate_version_is_in_force_as_soon_as_it_is_saved() -> None:
+    """Real clock, real database: «darhol» is active for the very next read (purchases earn by it)."""
+    author = StaffUserFactory.create()
+    result = services.create_policy_version(
+        None, enums.RateBasis.BEFORE_PURCHASE, False, [TierBand(0, None, Decimal("5.00"))], author.pk
+    )
+    policy = CashbackPolicy.objects.get(version=result.version)
+    assert policy.effective_from - policy.created_at == services.IMMEDIATE_START
+    active = selectors.active_policy()
+    assert active is not None and active.version == result.version
+    entry = AuditEntry.objects.get(action="cashback.policy_version_created", entity_id=str(result.version))
+    assert entry.after is not None and entry.after["immediately"] is True
