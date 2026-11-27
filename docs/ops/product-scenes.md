@@ -54,6 +54,23 @@ Live on the owner's photos (Bria cut-out, Bria scene, Gemini QA): 3 of 4 accepte
 product interior identical in all; the QA check refused one with an extra bottle in the scene. A jar keeps a
 faint pink fringe where the cut-out met the fingers. Gemini has not been compared yet (no billing).
 
+## Template previews, typed scenes and saved templates
+
+- **Previews.** Every template card in the scene dialog shows a 4:5 sample picture. It is the bundled sample
+  product (`assistant/scenes/assets/sample-product.webp`, the owner's green bottle, cut out once) placed in the
+  scene. Studio previews are drawn at once and for free, and redrawn when the colours change. AI previews cost
+  one image call each (Bria: $0.032), are made only when someone presses **Namuna yaratish** (or **Yo‘q
+  namunalarni yaratish** on the scenes page), run as jobs of kind `preview` (in the budget, one at a time, one
+  pending per template), and are cleared when the prompt changes. A failed preview shows its reason on the
+  template page.
+- **Typed scenes.** In the AI tab staff can pick **O‘z sahnasi** and describe the scene in any language (at most
+  400 characters). The worker turns it into an English scene description with the analyst model (one cheap text
+  call) and refuses one that asks for people, hands, text or brands (`scene_custom_refused`). Everything else is
+  as for a template: the product rule, the checks, the budget.
+- **Saved templates.** A finished typed scene can be saved as a template for everyone (**Shablon sifatida
+  saqlash**, a name). It gets the English description, goes last in the list, and its preview is the scene the
+  staff member made. The console marks it "xodim saqlagan"; edit or switch it off there like any template.
+
 ## What it does
 
 Staff photograph products on a phone, often in an office and sometimes holding the product. The pipeline builds a clean scene around the product. The product itself is never redrawn.

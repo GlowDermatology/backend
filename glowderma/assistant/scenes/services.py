@@ -15,16 +15,21 @@ daily limit are the scenes' own (``SceneSettings``), apart from the text assista
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
+from functools import cache
+from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
 from django.db.models import Q, Sum
+from PIL import Image
 from rest_framework import exceptions as drf_exceptions
 from rest_framework.exceptions import NotFound, ValidationError
 
@@ -37,7 +42,7 @@ from glowderma.assistant.models import (
     SceneSettings,
     SceneTemplate,
 )
-from glowderma.assistant.scenes import pipeline
+from glowderma.assistant.scenes import pipeline, prompts
 from glowderma.assistant.scenes.templates import Template
 from glowderma.catalog import services as catalog_services
 from glowderma.catalog.models import ProductImage
@@ -56,6 +61,11 @@ STALE_AFTER = timedelta(minutes=6)  # longer than the task's hard limit (tasks.S
 # a queued job may wait behind another one (one scene at a time): it is lost only after this
 QUEUED_STALE_AFTER = timedelta(minutes=30)
 FAKE_KEY = "fake-key"
+SAMPLE_PRODUCT = Path(__file__).with_name("assets") / "sample-product.webp"  # the owner's own product
+PREVIEW_WIDTH = 600  # the template card's sample picture (4:5)
+CUSTOM_KEY = "custom"
+CUSTOM_NAMES = {"uz": "O‘z sahnasi", "ru": "Своя сцена", "en": "Custom scene"}
+TEMPLATE_NAME_MAX = 60
 COST_QUANT = Decimal("0.000001")
 SERVER_ERROR = "server_error"
 WORKER_LOST = "worker_lost"
@@ -75,6 +85,14 @@ ERROR_MESSAGES: dict[str, str] = {
         "Qo‘l mahsulotning bir qismini yopib turibdi: Bria sahnasi faqat fonni chizadi va yopilgan joyni "
         "to‘ldira olmaydi. Rasmni qayta oling."
     ),
+    pipeline.CUSTOM_REFUSED: N_(
+        "Bu tavsif bo‘yicha sahna yaratib bo‘lmaydi: unda odamlar, qo‘llar, yozuv yoki brend bo‘lmasligi "
+        "kerak. Faqat fon va atrofni tasvirlang."
+    ),
+    "scene_not_custom": N_("Faqat o‘zingiz yozgan, tayyor sahnani shablon sifatida saqlash mumkin."),
+    "scene_template_exists": N_("Bu sahna allaqachon shablon sifatida saqlangan."),
+    "scene_template_name": N_("Shablon nomini yozing."),
+    "scene_custom_text": N_("Sahnani tasvirlang (ko‘pi bilan 400 belgi)."),
     pipeline.PRODUCT_CUT_OFF: N_(
         "Mahsulot rasmga to‘liq sig‘magan: rasmni mahsulot to‘liq ko‘rinadigan qilib oling."
     ),
@@ -124,6 +142,16 @@ class SceneBusy(Exception):
 class SceneNotReviewable(Conflict):
     default_code = "scene_job_not_ready"
     default_detail = N_("Bu natija hali tayyor emas yoki allaqachon ko‘rib chiqilgan.")
+
+
+class SceneNotCustom(Conflict):
+    default_code = "scene_not_custom"
+    default_detail = ERROR_MESSAGES["scene_not_custom"]
+
+
+class SceneTemplateExists(Conflict):
+    default_code = "scene_template_exists"
+    default_detail = ERROR_MESSAGES["scene_template_exists"]
 
 
 class SceneSourceChanged(Conflict):
@@ -204,18 +232,52 @@ def _template_snapshot(template: SceneTemplate) -> dict[str, Any]:
     }
 
 
+def _custom_snapshot(text: str) -> dict[str, Any]:
+    """A scene staff typed: translated to English by the worker (``prompt`` is filled then)."""
+    return {
+        "key": CUSTOM_KEY,
+        "kind": enums.SceneTemplateKind.AI_SCENE,
+        "name": dict(CUSTOM_NAMES),
+        "params": {},
+        "prompt": "",
+        "custom_text": text,
+    }
+
+
 def start_job(
-    product_id: int, image_id: int, *, kind: str, template_id: int | None, actor: Any
+    product_id: int,
+    image_id: int,
+    *,
+    kind: str,
+    template_id: int | None,
+    actor: Any,
+    custom_prompt: str = "",
 ) -> StartResult:
-    """Queue a scene / fit job on a saved image, or return the image's active job (``created=False``)."""
+    """Queue a scene / fit job on a saved image, or return the image's active job (``created=False``).
+
+    An AI scene takes a template or ``custom_prompt`` (a scene staff typed, any language)."""
     row = get_settings()
     if not row.enabled:
         raise ScenesDisabled()
     image = ProductImage.objects.filter(pk=image_id, product_id=product_id).first()
     if image is None:
         raise NotFound
+    if kind == enums.SceneJobKind.PREVIEW:  # the console's, never staff's
+        raise ValidationError(
+            {"kind": [field_error("invalid", ERROR_MESSAGES["scene_template_unavailable"])]}
+        )
     template: SceneTemplate | None = None
-    if kind != enums.SceneJobKind.FIT:
+    snapshot: dict[str, Any] = {}
+    custom = " ".join(custom_prompt.split())
+    if kind != enums.SceneJobKind.FIT and custom:
+        if kind != enums.SceneJobKind.AI_SCENE or len(custom) > prompts.CUSTOM_MAX_CHARS:
+            raise ValidationError(
+                {"custom_prompt": [field_error("invalid", ERROR_MESSAGES["scene_custom_text"])]}
+            )
+        if not row.ai_enabled:
+            raise AiScenesDisabled()
+        snapshot = _custom_snapshot(custom)
+    elif kind != enums.SceneJobKind.FIT:
         template = SceneTemplate.objects.filter(pk=template_id, enabled=True).first() if template_id else None
         if template is None or template.kind != kind:
             raise ValidationError(
@@ -223,6 +285,7 @@ def start_job(
             )
         if kind == enums.SceneJobKind.AI_SCENE and not row.ai_enabled:
             raise AiScenesDisabled()
+        snapshot = _template_snapshot(template)
     active = _active(image.pk)
     if active is not None:
         return StartResult(job=active, created=False)
@@ -238,7 +301,7 @@ def start_job(
                 source_sha256=image.sha256,
                 kind=kind,
                 template=template,
-                template_snapshot=_template_snapshot(template) if template is not None else {},
+                template_snapshot=snapshot,
                 created_by=actor,
             )
             outbox.enqueue(
@@ -410,6 +473,8 @@ def run(job_id: int) -> SceneJob | None:
     job = claim(job_id)
     if job is None:
         return None
+    if job.kind == enums.SceneJobKind.PREVIEW:
+        return _run_preview(job)
     image = ProductImage.objects.filter(pk=job.source_image_id).first() if job.source_image_id else None
     if image is None or image.sha256 != job.source_sha256:
         return fail(job, "scene_source_changed")
@@ -436,7 +501,12 @@ def run(job_id: int) -> SceneJob | None:
                 cost_usd=_cost(row, usage),
                 expires_at=timeutils.now() + timedelta(hours=row.candidate_ttl_hours),
             )
-        template = template_of(job.template_snapshot)
+        snapshot = dict(job.template_snapshot or {})
+        if snapshot.get("custom_text") and not snapshot.get("prompt"):
+            # translated once; kept on the job, so a retry and «save as template» reuse it
+            snapshot["prompt"] = pipeline.custom_scene(str(snapshot["custom_text"]), used, config, usage)
+            SceneJob.objects.filter(pk=job.pk).update(template_snapshot=snapshot)
+        template = template_of(snapshot)
         analysis, result = pipeline.run(photo, template, used, config, usage)
     except pipeline.SceneError as exc:
         return fail(job, exc.code, usage=exc.usage or usage)
@@ -486,6 +556,212 @@ def renditions_crop(box: compose.Box, width: int, height: int) -> tuple[float, f
         round((box[2] - box[0]) / width, 5),
         round((box[3] - box[1]) / height, 5),
     )
+
+
+# --- template previews --------------------------------------------------------------------------------------
+
+
+@cache
+def _sample_bytes() -> bytes:
+    return SAMPLE_PRODUCT.read_bytes()
+
+
+def sample_product() -> Image.Image:
+    with Image.open(BytesIO(_sample_bytes())) as source:
+        source.load()
+        return source.convert("RGBA")
+
+
+def _preview_content(final: Image.Image, key: str) -> ContentFile[bytes]:
+    picture = final.convert("RGB")
+    if picture.width > PREVIEW_WIDTH:
+        height = round(picture.height * PREVIEW_WIDTH / picture.width)
+        picture = picture.resize((PREVIEW_WIDTH, height), Image.Resampling.LANCZOS)
+    data = compose.encode(picture, "WEBP", 85)
+    return ContentFile(data, name=f"{key}-{hashlib.sha256(data).hexdigest()[:12]}.webp")
+
+
+def _store_preview(template: SceneTemplate, content: ContentFile[bytes] | None) -> None:
+    """Replace (``None``: clear) a template's preview; the old file goes once the transaction commits."""
+    old = str(template.preview.name or "")
+    if content is None:
+        template.preview = ""
+    else:
+        template.preview.save(content.name or "preview.webp", content, save=False)
+    template.save(update_fields=["preview", "updated_at"])
+    if old and old != str(template.preview.name or ""):
+        _delete_later(template.preview.storage, old)
+
+
+def _same_scene(template: SceneTemplate, snapshot: dict[str, Any]) -> bool:
+    return (
+        template.kind == snapshot.get("kind")
+        and template.prompt == (snapshot.get("prompt") or "")
+        and template.params == (snapshot.get("params") or {})
+    )
+
+
+def render_studio_preview(template: SceneTemplate) -> None:
+    """A studio template's preview, composed on our server at once (no provider, no cost)."""
+    result = pipeline.preview(
+        sample_product(),
+        template_of(_template_snapshot(template)),
+        None,
+        config_of(get_settings()),
+        pipeline.Usage(),
+    )
+    _store_preview(template, _preview_content(result.final, template.key))
+
+
+def template_changed(template: SceneTemplate) -> None:
+    """After params or prompt changed: the old preview is wrong. A studio one is redrawn at once; an AI one
+    waits for «Namuna yaratish» (a billed call)."""
+    if template.kind == enums.SceneTemplateKind.STUDIO:
+        render_studio_preview(template)
+    elif template.preview:
+        _store_preview(template, None)
+
+
+def start_preview(template_id: int, *, actor: Any) -> SceneJob | None:
+    """«Namuna yaratish»: a studio preview is drawn now (``None``); an AI one is queued as a job (one at a
+    time per template: a second click returns the pending job), within the scene budget."""
+    row = get_settings()
+    with transaction.atomic():
+        template = SceneTemplate.objects.select_for_update().filter(pk=template_id).first()
+        if template is None:
+            raise NotFound
+        if template.kind == enums.SceneTemplateKind.STUDIO:
+            render_studio_preview(template)
+            return None
+        pending = SceneJob.objects.filter(
+            kind=enums.SceneJobKind.PREVIEW, template=template, state__in=ACTIVE_SCENE_STATES
+        ).first()
+        if pending is not None:
+            return pending
+        if spent_today() >= row.daily_budget_usd or spent_this_month() >= row.monthly_budget_usd:
+            raise SceneBudgetExceeded()
+        job = SceneJob.objects.create(
+            kind=enums.SceneJobKind.PREVIEW,
+            template=template,
+            template_snapshot=_template_snapshot(template),
+            source_sha256="",
+            created_by=actor,
+        )
+        outbox.enqueue(topics.SCENE_QUEUED, {"job_id": job.pk}, dedupe_key=f"{topics.SCENE_QUEUED}:{job.pk}")
+    logger.info("scene preview job %s queued", job.pk)
+    return job
+
+
+def start_missing_previews(*, actor: Any) -> tuple[int, int]:
+    """The console's «Yo‘q namunalarni yaratish»: (studio previews drawn, AI preview jobs queued)."""
+    drawn = queued = 0
+    for template_id, kind in SceneTemplate.objects.filter(preview="").values_list("pk", "kind"):
+        job = start_preview(template_id, actor=actor)
+        if kind == enums.SceneTemplateKind.STUDIO:
+            drawn += 1
+        elif job is not None:
+            queued += 1
+    return drawn, queued
+
+
+def _run_preview(job: SceneJob) -> SceneJob | None:
+    row = get_settings()
+    usage = pipeline.Usage()
+    snapshot = dict(job.template_snapshot or {})
+    try:
+        result = pipeline.preview(
+            sample_product(), template_of(snapshot), providers(row), config_of(row), usage
+        )
+    except pipeline.SceneError as exc:
+        return fail(job, exc.code, usage=exc.usage or usage)
+    except LLMError as exc:
+        return fail(job, exc.code, usage=usage)
+    except VaultError:
+        return fail(job, "vault_unavailable", usage=usage)
+    content = _preview_content(result.final, str(snapshot.get("key") or "preview"))
+    with transaction.atomic():
+        locked = SceneJob.objects.select_for_update().filter(pk=job.pk).first()
+        if locked is None or locked.state != enums.JobState.RUNNING:
+            return None
+        template = (
+            SceneTemplate.objects.select_for_update().filter(pk=locked.template_id).first()
+            if locked.template_id is not None
+            else None
+        )
+        if template is not None and _same_scene(template, snapshot):  # not edited meanwhile
+            _store_preview(template, content)
+        instant = timeutils.now()
+        locked.state = enums.JobState.SUCCEEDED
+        locked.outcome = enums.SceneJobOutcome.ACCEPTED  # nothing to review: never expires
+        locked.warnings = result.warnings
+        locked.usage = _usage_dict(usage)
+        locked.cost_usd = _cost(row, usage)
+        locked.finished_at = instant
+        locked.heartbeat_at = instant
+        locked.reviewed_at = instant
+        locked.save()
+        return locked
+
+
+# --- save a custom scene as a template ----------------------------------------------------------------------
+
+
+def save_as_template(job_id: int, *, name: str, actor: Any, request: Any = None) -> SceneTemplate:
+    """A scene staff typed becomes an AI template for everyone: its English description, named by them, with
+    the scene they got as the card's preview. Allowed while the scene waits for review or after it was
+    accepted; once per job."""
+    clean = " ".join(name.split())[:TEMPLATE_NAME_MAX]
+    if not clean:
+        raise ValidationError({"name": [field_error("required", ERROR_MESSAGES["scene_template_name"])]})
+    with transaction.atomic():
+        job = SceneJob.objects.select_for_update().filter(pk=job_id).first()
+        if job is None:
+            raise NotFound
+        snapshot = dict(job.template_snapshot or {})
+        if (
+            not snapshot.get("custom_text")
+            or not snapshot.get("prompt")
+            or job.state != enums.JobState.SUCCEEDED
+        ):
+            raise SceneNotCustom()
+        key = f"{CUSTOM_KEY}-{job.pk}"
+        if snapshot.get("saved_template_id") or SceneTemplate.objects.filter(key=key).exists():
+            raise SceneTemplateExists()
+        if job.candidate:
+            field = job.candidate
+        elif job.accepted_image_id and (
+            accepted := ProductImage.objects.filter(pk=job.accepted_image_id).first()
+        ):
+            field = accepted.file
+        else:
+            raise SceneNotReviewable()
+        with field.storage.open(str(field.name), "rb") as handle:
+            picture = pipeline.load_photo(bytes(handle.read()))
+        last = SceneTemplate.objects.order_by("-position").values_list("position", flat=True).first() or 0
+        template = SceneTemplate.objects.create(
+            key=key,
+            kind=enums.SceneTemplateKind.AI_SCENE,
+            name_uz=clean,
+            name_ru=clean,
+            name_en=clean,
+            enabled=True,
+            position=last + 1,
+            prompt=str(snapshot["prompt"]),
+            created_by=actor,
+        )
+        _store_preview(template, _preview_content(picture, key))
+        snapshot["saved_template_id"] = template.pk
+        job.template_snapshot = snapshot
+        job.save(update_fields=["template_snapshot", "updated_at"])
+        audit.record(
+            action="assistant.scene_template_created",
+            entity_type="assistant_scene_template",
+            entity_id=template.key,
+            actor=actor,
+            request=request,
+            after={"name": clean, "from_job": job.pk, "prompt": {"length": len(template.prompt)}},
+        )
+    return template
 
 
 # --- review -------------------------------------------------------------------------------------------------

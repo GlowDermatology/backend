@@ -4,6 +4,24 @@
 {% block page %}
 <section class="gd-ai-card" aria-labelledby="ai-scene-template-title">
     <h2 id="ai-scene-template-title" class="gd-ai-card__title">{{ row.name_uz }} · <code>{{ row.key }}</code> · {{ row.get_kind_display }}</h2>
+    <div class="gd-ai-preview" data-testid="ai-scene-template-preview">
+        {% if row.preview %}
+            <img src="{{ row.preview_url }}" alt="{% translate 'Namuna rasmi' %}" width="240" height="300" style="border-radius:8px;object-fit:cover">
+        {% else %}
+            <p class="gd-ai-muted">{% translate "Namuna hali yo‘q: xodimlar shablonni faqat nomidan taniydi." %}</p>
+        {% endif %}
+        {% if preview_job and preview_job.state == 'queued' or preview_job and preview_job.state == 'running' %}
+            <p class="gd-ai-muted">{% translate "Namuna tayyorlanmoqda. Bir ozdan keyin sahifani yangilang." %}</p>
+        {% elif preview_error %}
+            <p class="gd-ai-muted">{% translate "Oxirgi namuna chiqmadi:" %} {{ preview_error }}</p>
+        {% endif %}
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="preview">
+            <button type="submit" class="gd-ai-button">{% translate "Namuna yaratish" %}</button>
+            {% if row.kind == 'ai_scene' %}<span class="gd-ai-muted">{% translate "AI shablon: bitta pullik so‘rov (Bria: $0.032)." %}</span>{% endif %}
+        </form>
+    </div>
     <form method="post" novalidate data-testid="ai-scene-template-form">
         {% csrf_token %}
         {% include "assistant/console/_errors.html" %}

@@ -659,6 +659,8 @@ class ScenesView(ConsolePage):
         return self._render(request, forms.SceneSettingsForm(instance=_scene_row()))
 
     def post(self, request: HttpRequest) -> HttpResponse:
+        if request.POST.get("action") == "missing_previews":
+            return self._missing_previews(request)
         form = forms.SceneSettingsForm(request.POST, instance=_scene_row())
         if not form.is_valid():
             return self._render(request, form, status=400)
@@ -668,6 +670,23 @@ class ScenesView(ConsolePage):
         else:
             writes.update_scene_settings(changes, actor=request.user, request=request)
             messages.success(request, SAVED)
+        return HttpResponseRedirect(reverse("admin:assistant_scenes"))
+
+    def _missing_previews(self, request: HttpRequest) -> HttpResponse:
+        from glowderma.assistant.scenes import services as scene_services
+
+        try:
+            drawn, queued = scene_services.start_missing_previews(actor=request.user)
+        except APIException as exc:  # the scene budget is spent
+            messages.error(request, str(exc.detail))
+        else:
+            messages.success(
+                request,
+                gettext(
+                    "Studiya namunalari chizildi: %(drawn)s. AI namunalari navbatga qo‘yildi: %(queued)s."
+                )
+                % {"drawn": drawn, "queued": queued},
+            )
         return HttpResponseRedirect(reverse("admin:assistant_scenes"))
 
     def _render(self, request: HttpRequest, form: forms.SceneSettingsForm, status: int = 200) -> HttpResponse:
@@ -705,6 +724,8 @@ class SceneTemplateView(ConsolePage):
 
     def post(self, request: HttpRequest, pk: int) -> HttpResponse:
         row = self._template(pk)
+        if request.POST.get("action") == "preview":
+            return self._preview(request, row)
         form = forms.SceneTemplateForm(request.POST, instance=row)
         if not form.is_valid():
             return self._render(request, self._template(pk), form, status=400)
@@ -716,7 +737,41 @@ class SceneTemplateView(ConsolePage):
             messages.success(request, SAVED)
         return HttpResponseRedirect(reverse("admin:assistant_scene_template", args=[pk]))
 
+    def _preview(self, request: HttpRequest, row: SceneTemplate) -> HttpResponse:
+        """«Namuna yaratish»: a studio preview is drawn at once; an AI one is a billed job on the worker."""
+        from glowderma.assistant.scenes import services as scene_services
+
+        try:
+            job = scene_services.start_preview(row.pk, actor=request.user)
+        except APIException as exc:  # the scene budget is spent
+            messages.error(request, str(exc.detail))
+        else:
+            messages.success(
+                request,
+                gettext("Namuna chizildi.")
+                if job is None
+                else gettext("Namuna tayyorlanmoqda (taxminan 30 soniya). Keyin sahifani yangilang."),
+            )
+        return HttpResponseRedirect(reverse("admin:assistant_scene_template", args=[row.pk]))
+
     def _render(
         self, request: HttpRequest, row: SceneTemplate, form: forms.SceneTemplateForm, status: int = 200
     ) -> HttpResponse:
-        return self.page(request, "scene_template.html", status=status, form=form, row=row)
+        from glowderma.assistant.scenes import services as scene_services
+
+        preview_job = (
+            SceneJob.objects.filter(kind=enums.SceneJobKind.PREVIEW, template=row)
+            .order_by("-created_at")
+            .first()
+        )
+        return self.page(
+            request,
+            "scene_template.html",
+            status=status,
+            form=form,
+            row=row,
+            preview_job=preview_job,
+            preview_error=scene_services.message_of(preview_job.error_code)
+            if preview_job is not None and preview_job.error_code
+            else "",
+        )

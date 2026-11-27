@@ -492,6 +492,10 @@ msgstr "An AI scene needs a description."
 msgid "AI sahnasi: faqat fon va atrofdagi narsalar tavsifi (mahsulot haqida yozmang)."
 msgstr "AI scene: describe only the background and the surroundings (not the product)."
 
+#: glowderma/assistant/templates/assistant/console/scene_template.html
+msgid "AI shablon: bitta pullik so‘rov (Bria: $0.032)."
+msgstr "AI template: one paid call (Bria: $0.032)."
+
 #: config/settings/ops_admin.py
 msgid "AI sozlamalari"
 msgstr "AI settings"
@@ -1404,6 +1408,10 @@ msgstr "The customer account with this phone number is not active."
 msgid "Bu rejim faqat boshqaruv konsolida ishlatiladi."
 msgstr "This mode is used only in the ops console."
 
+#: glowderma/assistant/scenes/services.py
+msgid "Bu sahna allaqachon shablon sifatida saqlangan."
+msgstr "This scene is already saved as a template."
+
 #: glowderma/delivery/services.py
 msgid "Bu sana allaqachon kiritilgan."
 msgstr "This date has already been entered."
@@ -1423,6 +1431,10 @@ msgstr "This slug is already taken."
 #: glowderma/assistant/services.py
 msgid "Bu takliflar hali tayyor emas yoki allaqachon ko‘rib chiqilgan."
 msgstr "These suggestions are not ready yet or were already reviewed."
+
+#: glowderma/assistant/scenes/services.py
+msgid "Bu tavsif bo‘yicha sahna yaratib bo‘lmaydi: unda odamlar, qo‘llar, yozuv yoki brend bo‘lmasligi kerak. Faqat fon va atrofni tasvirlang."
+msgstr "A scene can't be made from this description: it must not contain people, hands, text or brands. Describe only the background and surroundings."
 
 #: glowderma/notifications/services/campaigns/common.py
 msgid "Bu test eski matn uchun yuborilgan: qayta test yuboring."
@@ -2094,6 +2106,10 @@ msgstr "Only lowercase Latin letters, digits and hyphens (not digits only)."
 #: glowderma/core/admin_actions.py
 msgid "Faqat menejerlar uchun."
 msgstr "Managers only."
+
+#: glowderma/assistant/scenes/services.py
+msgid "Faqat o‘zingiz yozgan, tayyor sahnani shablon sifatida saqlash mumkin."
+msgstr "Only a finished scene you described yourself can be saved as a template."
 
 #: glowderma/assistant/console/views.py
 msgid "Faqat qoralama versiyani tahrirlash va sinash mumkin."
@@ -3734,9 +3750,18 @@ msgstr "Failed refunds (action required)"
 msgid "Muvofiqlik hisoboti navbatga qo‘yildi. Natija audit jurnalida «report.consistency» bo‘lib chiqadi."
 msgstr "The consistency report has been queued. The result will appear in the audit log as “report.consistency”."
 
+#: glowderma/assistant/templates/assistant/console/scenes.html
 #: glowderma/reporting/templates/reporting/dashboards/money.html
 msgid "Namuna"
 msgstr "Samples"
+
+#: glowderma/assistant/console/views.py
+msgid "Namuna chizildi."
+msgstr "Preview drawn."
+
+#: glowderma/assistant/templates/assistant/console/scene_template.html
+msgid "Namuna hali yo‘q: xodimlar shablonni faqat nomidan taniydi."
+msgstr "No preview yet: staff only see the template's name."
 
 #: glowderma/assistant/console/forms.py
 msgid "Namuna mahsulot (ID)"
@@ -3745,6 +3770,22 @@ msgstr "Sample product (ID)"
 #: glowderma/assistant/templates/assistant/console/prompt_version.html
 msgid "Namuna mahsulotda sinash"
 msgstr "Test on a sample product"
+
+#: glowderma/assistant/templates/assistant/console/scene_template.html
+msgid "Namuna rasmi"
+msgstr "Preview"
+
+#: glowderma/assistant/console/views.py
+msgid "Namuna tayyorlanmoqda (taxminan 30 soniya). Keyin sahifani yangilang."
+msgstr "The preview is being made (about 30 seconds). Then refresh the page."
+
+#: glowderma/assistant/templates/assistant/console/scene_template.html
+msgid "Namuna tayyorlanmoqda. Bir ozdan keyin sahifani yangilang."
+msgstr "The preview is being made. Refresh the page in a moment."
+
+#: glowderma/assistant/templates/assistant/console/scene_template.html
+msgid "Namuna yaratish"
+msgstr "Make preview"
 
 #: admin history (professionals.Service)
 #: glowderma/appointments/admin.py
@@ -4133,6 +4174,10 @@ msgstr "Last success"
 #: glowderma/integrations/admin.py
 msgid "Oxirgi muvaffaqiyatli sinxronlashdan keyingi o‘zgarishlar (delta) Billz’dan olinadi: narxlar va qoldiqlar yangilanadi. Import allaqachon ishlayotgan bo‘lsa, yangisi boshlanmaydi."
 msgstr "Changes since the last successful sync (delta) are fetched from Billz: prices and stock are updated. If an import is already running, a new one is not started."
+
+#: glowderma/assistant/templates/assistant/console/scene_template.html
+msgid "Oxirgi namuna chiqmadi:"
+msgstr "The last preview failed:"
 
 #: glowderma/assistant/templates/assistant/console/provider.html
 #: glowderma/assistant/templates/assistant/console/scenes.html
@@ -4918,6 +4963,10 @@ msgstr "Scenes are switched off."
 msgid "Sahnalar uchun ajratilgan byudjet tugadi. Administratorga murojaat qiling."
 msgstr "The scenes budget is used up. Contact an administrator."
 
+#: glowderma/assistant/scenes/services.py
+msgid "Sahnani tasvirlang (ko‘pi bilan 400 belgi)."
+msgstr "Describe the scene (at most 400 characters)."
+
 #: admin history (professionals.WorkingHoursOverride)
 #: glowderma.core.labels.NOTIFICATION_EXPORT_HEADERS
 msgid "Sana"
@@ -5092,6 +5141,14 @@ msgstr "End session"
 #: glowderma/professionals/api/admin/views/specialists.py
 msgid "Sh"
 msgstr "Sat"
+
+#: model metadata
+msgid "Shablon namunasi"
+msgstr "Template preview"
+
+#: glowderma/assistant/scenes/services.py
+msgid "Shablon nomini yozing."
+msgstr "Enter the template's name."
 
 #: glowderma/notifications/models.py
 msgid "Shablon «%(status)s»: %(text)s"
@@ -5310,6 +5367,14 @@ msgstr "Standard: earliest (minutes)"
 #: model metadata
 msgid "Studiya"
 msgstr "Studio"
+
+#: glowderma/assistant/templates/assistant/console/scenes.html
+msgid "Studiya namunalari bepul; har bir AI namunasi bitta pullik so‘rov."
+msgstr "Studio previews are free; each AI preview is one paid call."
+
+#: glowderma/assistant/console/views.py
+msgid "Studiya namunalari chizildi: %(drawn)s. AI namunalari navbatga qo‘yildi: %(queued)s."
+msgstr "Studio previews drawn: %(drawn)s. AI previews queued: %(queued)s."
 
 #: glowderma/assistant/console/forms.py
 msgid "Studiya sahnalari va ekranlarga moslash admin panelda ko‘rinadi."
@@ -6464,6 +6529,10 @@ msgstr "In transit"
 #: glowderma/reporting/dashboards/ops.py
 msgid "Yo‘q"
 msgstr "No"
+
+#: glowderma/assistant/templates/assistant/console/scenes.html
+msgid "Yo‘q namunalarni yaratish"
+msgstr "Make missing previews"
 
 #: glowderma.core.labels.NOTIFICATION_STATE
 #: model metadata
@@ -7810,6 +7879,10 @@ msgstr "specialists"
 #: model metadata
 msgid "mutlaq muddat"
 msgstr "absolute expiry"
+
+#: model metadata
+msgid "namuna rasmi"
+msgstr "preview"
 
 #: model metadata
 msgid "narx"
@@ -9161,6 +9234,10 @@ msgstr "staff social sign-ins"
 msgid "xodim izohi"
 msgstr "staff note"
 
+#: glowderma/assistant/templates/assistant/console/scenes.html
+msgid "xodim saqlagan"
+msgstr "saved by staff"
+
 #: model metadata
 msgid "xodimlar"
 msgstr "staff members"
@@ -9188,6 +9265,10 @@ msgstr "rotation confirmed"
 #: model metadata
 msgid "yaratgan"
 msgstr "created by"
+
+#: model metadata
+msgid "yaratgan (admin panelda saqlangan)"
+msgstr "created by (saved in the admin panel)"
 
 #: glowderma/core/otp_apps.py
 #: model metadata

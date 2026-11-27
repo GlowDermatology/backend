@@ -38,6 +38,11 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("scenes/jobs/<int:pk>/", views.SceneJobDetailView.as_view(), name="admin-scene-job"),
     path("scenes/jobs/<int:pk>/accept/", views.SceneJobAcceptView.as_view(), name="admin-scene-job-accept"),
     path(
+        "scenes/jobs/<int:pk>/template/",
+        views.SceneJobTemplateView.as_view(),
+        name="admin-scene-job-template",
+    ),
+    path(
         "scenes/jobs/<int:pk>/discard/", views.SceneJobDiscardView.as_view(), name="admin-scene-job-discard"
     ),
 ]

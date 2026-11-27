@@ -56,6 +56,7 @@ MASK_UNUSABLE = "scene_mask_unusable"
 HAND_COVERS_PRODUCT = "scene_hand_covers_product"
 OCCLUSION_NEEDS_AI = "scene_occlusion_needs_ai"
 OCCLUSION_NOT_FILLABLE = "scene_occlusion_not_fillable"  # the AI provider builds only the background
+CUSTOM_REFUSED = "scene_custom_refused"  # a typed scene that asks for people, text, brands…
 PRODUCT_DRIFT = "scene_product_drift"
 RESULT_REJECTED = "scene_result_rejected"
 PRODUCT_CUT_OFF = "scene_product_cut_off"
@@ -483,6 +484,74 @@ def ai_scene(
     error = SceneError(last_error, f"{len(attempts)} attempts rejected", usage=usage)
     error.attempts = attempts  # type: ignore[attr-defined]
     raise error
+
+
+def custom_scene(text: str, providers: Providers, config: Config, usage: Usage) -> str:
+    """A scene staff typed (any language) as a plain English scene description; refused when it asks for
+    what a product photo must not show (people, text, brands)."""
+    typed = " ".join(text.split())[: prompts.CUSTOM_MAX_CHARS]
+    if not typed:
+        raise SceneError(CUSTOM_REFUSED, "empty")
+    answer = providers.content_model.generate(
+        GenerationRequest(
+            model=config.qa_model,
+            system_instruction="You turn shop staff's scene ideas into short English scene descriptions.",
+            prompt=prompts.CUSTOM_PROMPT.format(text=typed),
+            response_schema=prompts.CUSTOM_SCHEMA,
+            temperature=0.2,
+            max_output_tokens=400,
+            timeout_seconds=config.qa_timeout,
+            max_retries=config.max_retries,
+        ),
+        api_key=providers.api_key,
+    )
+    usage.add_text(answer.input_tokens, answer.output_tokens)
+    scene = " ".join(str(answer.data.get("scene") or "").split())
+    if answer.data.get("refused") or not scene:
+        raise SceneError(CUSTOM_REFUSED, str(answer.data.get("reason") or "refused")[:120], usage=usage)
+    if not scene.isascii():
+        raise LLMBadOutput("the custom scene is not in English")
+    return scene
+
+
+PREVIEW_BACKGROUND = (128, 128, 128)  # under a cut-out's soft edge: no dark fringe
+
+
+def analysis_of_cutout(cutout: Image.Image) -> Analysis:
+    """A ready cut-out (alpha = the product) as an :class:`Analysis`: no segmentation call, nothing hidden.
+
+    Template previews use it with the bundled sample product (``assets/sample-product.webp``)."""
+    rgba = cutout.convert("RGBA")
+    mask = compose.binary(rgba.getchannel("A"))
+    box = mask.getbbox()
+    if box is None:
+        raise SceneError(NO_PRODUCT, "the cut-out is empty")
+    photo = Image.new("RGB", rgba.size, PREVIEW_BACKGROUND)
+    photo.paste(rgba, (0, 0), rgba)
+    hidden = Image.new("L", rgba.size, 0)
+    return Analysis(
+        photo=photo,
+        segmentation=Segmentation(product=mask, box=box),
+        mask=mask,
+        box=box,
+        occlusion=compose.Occlusion(hull=compose.filled_hull(mask), hidden=hidden, percent=0.0),
+        occluded_pct=0.0,
+        warnings=[],
+        seconds=0.0,
+    )
+
+
+def preview(
+    cutout: Image.Image, template: Template, providers: Providers | None, config: Config, usage: Usage
+) -> Result:
+    """A template's sample picture: the cut-out placed and the scene built as for a real photo (a studio
+    template needs no providers)."""
+    analysis = analysis_of_cutout(cutout)
+    if template.kind == "studio":
+        return studio(analysis, template, config)
+    if providers is None:
+        raise ValueError("an AI preview needs the providers")
+    return ai_scene(analysis, template, providers, config, usage)
 
 
 def run(

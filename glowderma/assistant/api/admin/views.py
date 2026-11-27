@@ -27,6 +27,7 @@ from glowderma.assistant.api.admin.schemas import (
     SCENE_JOB_DETAIL_GET,
     SCENE_JOB_DISCARD_POST,
     SCENE_JOB_START_POST,
+    SCENE_JOB_TEMPLATE_POST,
     SCENE_TEMPLATES_GET,
     SCENES_STATUS_GET,
 )
@@ -39,6 +40,7 @@ from glowderma.assistant.api.admin.serializers import (
     SceneJobCreateSerializer,
     SceneJobSerializer,
     SceneStatusSerializer,
+    SceneTemplateSaveSerializer,
     SceneTemplateSerializer,
 )
 from glowderma.assistant.models import SceneJob, SceneTemplate
@@ -173,7 +175,12 @@ class SceneJobStartView(AdminAPIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         result = scene_services.start_job(
-            product_id, image_id, kind=data["kind"], template_id=data.get("template_id"), actor=request.user
+            product_id,
+            image_id,
+            kind=data["kind"],
+            template_id=data.get("template_id"),
+            custom_prompt=data.get("custom_prompt") or "",
+            actor=request.user,
         )
         body = SceneJobSerializer(result.job, context={"request": request}).data
         return Response(body, status=202 if result.created else 200)
@@ -211,6 +218,20 @@ class SceneJobAcceptView(AdminAPIView):
                 "image": ProductImageSerializer(image).data,
             }
         )
+
+
+class SceneJobTemplateView(AdminAPIView):
+    """«Shablon sifatida saqlash»: a scene staff typed becomes a template for everyone."""
+
+    @SCENE_JOB_TEMPLATE_POST
+    @idempotent(required=False)
+    def post(self, request: Request, pk: int) -> Response:
+        serializer = SceneTemplateSaveSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        template = scene_services.save_as_template(
+            pk, name=serializer.validated_data["name"], actor=request.user, request=request
+        )
+        return Response(SceneTemplateSerializer(template, context={"request": request}).data, status=201)
 
 
 class SceneJobDiscardView(AdminAPIView):

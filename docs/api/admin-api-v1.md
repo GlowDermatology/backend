@@ -1787,15 +1787,23 @@ where the model moved, resized or restyled the product are refused. Ships switch
 "gemini_matte" | "bria" | "gemini_json"}`.
 
 **`GET scenes/templates/`** → `{"results": [{"id", "key", "kind": "studio" | "ai_scene", "name" (request
-language, else uz), "colours": ["#rrggbb", …] (studio swatch)}]}`, enabled ones in console order.
+language, else uz), "colours": ["#rrggbb", …] (studio swatch), "preview_url": url | null}]}`, enabled ones in
+console order. `preview_url` is a 4:5 sample picture of the scene (600 px wide): a bundled sample product in it
+(made in the ops console: studio ones at once, AI ones as a billed job of kind `preview`), or, for a template
+staff saved, the scene they made. It is cleared when the template's scene changes.
 
 **`POST products/{id}/images/{image_id}/scenes/`** (optional `Idempotency-Key`; throttle `scene_generate`
-20/hour per staff) Body `{"kind": "studio" | "ai_scene" | "fit", "template_id"?: int}` (required unless `fit`;
-its kind must match) → 202 `SceneJob` (new) or 200 (the image's queued/running job). 409 `scenes_disabled`,
-`scene_ai_disabled`, `assistant_budget_exceeded`; 429 `scene_daily_limit`; 400 `template_id`; 404 another
-product's image.
+20/hour per staff) Body `{"kind": "studio" | "ai_scene" | "fit", "template_id"?: int, "custom_prompt"?: str}`
+(`template_id` required unless `fit` or `custom_prompt`; its kind must match). `custom_prompt` (`ai_scene` only,
+at most 400 characters, any language) is a scene staff typed: the worker turns it into an English scene
+description with the analyst model and refuses one that asks for people, hands, text or brands
+(`scene_custom_refused`); the job's `template` is then `{key: "custom", name, custom_text}` → 202 `SceneJob`
+(new) or 200 (the image's queued/running job). 409 `scenes_disabled`, `scene_ai_disabled`,
+`assistant_budget_exceeded`; 429 `scene_daily_limit`; 400 `template_id` / `custom_prompt` / `kind` (`preview` is
+the console's); 404 another product's image.
 
-**`GET scenes/jobs/{id}/`** → `SceneJob = {id, product_id, source_image_id, kind, template: {key, name} | null,
+**`GET scenes/jobs/{id}/`** → `SceneJob = {id, product_id, source_image_id, kind, template: {key, name, custom_text,
+saved_template_id} | null,
 state (JobState), outcome ("pending" | "accepted" | "discarded" | "expired"), progress: null, result, error:
 {code, message} | null, warnings: [str], accepted_image_id, created_at, finished_at, expires_at, created_by}`.
 `result` (succeeded and not expired) = `{url (the 4:5 candidate; null for fit), overlay_url (the candidate with
@@ -1816,6 +1824,13 @@ it first; 400 `images` `max_items` at 8); a `fit` writes the proposed renditions
 acknowledged; 409 `scene_job_not_ready` (not succeeded or already reviewed), `scene_source_changed`.
 
 **`POST scenes/jobs/{id}/discard/`** (no body) → 200 `SceneJob` (`discarded`; its files are deleted).
+
+**`POST scenes/jobs/{id}/template/`** (optional `Idempotency-Key`) Body `{"name": str}` (≤ 60, used for every
+language) → 201 `SceneTemplate` (the list's shape). Saves a finished scene staff typed (`template.key ==
+"custom"`) as an AI template for everyone: its English description, at the end of the list, with the scene as
+its preview. Allowed while it waits for review or after it was accepted, once per job. 409 `scene_not_custom`,
+`scene_template_exists`; 400 `name`. Audit `assistant.scene_template_created` (entity `assistant_scene_template`,
+`{name, from_job, prompt: {length}}`).
 
 Unreviewed candidates expire after `candidate_ttl_hours` (default 72; beat `assistant.scenes_housekeeping`).
 Audit: `assistant.scene_accepted` (entity `product`; `{job_id, kind, image_id, source_image_id}`) plus the

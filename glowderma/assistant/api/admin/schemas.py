@@ -22,6 +22,8 @@ from glowderma.assistant.api.admin.serializers import (
     SceneJobCreateSerializer,
     SceneJobSerializer,
     SceneStatusSerializer,
+    SceneTemplateSaveSerializer,
+    SceneTemplateSerializer,
     SceneTemplatesSerializer,
 )
 from glowderma.core.api.schema import ADMIN_ERRORS
@@ -96,8 +98,8 @@ SCENE_JOB_START_POST = extend_schema(
         "its 4:5 and square crops (`fit`). 202 with a new job, 200 with the image's queued/running job. The "
         "product itself is never redrawn: the photo's own pixels are pasted back. Refusals (as the job's "
         "`error.code`): `scene_product_cut_off`, `scene_hand_covers_product`, `scene_occlusion_needs_ai`, "
-        "`scene_occlusion_not_fillable`, `scene_no_product`, `scene_mask_unusable`, `scene_product_drift`, "
-        "`scene_result_rejected`."
+        "`scene_occlusion_not_fillable`, `scene_custom_refused`, `scene_no_product`, `scene_mask_unusable`, "
+        "`scene_product_drift`, `scene_result_rejected`. `ai_scene` takes `template_id` or `custom_prompt`."
     ),
     request=SceneJobCreateSerializer,
     responses={200: SceneJobSerializer, 202: SceneJobSerializer, **ADMIN_ERRORS},
@@ -116,6 +118,17 @@ SCENE_JOB_ACCEPT_POST = extend_schema(
     ),
     request=SceneAcceptSerializer,
     responses={200: SceneAcceptResponseSerializer, **ADMIN_ERRORS},
+)
+
+SCENE_JOB_TEMPLATE_POST = extend_schema(
+    operation_id="admin_scene_jobs_template_create",
+    description=(
+        "Save a finished scene staff typed (`template.key == custom`) as an AI template for everyone: its "
+        "English description, the given `name`, and the scene as the card's preview. Allowed while it waits "
+        "for review or after it was accepted, once per job: 409 `scene_not_custom` / `scene_template_exists`."
+    ),
+    request=SceneTemplateSaveSerializer,
+    responses={201: SceneTemplateSerializer, **ADMIN_ERRORS},
 )
 
 SCENE_JOB_DISCARD_POST = extend_schema(
@@ -138,4 +151,5 @@ __all__ = [
     "SCENE_JOB_DISCARD_POST",
     "SCENE_JOB_START_POST",
     "SCENE_TEMPLATES_GET",
+    "SCENE_JOB_TEMPLATE_POST",
 ]

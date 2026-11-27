@@ -205,11 +205,20 @@ class SceneTemplateSerializer(serializers.Serializer[Any]):
     colours = serializers.SerializerMethodField(
         help_text="A studio template's colours (#rrggbb) for a swatch."
     )
+    preview_url = serializers.SerializerMethodField(
+        help_text="A 4:5 sample picture of the scene (a sample product, or the scene staff saved as this "
+        "template); null until the console made one."
+    )
 
     def get_name(self, obj: Any) -> str:
         request = self.context.get("request")
         language = admin_language(request) if request else "uz"
         return str(getattr(obj, f"name_{language}", "") or obj.name_uz)
+
+    @extend_schema_field(serializers.URLField(allow_null=True))
+    def get_preview_url(self, obj: Any) -> str | None:
+        url: str | None = obj.preview_url
+        return url
 
     @extend_schema_field(serializers.ListField(child=serializers.CharField()))
     def get_colours(self, obj: Any) -> list[str]:
@@ -224,11 +233,25 @@ class SceneTemplatesSerializer(serializers.Serializer[Any]):
     results = SceneTemplateSerializer(many=True)
 
 
+STAFF_SCENE_KINDS = [kind for kind in enums.SceneJobKind.values if kind != enums.SceneJobKind.PREVIEW]
+
+
 class SceneJobCreateSerializer(serializers.Serializer[dict[str, Any]]):
-    kind = serializers.ChoiceField(choices=enums.SceneJobKind.values)
+    kind = serializers.ChoiceField(choices=STAFF_SCENE_KINDS)
     template_id = serializers.IntegerField(
-        required=False, allow_null=True, help_text="Required unless `fit`."
+        required=False, allow_null=True, help_text="Required unless `fit` or `custom_prompt`."
     )
+    custom_prompt = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=400,
+        help_text="`ai_scene` only, instead of `template_id`: the scene in staff's own words, any language "
+        "(translated to English and screened by the worker).",
+    )
+
+
+class SceneTemplateSaveSerializer(serializers.Serializer[dict[str, Any]]):
+    name = serializers.CharField(max_length=60, help_text="The card's name (all languages).")
 
 
 class SceneCropsSerializer(serializers.Serializer[Any]):
@@ -269,7 +292,13 @@ class SceneJobSerializer(serializers.Serializer[Any]):
     expires_at = serializers.DateTimeField(allow_null=True)
     created_by = ActorSerializer()
 
-    @extend_schema_field(serializers.JSONField(allow_null=True))
+    @extend_schema_field(
+        serializers.JSONField(
+            allow_null=True,
+            help_text="`{key, name, custom_text, saved_template_id}`: `key` is `custom` for a scene staff "
+            "typed (`custom_text`, null otherwise); `saved_template_id` once it was saved as a template.",
+        )
+    )
     def get_template(self, obj: Any) -> dict[str, Any] | None:
         snapshot = obj.template_snapshot or {}
         if not snapshot:
@@ -277,7 +306,12 @@ class SceneJobSerializer(serializers.Serializer[Any]):
         request = self.context.get("request")
         language = admin_language(request) if request else "uz"
         names = snapshot.get("name") or {}
-        return {"key": snapshot.get("key"), "name": names.get(language) or names.get("uz") or ""}
+        return {
+            "key": snapshot.get("key"),
+            "name": names.get(language) or names.get("uz") or "",
+            "custom_text": snapshot.get("custom_text") or None,
+            "saved_template_id": snapshot.get("saved_template_id"),
+        }
 
     @extend_schema_field(serializers.JSONField(allow_null=True, help_text="Always null (no progress steps)."))
     def get_progress(self, obj: Any) -> None:

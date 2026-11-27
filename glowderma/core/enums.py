@@ -374,6 +374,7 @@ class SceneJobKind(TextChoices):
     STUDIO = "studio", "Studiya sahnasi"
     AI_SCENE = "ai_scene", "AI sahnasi"
     FIT = "fit", "Ekranlarga moslash"
+    PREVIEW = "preview", "Shablon namunasi"  # the console's sample picture of a template (no product)
 
 
 class SceneJobOutcome(TextChoices):

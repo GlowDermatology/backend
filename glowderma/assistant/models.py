@@ -24,6 +24,7 @@ from django.db import models
 from django.db.models import Q
 
 from glowderma.core import enums
+from glowderma.core.media import absolute_media_url
 from glowderma.core.models import TimeStampedModel
 
 SETTINGS_PK = 1
@@ -489,6 +490,19 @@ class SceneTemplate(models.Model):
     position = models.PositiveSmallIntegerField(default=0, verbose_name="tartib")
     params = models.JSONField(default=dict, blank=True, verbose_name="studiya parametrlari")
     prompt = models.TextField(blank=True, default="", verbose_name="sahna tavsifi")
+    # the sample picture staff see on the template's card (4:5 WEBP): the bundled sample product in this
+    # scene, or the scene a staff member saved as this template; cleared when params or prompt change
+    preview = models.FileField(
+        upload_to="scene-previews/", max_length=255, blank=True, verbose_name="namuna rasmi"
+    )
+    created_by = models.ForeignKey(
+        "accounts.StaffUser",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="yaratgan (admin panelda saqlangan)",
+    )
     updated_at = models.DateTimeField(auto_now=True, verbose_name="yangilangan")
 
     class Meta:
@@ -504,6 +518,10 @@ class SceneTemplate(models.Model):
 
     def __str__(self) -> str:
         return self.name_uz
+
+    @property
+    def preview_url(self) -> str | None:
+        return absolute_media_url(str(self.preview.name)) if self.preview else None
 
 
 class SceneJob(TimeStampedModel):

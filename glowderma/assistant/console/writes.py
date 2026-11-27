@@ -181,6 +181,10 @@ def update_scene_template(
         before, after = _apply(row, SCENE_TEMPLATE_FIELDS, changes)
         if after:
             row.save()
+            if {"params", "prompt"} & set(after):
+                from glowderma.assistant.scenes import services as scene_services
+
+                scene_services.template_changed(row)  # the old sample picture shows another scene
             audit.record(
                 action="assistant.scene_template_updated",
                 entity_type="assistant_scene_template",

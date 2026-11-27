@@ -30,17 +30,24 @@
         </dl>
         <h2 class="gd-ai-card__title">{% translate "Shablonlar" %}</h2>
         <table class="gd-ai-table">
-            <thead><tr><th>{% translate "Nomi" %}</th><th>{% translate "Turi" %}</th><th>{% translate "Yoqilgan" %}</th></tr></thead>
+            <thead><tr><th>{% translate "Namuna" %}</th><th>{% translate "Nomi" %}</th><th>{% translate "Turi" %}</th><th>{% translate "Yoqilgan" %}</th></tr></thead>
             <tbody>
             {% for template in templates %}
                 <tr>
-                    <td><a class="gd-ai-link" href="{% url 'admin:assistant_scene_template' template.pk %}">{{ template.name_uz }}</a></td>
+                    <td>{% if template.preview %}<img src="{{ template.preview_url }}" alt="" width="48" height="60" style="border-radius:4px;object-fit:cover">{% else %}<span class="gd-ai-muted">—</span>{% endif %}</td>
+                    <td><a class="gd-ai-link" href="{% url 'admin:assistant_scene_template' template.pk %}">{{ template.name_uz }}</a>{% if template.created_by_id %} <span class="gd-ai-muted">· {% translate "xodim saqlagan" %}</span>{% endif %}</td>
                     <td>{{ template.get_kind_display }}</td>
                     <td>{% if template.enabled %}{% translate "Ha" %}{% else %}{% translate "Yo‘q" %}{% endif %}</td>
                 </tr>
             {% endfor %}
             </tbody>
         </table>
+        <form method="post" data-testid="ai-scenes-missing-previews">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="missing_previews">
+            <button type="submit" class="gd-ai-button">{% translate "Yo‘q namunalarni yaratish" %}</button>
+            <span class="gd-ai-muted">{% translate "Studiya namunalari bepul; har bir AI namunasi bitta pullik so‘rov." %}</span>
+        </form>
         <h2 class="gd-ai-card__title">{% translate "Oxirgi so‘rovlar" %}</h2>
         <table class="gd-ai-table">
             <thead><tr><th>#</th><th>{% translate "Turi" %}</th><th>{% translate "Holat" %}</th><th>{% translate "Narx" %}</th></tr></thead>

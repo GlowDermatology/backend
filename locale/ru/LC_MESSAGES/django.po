@@ -558,6 +558,10 @@ msgstr "Для ИИ-сцены нужно описание."
 msgid "AI sahnasi: faqat fon va atrofdagi narsalar tavsifi (mahsulot haqida yozmang)."
 msgstr "ИИ-сцена: опишите только фон и окружение (не товар)."
 
+#: glowderma/assistant/templates/assistant/console/scene_template.html
+msgid "AI shablon: bitta pullik so‘rov (Bria: $0.032)."
+msgstr "ИИ-шаблон: один платный запрос (Bria: $0.032)."
+
 #: config/settings/ops_admin.py
 msgid "AI sozlamalari"
 msgstr "Настройки AI"
@@ -1472,6 +1476,10 @@ msgstr "Учётная запись клиента с этим номером н
 msgid "Bu rejim faqat boshqaruv konsolida ishlatiladi."
 msgstr "Этот режим используется только в консоли."
 
+#: glowderma/assistant/scenes/services.py
+msgid "Bu sahna allaqachon shablon sifatida saqlangan."
+msgstr "Эта сцена уже сохранена как шаблон."
+
 #: glowderma/delivery/services.py
 msgid "Bu sana allaqachon kiritilgan."
 msgstr "Эта дата уже добавлена."
@@ -1491,6 +1499,10 @@ msgstr "Этот slug уже занят."
 #: glowderma/assistant/services.py
 msgid "Bu takliflar hali tayyor emas yoki allaqachon ko‘rib chiqilgan."
 msgstr "Эти предложения ещё не готовы или уже рассмотрены."
+
+#: glowderma/assistant/scenes/services.py
+msgid "Bu tavsif bo‘yicha sahna yaratib bo‘lmaydi: unda odamlar, qo‘llar, yozuv yoki brend bo‘lmasligi kerak. Faqat fon va atrofni tasvirlang."
+msgstr "По этому описанию сцену создать нельзя: в ней не должно быть людей, рук, надписей или брендов. Опишите только фон и окружение."
 
 #: glowderma/notifications/services/campaigns/common.py
 msgid "Bu test eski matn uchun yuborilgan: qayta test yuboring."
@@ -2164,6 +2176,10 @@ msgstr "Только строчные латинские буквы, цифры 
 #: glowderma/core/admin_actions.py
 msgid "Faqat menejerlar uchun."
 msgstr "Только для менеджеров."
+
+#: glowderma/assistant/scenes/services.py
+msgid "Faqat o‘zingiz yozgan, tayyor sahnani shablon sifatida saqlash mumkin."
+msgstr "Сохранить как шаблон можно только готовую сцену, которую вы описали сами."
 
 #: glowderma/assistant/console/views.py
 msgid "Faqat qoralama versiyani tahrirlash va sinash mumkin."
@@ -3810,9 +3826,18 @@ msgstr "Неуспешные возвраты (требуется действи
 msgid "Muvofiqlik hisoboti navbatga qo‘yildi. Natija audit jurnalida «report.consistency» bo‘lib chiqadi."
 msgstr "Отчёт о согласованности поставлен в очередь. Результат появится в журнале действий как «report.consistency»."
 
+#: glowderma/assistant/templates/assistant/console/scenes.html
 #: glowderma/reporting/templates/reporting/dashboards/money.html
 msgid "Namuna"
 msgstr "Примеры"
+
+#: glowderma/assistant/console/views.py
+msgid "Namuna chizildi."
+msgstr "Образец нарисован."
+
+#: glowderma/assistant/templates/assistant/console/scene_template.html
+msgid "Namuna hali yo‘q: xodimlar shablonni faqat nomidan taniydi."
+msgstr "Образца пока нет: сотрудники узнают шаблон только по названию."
 
 #: glowderma/assistant/console/forms.py
 msgid "Namuna mahsulot (ID)"
@@ -3821,6 +3846,22 @@ msgstr "Пример товара (ID)"
 #: glowderma/assistant/templates/assistant/console/prompt_version.html
 msgid "Namuna mahsulotda sinash"
 msgstr "Проверить на примере товара"
+
+#: glowderma/assistant/templates/assistant/console/scene_template.html
+msgid "Namuna rasmi"
+msgstr "Образец"
+
+#: glowderma/assistant/console/views.py
+msgid "Namuna tayyorlanmoqda (taxminan 30 soniya). Keyin sahifani yangilang."
+msgstr "Образец готовится (около 30 секунд). Затем обновите страницу."
+
+#: glowderma/assistant/templates/assistant/console/scene_template.html
+msgid "Namuna tayyorlanmoqda. Bir ozdan keyin sahifani yangilang."
+msgstr "Образец готовится. Обновите страницу чуть позже."
+
+#: glowderma/assistant/templates/assistant/console/scene_template.html
+msgid "Namuna yaratish"
+msgstr "Создать образец"
 
 #: admin history (professionals.Service)
 #: glowderma/appointments/admin.py
@@ -4211,6 +4252,10 @@ msgstr "Последний успех"
 #: glowderma/integrations/admin.py
 msgid "Oxirgi muvaffaqiyatli sinxronlashdan keyingi o‘zgarishlar (delta) Billz’dan olinadi: narxlar va qoldiqlar yangilanadi. Import allaqachon ishlayotgan bo‘lsa, yangisi boshlanmaydi."
 msgstr "Из Billz загружаются изменения с момента последней успешной синхронизации (дельта): обновляются цены и остатки. Если импорт уже выполняется, новый не запускается."
+
+#: glowderma/assistant/templates/assistant/console/scene_template.html
+msgid "Oxirgi namuna chiqmadi:"
+msgstr "Последний образец не получился:"
 
 #: glowderma/assistant/templates/assistant/console/provider.html
 #: glowderma/assistant/templates/assistant/console/scenes.html
@@ -4996,6 +5041,10 @@ msgstr "Сцены отключены."
 msgid "Sahnalar uchun ajratilgan byudjet tugadi. Administratorga murojaat qiling."
 msgstr "Бюджет на сцены исчерпан. Обратитесь к администратору."
 
+#: glowderma/assistant/scenes/services.py
+msgid "Sahnani tasvirlang (ko‘pi bilan 400 belgi)."
+msgstr "Опишите сцену (не более 400 символов)."
+
 #: admin history (professionals.WorkingHoursOverride)
 #: glowderma.core.labels.NOTIFICATION_EXPORT_HEADERS
 msgid "Sana"
@@ -5170,6 +5219,14 @@ msgstr "Завершить сеанс"
 #: glowderma/professionals/api/admin/views/specialists.py
 msgid "Sh"
 msgstr "Сб"
+
+#: model metadata
+msgid "Shablon namunasi"
+msgstr "Образец шаблона"
+
+#: glowderma/assistant/scenes/services.py
+msgid "Shablon nomini yozing."
+msgstr "Введите название шаблона."
 
 #: glowderma/notifications/models.py
 msgid "Shablon «%(status)s»: %(text)s"
@@ -5388,6 +5445,14 @@ msgstr "Стандарт: самое раннее (мин)"
 #: model metadata
 msgid "Studiya"
 msgstr "Студия"
+
+#: glowderma/assistant/templates/assistant/console/scenes.html
+msgid "Studiya namunalari bepul; har bir AI namunasi bitta pullik so‘rov."
+msgstr "Образцы студии бесплатны; каждый ИИ-образец — один платный запрос."
+
+#: glowderma/assistant/console/views.py
+msgid "Studiya namunalari chizildi: %(drawn)s. AI namunalari navbatga qo‘yildi: %(queued)s."
+msgstr "Образцов студии нарисовано: %(drawn)s. ИИ-образцов в очереди: %(queued)s."
 
 #: glowderma/assistant/console/forms.py
 msgid "Studiya sahnalari va ekranlarga moslash admin panelda ko‘rinadi."
@@ -6546,6 +6611,10 @@ msgstr "В пути"
 #: glowderma/reporting/dashboards/ops.py
 msgid "Yo‘q"
 msgstr "Нет"
+
+#: glowderma/assistant/templates/assistant/console/scenes.html
+msgid "Yo‘q namunalarni yaratish"
+msgstr "Создать недостающие образцы"
 
 #: glowderma.core.labels.NOTIFICATION_STATE
 #: model metadata
@@ -7904,6 +7973,10 @@ msgstr "специалисты"
 #: model metadata
 msgid "mutlaq muddat"
 msgstr "абсолютный срок действия"
+
+#: model metadata
+msgid "namuna rasmi"
+msgstr "образец"
 
 #: model metadata
 msgid "narx"
@@ -9275,6 +9348,10 @@ msgstr "входы сотрудников через соцсети"
 msgid "xodim izohi"
 msgstr "примечание сотрудника"
 
+#: glowderma/assistant/templates/assistant/console/scenes.html
+msgid "xodim saqlagan"
+msgstr "сохранил сотрудник"
+
 #: model metadata
 msgid "xodimlar"
 msgstr "сотрудники"
@@ -9302,6 +9379,10 @@ msgstr "обновление подтверждено"
 #: model metadata
 msgid "yaratgan"
 msgstr "кем создано"
+
+#: model metadata
+msgid "yaratgan (admin panelda saqlangan)"
+msgstr "создал (сохранено в админ-панели)"
 
 #: glowderma/core/otp_apps.py
 #: model metadata

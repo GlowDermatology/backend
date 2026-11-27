@@ -7688,8 +7688,9 @@ paths:
         a new job, 200 with the image''s queued/running job. The product itself is
         never redrawn: the photo''s own pixels are pasted back. Refusals (as the job''s
         `error.code`): `scene_product_cut_off`, `scene_hand_covers_product`, `scene_occlusion_needs_ai`,
-        `scene_occlusion_not_fillable`, `scene_no_product`, `scene_mask_unusable`,
-        `scene_product_drift`, `scene_result_rejected`.'
+        `scene_occlusion_not_fillable`, `scene_custom_refused`, `scene_no_product`,
+        `scene_mask_unusable`, `scene_product_drift`, `scene_result_rejected`. `ai_scene`
+        takes `template_id` or `custom_prompt`.'
       parameters:
       - in: path
         name: image_id
@@ -7974,6 +7975,78 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SceneJob'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/scenes/jobs/{id}/template/:
+    post:
+      operationId: admin_scene_jobs_template_create
+      description: 'Save a finished scene staff typed (`template.key == custom`) as
+        an AI template for everyone: its English description, the given `name`, and
+        the scene as the card''s preview. Allowed while it waits for review or after
+        it was accepted, once per job: 409 `scene_not_custom` / `scene_template_exists`.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SceneTemplateSaveRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SceneTemplate'
           description: ''
         '400':
           content:
@@ -29439,6 +29512,9 @@ components:
           $ref: '#/components/schemas/SceneJobKindEnum'
         template:
           nullable: true
+          description: '`{key, name, custom_text, saved_template_id}`: `key` is `custom`
+            for a scene staff typed (`custom_text`, null otherwise); `saved_template_id`
+            once it was saved as a template.'
           readOnly: true
         state:
           $ref: '#/components/schemas/JobStateEnum'
@@ -29495,18 +29571,7 @@ components:
       - state
       - template
       - warnings
-    SceneJobCreateRequest:
-      type: object
-      properties:
-        kind:
-          $ref: '#/components/schemas/SceneJobKindEnum'
-        template_id:
-          type: integer
-          nullable: true
-          description: Required unless `fit`.
-      required:
-      - kind
-    SceneJobKindEnum:
+    SceneJobCreateKindEnum:
       enum:
       - studio
       - ai_scene
@@ -29516,6 +29581,34 @@ components:
         * `studio` - studio
         * `ai_scene` - ai_scene
         * `fit` - fit
+    SceneJobCreateRequest:
+      type: object
+      properties:
+        kind:
+          $ref: '#/components/schemas/SceneJobCreateKindEnum'
+        template_id:
+          type: integer
+          nullable: true
+          description: Required unless `fit` or `custom_prompt`.
+        custom_prompt:
+          type: string
+          description: '`ai_scene` only, instead of `template_id`: the scene in staff''s
+            own words, any language (translated to English and screened by the worker).'
+          maxLength: 400
+      required:
+      - kind
+    SceneJobKindEnum:
+      enum:
+      - studio
+      - ai_scene
+      - fit
+      - preview
+      type: string
+      description: |-
+        * `studio` - studio
+        * `ai_scene` - ai_scene
+        * `fit` - fit
+        * `preview` - preview
     SceneJobOutcomeEnum:
       enum:
       - pending
@@ -29568,12 +29661,20 @@ components:
             type: string
           readOnly: true
           description: A studio template's colours (#rrggbb) for a swatch.
+        preview_url:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+          description: A 4:5 sample picture of the scene (a sample product, or the
+            scene staff saved as this template); null until the console made one.
       required:
       - colours
       - id
       - key
       - kind
       - name
+      - preview_url
     SceneTemplateKindEnum:
       enum:
       - studio
@@ -29582,6 +29683,16 @@ components:
       description: |-
         * `studio` - studio
         * `ai_scene` - ai_scene
+    SceneTemplateSaveRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: The card's name (all languages).
+          maxLength: 60
+      required:
+      - name
     SceneTemplates:
       type: object
       properties:
