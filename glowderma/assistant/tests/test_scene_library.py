@@ -143,7 +143,8 @@ def test_a_typed_scene_saved_as_a_template(staff_client: APIClient, ai_on: Scene
     assert saved["preview_url"].endswith(".webp")
     row = SceneTemplate.objects.get(key=f"custom-{job_id}")
     assert row.prompt == ENGLISH and row.enabled and row.created_by is not None
-    assert row.position == SceneTemplate.objects.exclude(pk=row.pk).order_by("-position").first().position + 1
+    before = SceneTemplate.objects.exclude(pk=row.pk).order_by("-position").values_list("position", flat=True)
+    assert row.position == before[0] + 1
     with Image.open(row.preview.path) as picture:
         assert picture.width == scene_services.PREVIEW_WIDTH
     listed = staff_client.get(f"{ADMIN}scenes/templates/").json()["results"]
@@ -190,7 +191,7 @@ def test_a_studio_preview_is_drawn_at_once_and_redrawn_on_change(ai_on: SceneSet
     ivory = template("studio-ivory")
     assert scene_services.start_preview(ivory.pk, actor=staff) is None  # no job: drawn now
     ivory.refresh_from_db()
-    first = ivory.preview.name
+    first = str(ivory.preview.name)
     assert first.startswith("scene-previews/studio-ivory-") and ivory.preview_url
     from glowderma.assistant.console import writes
 
