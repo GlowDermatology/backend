@@ -714,7 +714,7 @@ class SceneTemplatePreviewView(ConsolePage):
 
     http_method_names = ["get"]
 
-    def get(self, request: HttpRequest, pk: int) -> HttpResponse:
+    def get(self, request: HttpRequest, pk: int) -> FileResponse:
         row = SceneTemplate.objects.filter(pk=pk).first()
         if row is None or not row.preview:
             raise Http404

@@ -289,7 +289,7 @@ def test_the_console_serves_previews_from_its_own_origin(su: Client) -> None:
     su.post(reverse("admin:assistant_scene_template", args=[ivory.pk]), {"action": "preview"})
     picture = su.get(url)
     assert picture.status_code == 200 and picture["Content-Type"] == "image/webp"
-    assert b"".join(picture.streaming_content)[:4] == b"RIFF"
+    assert picture.getvalue()[:4] == b"RIFF"
     page = su.get(reverse("admin:assistant_scene_template", args=[ivory.pk])).content.decode()
     assert f'src="{url}?v=' in page and "http" not in page.split(f'src="{url}')[0][-12:]
     listing = su.get(reverse("admin:assistant_scenes")).content.decode()
