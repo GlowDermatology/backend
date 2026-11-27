@@ -281,3 +281,37 @@ def test_one_scene_job_runs_at_a_time(staff_client: APIClient, scenes_on: SceneS
     SceneJob.objects.filter(pk=a).update(heartbeat_at=timeutils.now() - timedelta(minutes=10))
     assert tasks.reap_stale_jobs() == 1
     assert scene_services.claim(b) is not None
+
+
+@pytest.mark.django_db
+def test_each_provider_uses_its_own_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    from glowderma.integrations.llm.ports import LLMError
+    from glowderma.integrations.secret import Secret
+
+    asked: list[str] = []
+    keys = {"gemini": "gemini-key", "bria": "bria-key"}
+
+    def key(provider: str) -> Secret:
+        asked.append(provider)
+        if provider not in keys:
+            raise LLMError(f"no active {provider} key", code="ai_not_configured")
+        return Secret(keys[provider])
+
+    monkeypatch.setattr(scene_services, "_key", key)
+    row = SceneSettings.objects.get()
+    row.scene_provider = enums.SceneImageProvider.BRIA
+    used = scene_services.providers(row)
+    assert used.api_key.reveal() == "gemini-key"  # the analyst and the QA check
+    assert used.image_key is not None and used.image_key.reveal() == "bria-key"
+    assert scene_services.prices(row).bria_scene_per_call == row.price_bria_scene_call
+
+    # No Bria key yet: a studio scene or a fit still works; only a Bria call is refused when it is made.
+    del keys["bria"]
+    used = scene_services.providers(row)
+    assert used.image_key is not None and not used.image_key
+
+    # Gemini scenes and the Gemini matte never ask for Bria's key.
+    asked.clear()
+    row.scene_provider = enums.SceneImageProvider.GEMINI
+    used = scene_services.providers(row)
+    assert asked == ["gemini"] and used.image_key is not None and used.image_key.reveal() == "gemini-key"

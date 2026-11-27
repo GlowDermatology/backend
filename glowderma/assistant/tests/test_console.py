@@ -487,6 +487,7 @@ def test_the_pages_write_no_admin_history(su: Client, django_capture_on_commit_c
 def scene_data(**values: str) -> dict[str, str]:
     data = {
         "segmenter": "bria",
+        "scene_provider": "bria",
         "analyst_model": "gemini-3.5-flash-lite",
         "image_model": "gemini-nano-banana-2.1",
         "image_size": "1K",
@@ -503,7 +504,8 @@ def scene_data(**values: str) -> dict[str, str]:
         "price_image_input": "1.5",
         "price_image_text_output": "7.5",
         "price_image_output": "30",
-        "price_bria_call": "0.018",
+        "price_bria_call": "0.025",
+        "price_bria_scene_call": "0.032",
         "style": "Calm ivory light.",
         "enabled": "on",
     }
@@ -521,6 +523,7 @@ def test_scene_settings_are_saved_and_audited(su: Client) -> None:
         "bria",
         Decimal("12"),
     )
+    assert (row.scene_provider, row.price_bria_scene_call) == ("bria", Decimal("0.032"))
     entry = AuditEntry.objects.get(action="assistant.scene_settings_updated")
     assert entry.after is not None and entry.after["style"]["length"] == len("Calm ivory light.")
 

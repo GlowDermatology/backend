@@ -35,6 +35,25 @@ reviews expire after 72 h.
 
 The cutter's mask must agree with the analyst's box, or the job fails with `scene_mask_unusable`.
 
+## AI scene providers (console: "AI sahna provayderi")
+
+Who paints an AI scene's background. Each provider uses its own key from **AI provayderlar** (Gemini's or
+Bria's); the analyst and the QA check always use Gemini's (the free lite model is enough).
+
+| | Gemini (Nano Banana, `gemini`) | Bria (Fibo 2, `bria`) |
+| --- | --- | --- |
+| What it gets | The grey-placeholder canvas and the locked-product rules | The same canvas as a PNG whose alpha is the product, and one plain English scene description (template + style, at most 110 words) |
+| Endpoint | Gemini API, image model from the console | `POST /v2/image/edit/replace_background`, `mode: "fibo2"`, `original_quality: true`, async + polling |
+| Product | Redrawn by the model, then our pixels pasted back (drift check) | Pasted back by Bria and again by us; live drift 0 |
+| Finger bites | Fills up to `max_occluded_pct` (marked for review) | Cannot fill: refused with `scene_occlusion_not_fillable` |
+| Needs | Billing on the Google project | The Bria key (the same one as the cutter) |
+| Cost | About $0.04-0.11 per image (tokens) | $0.032 per image (`price_bria_scene_call`) |
+| Time | 10-40 s | About 20 s |
+
+Live on the owner's photos (Bria cut-out, Bria scene, Gemini QA): 3 of 4 accepted on the first attempt, the
+product interior identical in all; the QA check refused one with an extra bottle in the scene. A jar keeps a
+faint pink fringe where the cut-out met the fingers. Gemini has not been compared yet (no billing).
+
 ## What it does
 
 Staff photograph products on a phone, often in an office and sometimes holding the product. The pipeline builds a clean scene around the product. The product itself is never redrawn.
@@ -57,7 +76,8 @@ Staff photograph products on a phone, often in an office and sometimes holding t
    - The product stands on a fixed baseline (82 % of the height) inside a centred safe zone, so the middle square crop also holds the whole product.
 4. **Scene.**
    - **Studio templates:** background and contact shadow are composed in Pillow.
-   - **AI templates:** Nano Banana receives the canvas (the product on a grey placeholder) with a locked-product prompt: no hands, people, office or text, and a contact shadow at the baseline.
+   - **AI templates, Gemini:** Nano Banana receives the canvas (the product on a grey placeholder) with a locked-product prompt: no hands, people, office or text, and a contact shadow at the baseline.
+   - **AI templates, Bria:** Bria receives the canvas with the product's alpha and builds only the background (see "AI scene providers").
 5. **Paste-back.** The photo's own product pixels go back on top. Every pixel deeper than the 2–3 px edge band is the original. The run asserts `interior_difference == 0` and fails if it is not.
 6. **Checks** (AI only):
    - Registration catches a product the model moved or resized (more than 1 % shift, or any scale change).
@@ -113,13 +133,15 @@ Open `report.html`. Each photo shows:
 
 ## Going live
 
-1. `migrate` (catalog `0013_productimage_scenes`, assistant `0005_scenes`, `0006_seed_scenes`).
+1. `migrate` (catalog `0013_productimage_scenes`, assistant `0005_scenes`, `0006_seed_scenes`,
+   `0007_scene_provider`). The deploy runs it (`backend-migrate`).
 2. Restart the API, the worker and beat (new beat entry `assistant-scenes-housekeeping`, hourly).
-3. Enable billing on the Google AI Studio project of the Gemini key: image models answer 429 without it.
+3. For Gemini AI scenes (or the Gemini matte cutter), enable billing on the Google AI Studio project of the
+   Gemini key: image models answer 429 without it. Bria needs only its key.
 4. In the console, set the analyst model (`gemini-3.5-flash-lite` by default) and check the prices against
    Google's and Bria's pages.
 5. Optional: put the Bria key in **AI provayderlar → Bria → Kalit** and press "Test"; choose `bria` as the
-   cut-out source.
+   cut-out source and, without Google billing, as the AI scene provider.
 6. Switch on **sahnalar yoqilgan** (fitting and studio scenes), then **AI sahnalar yoqilgan** after a test.
 
 There are no `.env` changes: keys live in Vault, and everything else is in the console.

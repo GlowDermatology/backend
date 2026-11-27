@@ -15,6 +15,7 @@ from django.core.exceptions import ImproperlyConfigured
 from PIL import Image, ImageDraw
 
 from glowderma.core import compose
+from glowderma.integrations.llm.bria_image import BriaSceneModel
 from glowderma.integrations.llm.fake import FakeImageModel
 from glowderma.integrations.llm.gemini_image import GeminiImageModel, _split_output
 from glowderma.integrations.llm.ports import (
@@ -216,6 +217,7 @@ def test_image_registry_modes(settings: Any) -> None:
     assert get_image_model() is fake_image_model()
     settings.AI_MODE = "live"
     assert isinstance(get_image_model(), GeminiImageModel)
+    assert isinstance(get_image_model("bria"), BriaSceneModel) and not get_image_model("bria").fills_hidden
     with pytest.raises(LLMNotConfigured):
         get_image_model("other")
     settings.AI_MODE = "other"
@@ -486,6 +488,69 @@ def test_bria_key_check() -> None:
     cutter, _ = bria(httpx.Response(401, json={}))
     with pytest.raises(LLMNotConfigured):
         cutter.check(api_key=Secret("bad"))
+
+
+def bria_scene(*responders: Any) -> tuple[BriaSceneModel, Recorder]:
+    recorder = Recorder(*responders)
+    client = httpx.Client(transport=httpx.MockTransport(recorder))
+    return BriaSceneModel(httpx_client=client, sleep=lambda _seconds: None), recorder
+
+
+def scene_request(**overrides: Any) -> ImageGenerationRequest:
+    values: dict[str, Any] = {
+        "model": "nb",
+        "prompt": "Gemini's layout rules",
+        "images": (ImagePart(png(scene_photo()), "image/png"),),
+        "cutout": ImagePart(rgba_cutout(), "image/png"),
+        "scene": "A polished marble surface, soft daylight.",
+        **overrides,
+    }
+    return ImageGenerationRequest(**values)
+
+
+def test_bria_scene_builds_the_background_around_our_cut_out() -> None:
+    generated = png(scene_photo(background=(10, 20, 30)))
+    model, recorder = bria_scene(
+        httpx.Response(202, json={"request_id": "abc", "status_url": STATUS}),
+        httpx.Response(
+            200, json={"status": "COMPLETED", "result": {"image_url": "https://temp.bria.ai/s.png"}}
+        ),
+        httpx.Response(200, content=generated),
+    )
+    result = model.generate_image(scene_request(), api_key=Secret("bria-key"))
+    assert result.image == generated and result.mime_type == "image/png"
+    assert result.billed_calls == 1 and (result.input_tokens, result.output_image_tokens) == (0, 0)
+    sent, status, download = recorder.requests
+    assert str(sent.url) == "https://engine.prod.bria-api.com/v2/image/edit/replace_background"
+    body = json.loads(sent.content)
+    assert (body["mode"], body["original_quality"], body["sync"]) == ("fibo2", True, False)
+    assert base64.b64decode(body["image"]) == rgba_cutout()  # the cut-out, not the grey canvas
+    assert body["prompt"] == "A polished marble surface, soft daylight."  # not Gemini's rules
+    assert sent.headers["api_token"] == "bria-key" and str(status.url) == STATUS  # noqa: S105
+    assert "api_token" not in download.headers
+
+
+def test_bria_scene_refusals() -> None:
+    model, recorder = bria_scene()
+    with pytest.raises(LLMNotConfigured):
+        model.generate_image(scene_request(), api_key=Secret(""))
+    with pytest.raises(LLMBadOutput):
+        model.generate_image(scene_request(cutout=None), api_key=Secret("k"))
+    with pytest.raises(LLMBadOutput):
+        model.generate_image(scene_request(scene=" "), api_key=Secret("k"))
+    assert recorder.requests == []  # nothing was sent
+    model, _ = bria_scene(httpx.Response(401, json={"error": {"code": 401}}))
+    with pytest.raises(LLMNotConfigured):
+        model.generate_image(scene_request(), api_key=Secret("bad"))
+    model, _ = bria_scene(
+        httpx.Response(200, json={"result": {"image_url": "https://temp.bria.ai/s.png"}}),
+        httpx.Response(200, content=b"not an image"),
+    )
+    with pytest.raises(LLMBadOutput):
+        model.generate_image(scene_request(), api_key=Secret("k"))
+    checker, recorder = bria_scene(httpx.Response(404, json={}))
+    checker.check(api_key=Secret("k"))
+    assert "/v2/status/" in str(recorder.requests[0].url) and checker.is_configured()
 
 
 class ScriptedCutter:

@@ -71,6 +71,10 @@ ERROR_MESSAGES: dict[str, str] = {
         "Qo‘l mahsulotning bir qismini yopib turibdi: studiya shabloni buni to‘ldira olmaydi. AI sahnasini "
         "tanlang yoki rasmni qayta oling."
     ),
+    pipeline.OCCLUSION_NOT_FILLABLE: N_(
+        "Qo‘l mahsulotning bir qismini yopib turibdi: Bria sahnasi faqat fonni chizadi va yopilgan joyni "
+        "to‘ldira olmaydi. Rasmni qayta oling."
+    ),
     pipeline.PRODUCT_CUT_OFF: N_(
         "Mahsulot rasmga to‘liq sig‘magan: rasmni mahsulot to‘liq ko‘rinadigan qilib oling."
     ),
@@ -173,6 +177,7 @@ def prices(row: SceneSettings) -> pipeline.Prices:
         image_text_output=row.price_image_text_output,
         image_output=row.price_image_output,
         bria_per_call=row.price_bria_call,
+        bria_scene_per_call=row.price_bria_scene_call,
     )
 
 
@@ -304,6 +309,7 @@ def _usage_dict(usage: pipeline.Usage | None) -> dict[str, int]:
         "text_calls": usage.text_calls,
         "image_calls": usage.image_calls,
         "bria_calls": usage.bria_calls,
+        "bria_scene_calls": usage.bria_scene_calls,
     }
 
 
@@ -334,16 +340,31 @@ def _key(provider: str) -> Secret:
     return key
 
 
+def _key_if_set(provider: str) -> Secret:
+    """The provider's active key, or an empty one: the adapter refuses it (``ai_not_configured``) only when
+    it is actually called, so a missing Bria key never stops a studio scene or a fit."""
+    try:
+        return _key(provider)
+    except LLMError:
+        return Secret("")
+
+
 def providers(row: SceneSettings) -> pipeline.Providers:
+    """Each provider with its own key: Gemini for the analyst and the QA check, the cutter's and the AI scene
+    provider's keys as the console chose them (Bria's from «AI provayderlar → Bria»)."""
     gemini = _key(enums.AssistantProvider.GEMINI)
-    cutter_key = _key(enums.AssistantProvider.BRIA) if row.segmenter == enums.SceneSegmenter.BRIA else gemini
+    bria_needed = enums.SceneImageProvider.BRIA in (row.segmenter, row.scene_provider)
+    bria = _key_if_set(enums.AssistantProvider.BRIA) if bria_needed else Secret("")
+    cutter_key = bria if row.segmenter == enums.SceneSegmenter.BRIA else gemini
+    image_key = bria if row.scene_provider == enums.SceneImageProvider.BRIA else gemini
     return pipeline.Providers(
         segmenter=segmentation_registry.get_segmenter(
             row.segmenter, image_model=row.image_model, cutter_key=cutter_key, bria_model=row.bria_model
         ),
-        image_model=llm_registry.get_image_model(),
+        image_model=llm_registry.get_image_model(row.scene_provider),
         content_model=llm_registry.get_content_model(),
         api_key=gemini,
+        image_key=image_key,
     )
 
 

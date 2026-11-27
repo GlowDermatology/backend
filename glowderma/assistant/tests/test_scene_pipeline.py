@@ -3,6 +3,7 @@ owner's 5 % threshold), drift retries, the QA rejection, and ``manage.py scene_s
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from decimal import Decimal
 from io import BytesIO
@@ -403,6 +404,72 @@ def test_a_thumb_bite_counts_even_when_the_analyst_misses_it() -> None:
     assert caught.value.code == pipeline.OCCLUSION_NEEDS_AI
     _analysis, result, _usage = run(MARBLE, providers(held))
     assert result.generated_inside_pct > 0 and product_kept(result)
+
+
+class BackgroundOnly(FakeImageModel):
+    """A provider like Bria: keeps the given foreground, builds only the background, billed per image."""
+
+    name = "bria"
+    fills_hidden = False
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.keys: list[str] = []
+
+    def generate_image(self, request: Any, *, api_key: Secret) -> Any:
+        self.keys.append(api_key.reveal())
+        result = super().generate_image(request, api_key=Secret("k"))
+        return dataclasses.replace(result, billed_calls=1)
+
+
+def background_only(seg: Segmentation | None = None) -> tuple[pipeline.Providers, BackgroundOnly]:
+    model = BackgroundOnly()
+    segmenter = FakeSegmenter()
+    segmenter.push(seg if seg is not None else segmentation())
+    used = pipeline.Providers(
+        segmenter=segmenter, image_model=model, content_model=QA(), api_key=Secret("k"), image_key=Secret("b")
+    )
+    return used, model
+
+
+def test_a_background_only_provider_gets_the_cut_out_its_own_key_and_a_plain_scene() -> None:
+    used, model = background_only()
+    _analysis, result, usage = run(MARBLE, used)
+    assert product_kept(result) and model.keys == ["b"]  # Bria's key, not Gemini's
+    sent = model.calls[0]
+    assert sent.cutout is not None
+    cutout = Image.open(BytesIO(sent.cutout.data))
+    assert cutout.mode == "RGBA" and cutout.getchannel("A").getbbox() == result.product_box
+    assert sent.scene.startswith("A polished white Carrara marble") and "SCENE:" not in sent.scene
+    assert usage.bria_scene_calls == 1
+    priced = usage.cost(pipeline.Prices(bria_scene_per_call=Decimal("0.032")))
+    assert priced >= Decimal("0.032")
+
+
+def test_a_background_only_provider_cannot_fill_a_finger_bite() -> None:
+    bite = rect(BOX)
+    ImageDraw.Draw(bite).ellipse([BOX[2] - 25, 500, BOX[2] + 25, 560], fill=0)
+    used, model = background_only(Segmentation(product=bite, box=BOX, hand_present=True))
+    with pytest.raises(pipeline.SceneError) as caught:
+        run(MARBLE, used)
+    assert caught.value.code == pipeline.OCCLUSION_NOT_FILLABLE and model.calls == []
+    _analysis, result, _usage = run(MARBLE, providers(Segmentation(product=bite, box=BOX, hand_present=True)))
+    assert result.generated_inside_pct > 0  # Gemini fills it (marked for review)
+
+
+def test_gemini_gets_its_rules_and_no_cut_out() -> None:
+    used = providers()
+    _analysis, _result, usage = run(MARBLE, used)
+    sent = used.image_model.calls[-1]  # type: ignore[attr-defined]
+    assert sent.cutout is None and sent.scene == "" and "SCENE:" in sent.prompt
+    assert usage.bria_scene_calls == 0
+
+
+def test_the_bria_scene_text_is_plain_and_bounded() -> None:
+    text = prompts.bria_scene("Silk “draped” & folds — warm light.", "word " * 200)
+    assert "“" not in text and "&" not in text and "—" not in text
+    assert len(text.split()) <= prompts.BRIA_MAX_WORDS and text.endswith("no logos.")
+    assert text.startswith("Silk draped folds warm light.")
 
 
 def test_summary_counts_a_broken_rule() -> None:

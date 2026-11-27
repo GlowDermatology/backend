@@ -115,6 +115,11 @@ class ImageGenerationRequest:
     thinking_level: str = "minimal"  # "minimal" | "low" | "medium" | "high"
     timeout_seconds: int = 60  # per HTTP attempt: image models take 10-40 s
     max_retries: int = 1
+    # For providers that build the background around a given foreground (Bria): the product alone on
+    # transparency, framed like ``images[0]``, and the scene in a few plain English sentences. Models that
+    # follow ``prompt`` (Gemini) ignore both.
+    cutout: ImagePart | None = field(default=None, repr=False)
+    scene: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,10 +130,14 @@ class ImageGenerationResult:
     output_text_tokens: int  # text and thinking output (billed at the text rate)
     output_image_tokens: int  # billed at the image rate
     model: str
+    billed_calls: int = 0  # a provider billed per image (Bria), not per token
 
 
 class ImageModel(Protocol):
     name: str
+    # whether the model can paint a part of the product a finger hid (``False``: it only builds the
+    # background, and the product is pasted back as it is)
+    fills_hidden: bool
 
     def generate_image(self, request: ImageGenerationRequest, *, api_key: Secret) -> ImageGenerationResult:
         """One image generation; raises an :class:`LLMError` subclass."""

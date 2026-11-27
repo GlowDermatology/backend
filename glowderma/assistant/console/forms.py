@@ -115,7 +115,13 @@ class SceneSettingsForm(ChangesMixin, forms.ModelForm):  # type: ignore[type-arg
         widgets = {"style": forms.Textarea(attrs={"rows": 5})}
         help_texts = {
             "enabled": _("Studiya sahnalari va ekranlarga moslash admin panelda ko‘rinadi."),
-            "ai_enabled": _("AI sahnalari (Nano Banana). Google loyihasida to‘lov yoqilgan bo‘lishi kerak."),
+            "ai_enabled": _("AI sahnalari: fonni quyida tanlangan provayder chizadi."),
+            "scene_provider": _(
+                "AI sahna fonini kim chizadi. Gemini (Nano Banana): Google loyihasida to‘lov yoqilgan "
+                "bo‘lishi kerak; qo‘l yopgan kichik joyni to‘ldira oladi. Bria (Fibo 2): Provayderlar "
+                "sahifasidagi Bria kaliti bilan ishlaydi, faqat fonni chizadi (qo‘l yopgan rasmlar rad "
+                "etiladi). Har bir provayder o‘z kalitidan foydalanadi."
+            ),
             "segmenter": _(
                 "Mahsulotni fondan qanday ajratish: Gemini yashil fon (rasm modeli kerak) yoki Bria "
                 "(Provayderlar sahifasida Bria kaliti kerak)."
@@ -128,7 +134,8 @@ class SceneSettingsForm(ChangesMixin, forms.ModelForm):  # type: ignore[type-arg
             "style": _(
                 "Barcha AI sahnalariga qo‘shiladigan uslub. Mahsulotni o‘zgartirmaslik qoidalari kodda."
             ),
-            "price_bria_call": _("Bria bitta so‘rov narxi (tokenlarda emas)."),
+            "price_bria_call": _("Bria fonni olib tashlash narxi, bitta so‘rov (promptli: $0.025)."),
+            "price_bria_scene_call": _("Bria sahna (fon yaratish) narxi, bitta rasm ($0.032)."),
         }
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:

@@ -384,6 +384,12 @@ class SceneSettings(models.Model):
         default=enums.SceneSegmenter.GEMINI_MATTE,
         verbose_name="mahsulotni kesib olish",
     )
+    scene_provider = models.CharField(
+        max_length=16,
+        choices=enums.SceneImageProvider.choices,
+        default=enums.SceneImageProvider.GEMINI,
+        verbose_name="AI sahna provayderi",
+    )
     analyst_model = models.CharField(
         max_length=100, default="gemini-3.5-flash-lite", verbose_name="tahlil modeli (Gemini)"
     )
@@ -433,7 +439,13 @@ class SceneSettings(models.Model):
         max_digits=10, decimal_places=4, default=Decimal("30.00"), verbose_name="rasm chiqish (1M, USD)"
     )
     price_bria_call = models.DecimalField(
-        max_digits=10, decimal_places=4, default=Decimal("0.018"), verbose_name="Bria (bitta so‘rov, USD)"
+        max_digits=10,
+        decimal_places=4,
+        default=Decimal("0.025"),
+        verbose_name="Bria kesish (bitta so‘rov, USD)",
+    )
+    price_bria_scene_call = models.DecimalField(
+        max_digits=10, decimal_places=4, default=Decimal("0.032"), verbose_name="Bria sahna (bitta rasm, USD)"
     )
     # editable style guidance appended to the fixed scene rules (assistant.scenes.prompts)
     style = models.TextField(blank=True, default="", verbose_name="uslub ko‘rsatmasi")

@@ -58,6 +58,7 @@ PROVIDER_FIELDS = (
 SCENE_SETTINGS_FIELDS = (
     "enabled",
     "ai_enabled",
+    "scene_provider",
     "segmenter",
     "analyst_model",
     "image_model",
@@ -76,6 +77,7 @@ SCENE_SETTINGS_FIELDS = (
     "price_image_text_output",
     "price_image_output",
     "price_bria_call",
+    "price_bria_scene_call",
     "style",
 )
 SCENE_TEMPLATE_FIELDS = ("name_uz", "name_ru", "name_en", "enabled", "position", "params", "prompt")

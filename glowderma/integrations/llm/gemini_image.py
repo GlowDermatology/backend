@@ -46,6 +46,7 @@ def _split_output(usage: Any) -> tuple[int, int]:
 
 class GeminiImageModel(GeminiContentModel):
     name = "gemini"
+    fills_hidden = True
 
     def generate_image(self, request: ImageGenerationRequest, *, api_key: Secret) -> ImageGenerationResult:
         if not api_key:

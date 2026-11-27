@@ -8,6 +8,7 @@ anything the rules forbid (Pillow cannot see a stray hand).
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from glowderma.core.compose import Layout
@@ -98,3 +99,25 @@ def scene_prompt(layout: Layout, scene: str, style: str, *, occluded: bool, stri
     if style.strip():
         parts.append(f"STYLE: {style.strip()}")
     return "\n".join(parts)
+
+
+# Bria builds only the background (the product is kept), from one plain English description: no layout
+# rules, no special characters, about 90-110 words (Bria's guidance for ``fibo2``).
+BRIA_ENDING = (
+    "A soft natural contact shadow under the product, which stands on the surface. Premium skincare "
+    "photography, no people, no hands, no text, no logos."
+)
+BRIA_MAX_WORDS = 110
+_BRIA_UNSAFE = re.compile(r"[^0-9A-Za-z .,;:'()%-]+")
+
+
+def bria_scene(scene: str, style: str) -> str:
+    """The description Bria gets: the template's scene, the house style (cut to fit), the fixed ending."""
+
+    def plain(text: str) -> list[str]:
+        return _BRIA_UNSAFE.sub(" ", text.replace("\u2019", "'")).split()
+
+    head, ending = plain(scene), plain(BRIA_ENDING)
+    room = max(0, BRIA_MAX_WORDS - len(head) - len(ending))
+    words = head + plain(style)[:room] + ending
+    return " ".join(words)

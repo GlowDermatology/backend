@@ -1802,7 +1802,8 @@ state (JobState), outcome ("pending" | "accepted" | "discarded" | "expired"), pr
 the parts drawn inside the product washed pink; null when none), product_box, crops: {portrait, square},
 generated_inside_pct, occluded_pct}`. Failure codes: `scene_product_cut_off` (the product is not whole in the
 photo), `scene_hand_covers_product` (a hand hides more than `max_occluded_pct`), `scene_occlusion_needs_ai`
-(studio templates fill nothing), `scene_no_product`, `scene_mask_unusable`, `scene_product_drift`,
+(studio templates fill nothing), `scene_occlusion_not_fillable` (the AI scene provider is Bria, which paints only the
+background), `scene_no_product`, `scene_mask_unusable`, `scene_product_drift`,
 `scene_result_rejected`, `scene_source_changed`, `provider_unavailable`, `ai_not_configured`, `ai_refused`,
 `ai_bad_output`, `vault_unavailable`, `worker_lost`, `server_error`. Warnings: `hand_removed`,
 `product_partly_generated`, `product_floating`, `low_resolution`, `straightened`.

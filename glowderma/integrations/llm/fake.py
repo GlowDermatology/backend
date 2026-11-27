@@ -176,6 +176,7 @@ class FakeImageModel:
     """
 
     name = "fake"
+    fills_hidden = True
 
     def __init__(self) -> None:
         self.calls: list[ImageGenerationRequest] = []

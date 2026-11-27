@@ -16,6 +16,7 @@ from django.core.exceptions import ImproperlyConfigured
 
 from glowderma.core import integration_modes
 
+from .bria_image import BriaSceneModel
 from .fake import FakeContentModel, FakeImageModel
 from .gemini import GeminiContentModel
 from .gemini_image import GeminiImageModel
@@ -23,7 +24,10 @@ from .ports import ContentModel, ImageModel, LLMNotConfigured
 
 PROVIDER = "ai"  # the name in core.integration_modes.PROVIDER_MODE_SETTINGS
 LIVE_PROVIDERS: dict[str, Callable[[], ContentModel]] = {"gemini": GeminiContentModel}
-LIVE_IMAGE_PROVIDERS: dict[str, Callable[[], ImageModel]] = {"gemini": GeminiImageModel}
+LIVE_IMAGE_PROVIDERS: dict[str, Callable[[], ImageModel]] = {
+    "gemini": GeminiImageModel,
+    "bria": BriaSceneModel,
+}
 
 _fake = FakeContentModel()
 _fake_image = FakeImageModel()
@@ -48,7 +52,7 @@ def fake_content_model() -> FakeContentModel:
 
 
 def get_image_model(provider: str = "gemini") -> ImageModel:
-    """The image-output adapter, chosen like :func:`get_content_model`."""
+    """The image-output adapter, chosen like :func:`get_content_model` (``gemini`` or ``bria``)."""
     mode = settings.AI_MODE
     if mode == "fake":
         if integration_modes.fake_in_production(PROVIDER):

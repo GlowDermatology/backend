@@ -460,6 +460,14 @@ msgstr "AI providers"
 msgid "AI rejimi"
 msgstr "AI mode"
 
+#: glowderma/assistant/console/forms.py
+msgid "AI sahna fonini kim chizadi. Gemini (Nano Banana): Google loyihasida to‘lov yoqilgan bo‘lishi kerak; qo‘l yopgan kichik joyni to‘ldira oladi. Bria (Fibo 2): Provayderlar sahifasidagi Bria kaliti bilan ishlaydi, faqat fonni chizadi (qo‘l yopgan rasmlar rad etiladi). Har bir provayder o‘z kalitidan foydalanadi."
+msgstr "Who paints an AI scene's background. Gemini (Nano Banana): billing must be enabled on the Google project; it can fill a small part a hand hides. Bria (Fibo 2): works with the Bria key from the Providers page and paints only the background (photos where a hand covers the product are refused). Each provider uses its own key."
+
+#: model metadata
+msgid "AI sahna provayderi"
+msgstr "AI scene provider"
+
 #: glowderma/assistant/scenes/services.py
 msgid "AI sahnalar hali yoqilmagan: studiya shablonidan foydalaning."
 msgstr "AI scenes are not switched on yet: use a studio template."
@@ -469,8 +477,8 @@ msgid "AI sahnalar yoqilgan"
 msgstr "AI scenes on"
 
 #: glowderma/assistant/console/forms.py
-msgid "AI sahnalari (Nano Banana). Google loyihasida to‘lov yoqilgan bo‘lishi kerak."
-msgstr "AI scenes (Nano Banana). Billing must be enabled on the Google project."
+msgid "AI sahnalari: fonni quyida tanlangan provayder chizadi."
+msgstr "AI scenes: the provider chosen below paints the background."
 
 #: model metadata
 msgid "AI sahnasi"
@@ -1200,24 +1208,36 @@ msgid "Bo‘shatildi"
 msgstr "Released"
 
 #: model metadata
-msgid "Bria (bitta so‘rov, USD)"
-msgstr "Bria (per request, USD)"
+msgid "Bria"
+msgstr "Bria"
 
 #: model metadata
-msgid "Bria (fon olib tashlash)"
-msgstr "Bria (background removal)"
+msgid "Bria (Fibo 2)"
+msgstr "Bria (Fibo 2)"
 
 #: model metadata
 msgid "Bria RMBG"
 msgstr "Bria RMBG"
 
 #: glowderma/assistant/console/forms.py
-msgid "Bria bitta so‘rov narxi (tokenlarda emas)."
-msgstr "Bria's price per request (not per token)."
+msgid "Bria fonni olib tashlash narxi, bitta so‘rov (promptli: $0.025)."
+msgstr "Bria background removal price per call (with a prompt: $0.025)."
+
+#: model metadata
+msgid "Bria kesish (bitta so‘rov, USD)"
+msgstr "Bria cut-out (one call, USD)"
 
 #: model metadata
 msgid "Bria modeli"
 msgstr "Bria model"
+
+#: model metadata
+msgid "Bria sahna (bitta rasm, USD)"
+msgstr "Bria scene (one image, USD)"
+
+#: glowderma/assistant/console/forms.py
+msgid "Bria sahna (fon yaratish) narxi, bitta rasm ($0.032)."
+msgstr "Bria scene (background generation) price per image ($0.032)."
 
 #: glowderma/catalog/services.py
 msgid "Bu Billz ID bilan mahsulot allaqachon bor."
@@ -2177,6 +2197,10 @@ msgstr "Google"
 #: model metadata
 msgid "Google Gemini"
 msgstr "Google Gemini"
+
+#: model metadata
+msgid "Google Gemini (Nano Banana)"
+msgstr "Google Gemini (Nano Banana)"
 
 #: glowderma/integrations/admin.py
 msgid "HTTP javob"
@@ -4599,6 +4623,10 @@ msgstr "A draft does not need to be cancelled: delete or edit it instead."
 #: glowderma/assistant/templates/assistant/console/prompt_version.html
 msgid "Qoralamani saqlash"
 msgstr "Save draft"
+
+#: glowderma/assistant/scenes/services.py
+msgid "Qo‘l mahsulotning bir qismini yopib turibdi: Bria sahnasi faqat fonni chizadi va yopilgan joyni to‘ldira olmaydi. Rasmni qayta oling."
+msgstr "A hand covers part of the product: a Bria scene paints only the background and cannot fill the hidden part. Retake the photo."
 
 #: glowderma/assistant/scenes/services.py
 msgid "Qo‘l mahsulotning bir qismini yopib turibdi: studiya shabloni buni to‘ldira olmaydi. AI sahnasini tanlang yoki rasmni qayta oling."

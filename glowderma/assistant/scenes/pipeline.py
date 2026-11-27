@@ -55,6 +55,7 @@ NO_PRODUCT = "scene_no_product"
 MASK_UNUSABLE = "scene_mask_unusable"
 HAND_COVERS_PRODUCT = "scene_hand_covers_product"
 OCCLUSION_NEEDS_AI = "scene_occlusion_needs_ai"
+OCCLUSION_NOT_FILLABLE = "scene_occlusion_not_fillable"  # the AI provider builds only the background
 PRODUCT_DRIFT = "scene_product_drift"
 RESULT_REJECTED = "scene_result_rejected"
 PRODUCT_CUT_OFF = "scene_product_cut_off"
@@ -72,7 +73,8 @@ class Usage:
     image_output: int = 0
     text_calls: int = 0
     image_calls: int = 0
-    bria_calls: int = 0  # billed per call
+    bria_calls: int = 0  # the cutter, billed per call
+    bria_scene_calls: int = 0  # Bria scene images, billed per image
 
     def add_text(self, input_tokens: int, output_tokens: int) -> None:
         self.text_input += input_tokens
@@ -93,21 +95,25 @@ class Usage:
             + Decimal(self.image_input) * prices.image_input
             + Decimal(self.image_text_output) * prices.image_text_output
             + Decimal(self.image_output) * prices.image_output
-        ) / million + Decimal(self.bria_calls) * prices.bria_per_call
+        ) / million + (
+            Decimal(self.bria_calls) * prices.bria_per_call
+            + Decimal(self.bria_scene_calls) * prices.bria_scene_per_call
+        )
         return total.quantize(Decimal("0.000001"))
 
 
 @dataclass(frozen=True, slots=True)
 class Prices:
-    """USD per 1M tokens (``bria_per_call``: per call). Defaults are placeholders from third-party pages at
-    the time of writing; the console's values win in production."""
+    """USD per 1M tokens (``bria_per_call`` / ``bria_scene_per_call``: per call). Defaults are placeholders
+    from the providers' pages at the time of writing; the console's values win in production."""
 
     text_input: Decimal = Decimal("0.10")
     text_output: Decimal = Decimal("0.40")
     image_input: Decimal = Decimal("1.50")
     image_text_output: Decimal = Decimal("7.50")
     image_output: Decimal = Decimal("30.00")
-    bria_per_call: Decimal = Decimal("0.018")
+    bria_per_call: Decimal = Decimal("0.025")  # background removal with a prompt
+    bria_scene_per_call: Decimal = Decimal("0.032")  # background generation
 
 
 @dataclass(frozen=True)
@@ -135,7 +141,8 @@ class Providers:
     segmenter: Segmenter
     image_model: ImageModel
     content_model: ContentModel  # the QA check
-    api_key: Secret
+    api_key: Secret  # Gemini: the analyst and the QA check
+    image_key: Secret | None = None  # the image model's own key (Bria's); ``None``: ``api_key``
 
 
 class SceneError(Exception):
@@ -378,8 +385,24 @@ def ai_scene(
 ) -> Result:
     started = time.monotonic()
     fill = check_occlusion(analysis, "ai_scene", config)
+    if fill and not providers.image_model.fills_hidden:
+        raise SceneError(
+            OCCLUSION_NOT_FILLABLE,
+            f"{analysis.occluded_pct}% hidden; {providers.image_model.name} builds only the background",
+        )
     prepared = prepare(analysis, config)
     sent = compose.canvas(prepared.placed)
+    cutout_part: ImagePart | None = None
+    scene = ""
+    if not providers.image_model.fills_hidden:
+        # A provider that keeps a given foreground and builds only the background (Bria) gets the same
+        # canvas with the paste alpha (only flat placeholder can show around the product, never the photo's
+        # hand or office) and a plain scene description instead of the layout rules.
+        cutout = sent.copy()
+        cutout.putalpha(prepared.placed.alpha)
+        cutout_part = ImagePart(data=compose.encode(cutout, "PNG"), mime_type="image/png")
+        scene = prompts.bria_scene(template.prompt, config.style)
+    image_key = providers.image_key if providers.image_key is not None else providers.api_key
     # The model sees the canvas at its own 4:5 size; the result is resized back to the master.
     attempts: list[Attempt] = []
     last_error = PRODUCT_DRIFT
@@ -401,14 +424,17 @@ def ai_scene(
                     thinking_level=config.thinking_level,
                     timeout_seconds=config.image_timeout,
                     max_retries=config.max_retries,
+                    cutout=cutout_part,
+                    scene=scene,
                 ),
-                api_key=providers.api_key,
+                api_key=image_key,
             )
         except LLMError as exc:
             usage.add_image(exc.input_tokens, 0, exc.output_tokens)
             exc.usage = usage  # type: ignore[attr-defined]
             raise
         usage.add_image(answer.input_tokens, answer.output_text_tokens, answer.output_image_tokens)
+        usage.bria_scene_calls += answer.billed_calls
         try:
             generated = compose.decode(answer.image).convert("RGB")
         except Exception:  # noqa: BLE001 - provider bytes that do not decode

@@ -348,7 +348,7 @@ class AssistantImproveGoal(TextChoices):
 
 class AssistantProvider(TextChoices):
     GEMINI = "gemini", "Google Gemini"
-    BRIA = "bria", "Bria (fon olib tashlash)"
+    BRIA = "bria", "Bria"
 
 
 # --- product scenes and screen-fit renditions (glowderma.assistant.scenes, glowderma.catalog) ---
@@ -381,6 +381,13 @@ class SceneJobOutcome(TextChoices):
     ACCEPTED = "accepted", "Qabul qilindi"
     DISCARDED = "discarded", "Bekor qilindi"
     EXPIRED = "expired", "Muddati o‘tdi"
+
+
+class SceneImageProvider(TextChoices):
+    """Who paints an AI scene's background; each uses its own key (AI provayderlar)."""
+
+    GEMINI = "gemini", "Google Gemini (Nano Banana)"
+    BRIA = "bria", "Bria (Fibo 2)"
 
 
 class SceneSegmenter(TextChoices):

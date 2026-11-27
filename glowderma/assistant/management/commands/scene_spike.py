@@ -28,6 +28,7 @@ from django.core.management.base import BaseCommand, CommandError, CommandParser
 from glowderma.assistant.scenes import pipeline
 from glowderma.assistant.scenes.templates import BY_KEY, Template
 from glowderma.core import compose
+from glowderma.integrations.llm.bria_image import BriaSceneModel
 from glowderma.integrations.llm.fake import FakeContentModel, FakeImageModel
 from glowderma.integrations.llm.gemini import GeminiContentModel
 from glowderma.integrations.llm.gemini_image import GeminiImageModel
@@ -74,6 +75,7 @@ def build_providers(
     api_key: Secret,
     image_model: str = pipeline.Config.image_model,
     bria_key: Secret | None = None,
+    scene_provider: str = "gemini",
 ) -> pipeline.Providers:
     if fake:
         return pipeline.Providers(
@@ -90,6 +92,14 @@ def build_providers(
         else:
             cutter = GeminiMatteCutter(image, model=image_model)
             chosen = CombinedSegmenter(analyst, cutter, cutter_key=api_key)
+    if scene_provider == "bria":
+        return pipeline.Providers(
+            segmenter=chosen,
+            image_model=BriaSceneModel(),
+            content_model=content,
+            api_key=api_key,
+            image_key=bria_key or Secret(""),
+        )
     return pipeline.Providers(segmenter=chosen, image_model=image, content_model=content, api_key=api_key)
 
 
@@ -290,6 +300,9 @@ class Command(BaseCommand):
         )
         parser.add_argument("--fake", action="store_true", help="offline fakes, no network")
         parser.add_argument("--segmenter", choices=("json", "matte", "bria"), default="matte")
+        parser.add_argument(
+            "--scene-provider", choices=("gemini", "bria"), default="gemini", help="who paints AI scenes"
+        )
         parser.add_argument("--segment-model", default=pipeline.Config.segment_model)
         parser.add_argument("--image-model", default=pipeline.Config.image_model)
         parser.add_argument("--qa-model", default=pipeline.Config.qa_model)
@@ -314,7 +327,7 @@ class Command(BaseCommand):
         templates = [BY_KEY[key] for key in keys]
         api_key = Secret("fake-key") if options["fake"] else _key(options["key_source"], options["key_env"])
         bria_key = None
-        if options["segmenter"] == "bria" and not options["fake"]:
+        if "bria" in (options["segmenter"], options["scene_provider"]) and not options["fake"]:
             bria_key = _key(options["key_source"], options["bria_key_env"], "bria")
         providers = build_providers(
             fake=options["fake"],
@@ -322,6 +335,7 @@ class Command(BaseCommand):
             api_key=api_key,
             image_model=options["image_model"],
             bria_key=bria_key,
+            scene_provider=options["scene_provider"],
         )
         config = pipeline.Config(
             segment_model=options["segment_model"],
