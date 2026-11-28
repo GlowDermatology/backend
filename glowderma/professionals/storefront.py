@@ -20,12 +20,13 @@ from glowderma.professionals.models import (
 
 
 def connect() -> None:
-    storefront.watch(Professional, [storefront.SPECIALISTS, storefront.SERVICES])
+    # The landing lists its hand-picked specialists only while they are published (and counts them).
+    storefront.watch(Professional, [storefront.SPECIALISTS, storefront.SERVICES, storefront.HOME])
     storefront.watch_m2m(
         Professional.additional_locations.through, [storefront.SPECIALISTS, storefront.CLINICS]
     )
     storefront.watch(Service, [storefront.SERVICES, storefront.SPECIALISTS])
-    storefront.watch(Location, [storefront.CLINICS, storefront.SPECIALISTS])
+    storefront.watch(Location, [storefront.CLINICS, storefront.SPECIALISTS, storefront.HOME])
     for schedule in (WorkingHours, WorkingHoursOverride, BlockedPeriod):
         storefront.watch(schedule, [storefront.AVAILABILITY, storefront.CLINICS])
     storefront.watch(HomeSpecialist, [storefront.HOME])

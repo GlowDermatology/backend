@@ -44,21 +44,24 @@ Each app declares what it shows in its `storefront` module (`<app>/storefront.py
 
 | App | Write | Tags |
 |---|---|---|
-| catalog | `Product`, `ProductImage`, `ProductStock` saves and deletes; a photo reorder; a Billz product or stock change | `shop:products` |
-| catalog | `Category` saves and deletes | `shop:categories`, `shop:products` |
+| catalog | `Product` saves and deletes; a Billz product change (a product's status, price or category decides its category's count and its banner links) | `shop:products`, `shop:categories`, `shop:banners` |
+| catalog | `ProductImage`, `ProductStock` saves and deletes; a photo reorder; every stored Billz stock read (a newer read changes availability even with the same quantity: sold units Billz has now seen stop counting) | `shop:products` |
+| catalog | `Category` saves and deletes (an inactive category hides its products and drops banner links) | `shop:categories`, `shop:products`, `shop:banners` |
 | catalog | category reorder | `shop:categories` |
 | catalog | `Banner` saves and deletes, banner reorder, banners unlinked from a deleted category | `shop:banners` |
 | catalog | «Bosh sahifa» product and category picks | `shop:home` |
-| professionals | `Professional` | `shop:specialists`, `shop:services` |
+| professionals | `Professional` (the landing lists its picked specialists only while published) | `shop:specialists`, `shop:services`, `shop:home` |
 | professionals | `Service` | `shop:services`, `shop:specialists` |
-| professionals | `Location`; the clinics a specialist works at (many-to-many) | `shop:clinics`, `shop:specialists` |
+| professionals | `Location` | `shop:clinics`, `shop:specialists`, `shop:home` |
+| professionals | the clinics a specialist works at (many-to-many) | `shop:clinics`, `shop:specialists` |
 | professionals | `WorkingHours`, `WorkingHoursOverride`, `BlockedPeriod` | `shop:availability`, `shop:clinics` |
 | professionals | photo removal | `shop:specialists` |
 | professionals | «Bosh sahifa» specialist picks | `shop:home` |
 | appointments | `Appointment` (booking, confirmation, cancellation, reschedule) | `shop:availability` |
-| commerce | `StockReservation` created; a reservation converted or released (`_settle_reservations`) | `shop:products` |
-| commerce | a new hourly bestsellers list (only when it differs) | `shop:home` |
+| commerce | a checkout's reservations (`bulk_create`); a reservation converted or released (`_settle_reservations`); an order cancelled; reservations settled against Billz | `shop:products` |
+| commerce | a new hourly bestsellers list (only when it differs, after it is stored) | `shop:home` |
 | loyalty | a new cashback policy version (and its tiers) | `shop:home` |
+| loyalty | a sale linked to its Billz push (`link_billz_sale`: whether its units still count as sold) | `shop:products` |
 | site_config | `SiteSettings` | `shop:settings` |
 
 ## How a change travels

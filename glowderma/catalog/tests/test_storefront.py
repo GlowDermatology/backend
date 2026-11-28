@@ -4,6 +4,7 @@ alike."""
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -23,7 +24,9 @@ from glowderma.core.tests.storefront_support import revalidated
 
 pytestmark = pytest.mark.django_db
 PRODUCTS = {"shop:products"}
-CATEGORIES = {"shop:categories", "shop:products"}
+# A product's status, price or category decides its category's count and its banner links.
+PRODUCT = {"shop:products", "shop:categories", "shop:banners"}
+CATEGORIES = {"shop:categories", "shop:products", "shop:banners"}
 BANNERS = {"shop:banners"}
 HOME = {"shop:home"}
 
@@ -37,7 +40,7 @@ def test_products_their_photos_and_stock(django_capture_on_commit_callbacks: Any
         product.price = 199_000
         product.save(update_fields=["price"])
 
-    assert revalidated(capture, price) == PRODUCTS
+    assert revalidated(capture, price) == PRODUCT
     image = ProductImageFactory.create(product=product)
     assert revalidated(capture, lambda: ProductImageFactory.create(product=product)) == PRODUCTS
     assert revalidated(capture, image.delete) == PRODUCTS
@@ -89,14 +92,19 @@ def test_a_photo_reorder_is_a_product_change(
     assert tags == PRODUCTS
 
 
-def test_a_billz_stock_read_marks_products_only_when_the_quantity_moves(
+def test_a_billz_stock_read_marks_products_unless_it_is_older_than_the_stored_one(
     django_capture_on_commit_callbacks: Any,
 ) -> None:
     capture = django_capture_on_commit_callbacks
     product = ProductFactory.create()
     ProductStockFactory.create(product=product, quantity=5, synced_at=timeutils.now())
     later = timeutils.now()
-    assert revalidated(capture, lambda: services.sync_stock(product, 5, later)) == set()
+    earlier = later - timedelta(hours=1)
+    # An older read than the stored one changes nothing.
+    assert revalidated(capture, lambda: services.sync_stock(product, 9, earlier)) == set()
+    # A newer read marks products stale even with the same quantity: sold units Billz has now seen stop
+    # counting against availability.
+    assert revalidated(capture, lambda: services.sync_stock(product, 5, later)) == PRODUCTS
     assert revalidated(capture, lambda: services.sync_stock(product, 2, timeutils.now())) == PRODUCTS
     assert ProductStock.objects.get(product=product).quantity == 2
 

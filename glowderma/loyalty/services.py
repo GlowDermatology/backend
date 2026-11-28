@@ -43,7 +43,7 @@ from django.utils import timezone
 from rest_framework.exceptions import ErrorDetail
 
 from glowderma.accounts.models import StaffUser
-from glowderma.core import audit, enums, timeutils
+from glowderma.core import audit, enums, storefront, timeutils
 from glowderma.core.api.exceptions import InvalidTransition, field_error
 from glowderma.core.uzsource import N_
 from glowderma.loyalty import engine, selectors
@@ -1110,6 +1110,8 @@ def _link_billz(
                         billz_pushed_at=pushed,
                         updated_at=timeutils.now(),
                     )
+                    # Whether the sale's units still count as sold depends on it (commerce.selectors).
+                    storefront.changed(storefront.PRODUCTS)
             except IntegrityError as exc:
                 if "purchase_billz_sale_unique" not in str(exc):
                     raise

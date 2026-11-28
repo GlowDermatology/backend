@@ -24,6 +24,7 @@ from django.db.models import Q
 from rest_framework.exceptions import NotFound, ValidationError
 
 from glowderma.catalog import selectors
+from glowderma.catalog import storefront as catalog_storefront
 from glowderma.catalog.models import (
     HOME_PICK_LIMITS,
     PRODUCT_SLUG_CONSTRAINT,
@@ -1155,8 +1156,9 @@ def sync_stock(product: Product, quantity: int, synced_at: Any) -> bool:
             )
             return False
         ProductStock.objects.filter(pk=stock.pk).update(quantity=quantity, synced_at=synced_at)
-    if previous != quantity:
-        storefront.changed(storefront.PRODUCTS)
+    # A newer read changes availability even with the same quantity: sold units Billz has now seen stop
+    # counting against it (commerce.selectors), so every stored read marks the products stale.
+    storefront.changed(storefront.PRODUCTS)
     return previous != quantity
 
 
@@ -1191,7 +1193,7 @@ def upsert_from_billz(row: BillzProduct) -> UpsertOutcome:
             fields["volume"] = row.volume
         Product.objects.filter(pk=product.pk).update(**fields)
         if changed:
-            storefront.changed(storefront.PRODUCTS)
+            storefront.changed(*catalog_storefront.PRODUCT_TAGS)
         stock_changed = sync_stock(product, row.stock, row.synced_at)
         return "updated" if changed or stock_changed else "unchanged"
 

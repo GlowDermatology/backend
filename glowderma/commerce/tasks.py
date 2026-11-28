@@ -1218,7 +1218,8 @@ def refresh_bestsellers() -> list[int]:
     end = timeutils.now()
     start = end - timedelta(days=selectors.BESTSELLERS_DAYS)
     ids = [row.product_id for row in selectors.top_products(start, end, limit=selectors.BESTSELLERS_LIMIT)]
-    if cache.get(selectors.BESTSELLERS_CACHE_KEY) != ids:
-        storefront.changed(storefront.HOME)  # the landing's bestsellers rail and carousel
+    moved = cache.get(selectors.BESTSELLERS_CACHE_KEY) != ids
     cache.set(selectors.BESTSELLERS_CACHE_KEY, ids, timeout=selectors.BESTSELLERS_CACHE_SECONDS)
+    if moved:
+        storefront.changed(storefront.HOME)  # the landing's bestsellers rail and carousel
     return ids

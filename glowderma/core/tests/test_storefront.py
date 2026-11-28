@@ -101,7 +101,11 @@ def test_a_watched_model_sends_its_tags_but_a_fixture_load_does_not(
 ) -> None:
     with django_capture_on_commit_callbacks(execute=True):
         category = CategoryFactory.create()
-    assert {tag for m in messages() for tag in m.payload["tags"]} == {"shop:categories", "shop:products"}
+    assert {tag for m in messages() for tag in m.payload["tags"]} == {
+        "shop:categories",
+        "shop:products",
+        "shop:banners",
+    }
     OutboxMessage.objects.filter(topic=storefront.TOPIC).delete()
     with django_capture_on_commit_callbacks(execute=True):
         post_save.send(sender=Category, instance=category, created=False, raw=True, using="default")

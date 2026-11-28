@@ -24,6 +24,7 @@ from glowderma.professionals.tests.factories import (
 
 pytestmark = pytest.mark.django_db
 SPECIALISTS = {"shop:specialists", "shop:services"}
+SPECIALIST = SPECIALISTS | {"shop:home"}  # the landing lists its picked specialists only while published
 SCHEDULE = {"shop:availability", "shop:clinics"}
 
 
@@ -35,10 +36,14 @@ def test_specialists_services_and_clinics(django_capture_on_commit_callbacks: An
         specialist.name = "Dilnoza Karimova"
         specialist.save(update_fields=["name"])
 
-    assert revalidated(capture, rename) == SPECIALISTS
+    assert revalidated(capture, rename) == SPECIALIST
     assert revalidated(capture, lambda: ServiceFactory.create(professional=specialist)) == SPECIALISTS
     location = LocationFactory.create()
-    assert revalidated(capture, lambda: LocationFactory.create()) == {"shop:clinics", "shop:specialists"}
+    assert revalidated(capture, lambda: LocationFactory.create()) == {
+        "shop:clinics",
+        "shop:specialists",
+        "shop:home",
+    }
     tags = revalidated(capture, lambda: specialist.additional_locations.add(location))
     assert tags == {"shop:specialists", "shop:clinics"}
     tags = revalidated(capture, lambda: specialist.additional_locations.remove(location))

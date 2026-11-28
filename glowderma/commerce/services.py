@@ -333,6 +333,9 @@ def _set_status(order: Order, status: str, at: datetime, **extra: Any) -> None:
     for name, value in extra.items():
         setattr(order, name, value)
     order.save()
+    if status == enums.OrderStatus.CANCELLED:
+        # A cancelled order's sold units stop counting against the stock (commerce.selectors).
+        storefront.changed(storefront.PRODUCTS)
 
 
 def _audit(action: str, order: Order, actor_id: int | None, request: Any, after: dict[str, Any]) -> None:
@@ -593,6 +596,7 @@ def create_order(
             )
             for line in lines
         )
+        storefront.changed(storefront.PRODUCTS)  # the products' available units drop (core.storefront)
         if cashback_used > 0:
             try:
                 loyalty_services.create_hold(customer.pk, order.pk, cashback_used, expires_at)
@@ -919,9 +923,12 @@ def settle_billz_reservations(
     )
     if product_ids is not None:
         eligible = eligible.filter(product_id__in=list(product_ids))
-    return StockReservation.objects.filter(
+    settled = StockReservation.objects.filter(
         pk__in=eligible.values("pk"), billz_settled_at__isnull=True
     ).update(billz_settled_at=instant, updated_at=instant)
+    if settled:
+        storefront.changed(storefront.PRODUCTS)  # settled units stop counting as sold
+    return settled
 
 
 def settle_order_reservations(order_id: int, *, at: datetime | None = None) -> int:
@@ -930,9 +937,12 @@ def settle_order_reservations(order_id: int, *, at: datetime | None = None) -> i
     customer contract §6.14), so the units must never start counting at the first live read."""
     _aware(at, "at")
     instant = at or timeutils.now()
-    return StockReservation.objects.filter(
+    settled = StockReservation.objects.filter(
         order_id=order_id, state=StockReservation.State.CONVERTED, billz_settled_at__isnull=True
     ).update(billz_settled_at=instant, updated_at=instant)
+    if settled:
+        storefront.changed(storefront.PRODUCTS)  # settled units stop counting as sold
+    return settled
 
 
 # --- admin cancel (rows 4, 6, 7) ----------------------------------------------------------------------------
