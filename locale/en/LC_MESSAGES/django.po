@@ -9637,3 +9637,9 @@ msgstr "№"
 #: glowderma/commerce/admin.py
 msgid "№%(number)s raqamli buyurtma topilmadi."
 msgstr "Order №%(number)s was not found."
+
+msgid "Shablonni saqlash"
+msgstr "Template save"
+
+msgid "Shablon hali saqlanmoqda: AI tekshiruvi tugashini kuting."
+msgstr "The template is still being saved: wait for the AI check to finish."

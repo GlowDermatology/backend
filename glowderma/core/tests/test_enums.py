@@ -239,7 +239,7 @@ SCENES_TABLE: dict[str, list[str]] = {
     "ProductImageSource": ["upload", "studio", "ai_scene"],
     "RenditionMode": ["auto", "manual"],
     "SceneTemplateKind": ["studio", "ai_scene"],
-    "SceneJobKind": ["studio", "ai_scene", "fit", "preview", "banner"],
+    "SceneJobKind": ["studio", "ai_scene", "fit", "preview", "banner", "template"],
     "SceneJobOutcome": ["pending", "accepted", "discarded", "expired"],
 }
 ALL_TABLES = {

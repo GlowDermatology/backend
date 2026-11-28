@@ -284,17 +284,17 @@ class SceneTemplateWriteSerializer(serializers.Serializer[dict[str, Any]]):
     reference = serializers.ImageField(
         required=False,
         help_text="A picture of the scene alone (JPG, PNG, WebP; ≤ 5 MB): screened (no product, person or "
-        "text) and described in the same request.",
+        "text) and described by the AI on the worker (the save is then a job).",
     )
     remove_reference = serializers.BooleanField(required=False, default=False)
     enabled = serializers.BooleanField(required=False)
 
 
-# a product photo's scene jobs (a template preview is the console's; a banner image has its own endpoint)
+# a product photo's scene jobs (a template's picture and save, and a banner image have their own endpoints)
 STAFF_SCENE_KINDS = [
     kind
     for kind in enums.SceneJobKind.values
-    if kind not in (enums.SceneJobKind.PREVIEW, enums.SceneJobKind.BANNER)
+    if kind not in (enums.SceneJobKind.PREVIEW, enums.SceneJobKind.BANNER, enums.SceneJobKind.TEMPLATE)
 ]
 
 
@@ -421,6 +421,10 @@ class SceneJobSerializer(serializers.Serializer[Any]):
     @extend_schema_field(SceneCandidateSerializer(allow_null=True))
     def get_result(self, obj: Any) -> dict[str, Any] | None:
         if obj.state != enums.JobState.SUCCEEDED or obj.outcome == enums.SceneJobOutcome.EXPIRED:
+            return None
+        if (
+            obj.kind == enums.SceneJobKind.TEMPLATE
+        ):  # its result is the template (`template.saved_template_id`)
             return None
         crops = obj.crops or {}
         return {

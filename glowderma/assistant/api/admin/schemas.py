@@ -166,34 +166,40 @@ BANNER_IMAGE_USE_POST = extend_schema(
 SCENE_TEMPLATE_CREATE = extend_schema(
     operation_id="admin_scene_templates_create",
     description=(
-        "A new AI template (§2.20.9), last in the list: `name` (`uz` required) and `text` (the scene "
-        "in any language: translated to English and screened, 400 `text` when refused) and/or "
-        "`reference` (a picture of the scene alone: screened, 400 `reference` when it shows a product, a "
-        "person or text, and described for Bria). JSON or multipart (`name.uz`, …, the file part "
-        "`reference`). 400 `text` `scene` without either; 409 `scenes_disabled` / `scene_ai_disabled`. The "
-        "translation and screening run in the request (a few seconds; 400 with a message when the AI "
-        "does not answer)."
+        "A new AI template (§2.20.9), last in the list: `name` (`uz` required) and `text` (the scene in any "
+        "language) and/or `reference` (a picture of the scene alone). JSON or multipart (`name.uz`, …, the "
+        "file part `reference`). The AI checks it on the worker: 202 the job (kind `template`); poll "
+        "`scenes/jobs/{id}/` until `succeeded` (`template.saved_template_id` is the new template) or "
+        "`failed` "
+        "(nothing saved): `scene_custom_refused` (the text asks for people, text or brands; field `text`), "
+        "`template_reference_product` / `template_reference_people` / `template_reference_text` (the "
+        "picture; field `reference`), or the AI's own codes. 400 `text` `scene` without either, `reference` "
+        "for an unreadable picture; 409 `scenes_disabled` / `scene_ai_disabled`."
     ),
     request={
         "multipart/form-data": SceneTemplateWriteSerializer,
         "application/json": SceneTemplateWriteSerializer,
     },
-    responses={201: SceneTemplateSerializer, **ADMIN_ERRORS},
+    responses={202: SceneJobSerializer, **ADMIN_ERRORS},
 )
 
 SCENE_TEMPLATE_PATCH = extend_schema(
     operation_id="admin_scene_templates_partial_update",
     description=(
         "Edit a template (§2.20.9): `name`, `enabled` (false hides it from the dialogs; the ops console "
-        "shows it again), and for an AI template `text`, `reference` (replace) or `remove_reference`. A "
-        "changed text clears a reference made from the old one (an uploaded one stays). A studio "
-        "template's colours stay in the ops console (400 `text`)."
+        "shows it again), and for an AI template `text`, `reference` (replace) or `remove_reference`. 200 "
+        "the template when nothing needs the AI (names, visibility, a removed reference, a cleared text). "
+        "A changed text or a new reference is checked by the AI on the worker: 202 the job (kind "
+        "`template`, failures as for create; the whole edit is saved when it succeeds); 409 "
+        "`scene_template_saving` while an earlier one is checked. A changed text clears a reference made "
+        "from the old one (an uploaded one stays). A studio template's colours stay in the ops console "
+        "(400 `text`)."
     ),
     request={
         "multipart/form-data": SceneTemplateWriteSerializer,
         "application/json": SceneTemplateWriteSerializer,
     },
-    responses={200: SceneTemplateSerializer, **ADMIN_ERRORS},
+    responses={200: SceneTemplateSerializer, 202: SceneJobSerializer, **ADMIN_ERRORS},
 )
 
 SCENE_TEMPLATE_REFERENCE_POST = extend_schema(

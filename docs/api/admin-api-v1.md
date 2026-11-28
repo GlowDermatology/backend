@@ -1863,15 +1863,32 @@ template gets a reference) its older sample picture.
 
 **`POST scenes/templates/`** creates an AI template. Body (JSON or multipart):
 - `name` (`{uz, ru, en}`; `name.uz` …), `uz` required;
-- `text` (any language, ≤ 400): translated and screened, 400 `text` when refused;
-- `reference` (file, ≤ 5 MB): screened and described in the request, 400 `reference` when it shows a product,
-  a person or text.
+- `text` (any language, ≤ 400): translated to English and screened;
+- `reference` (file, ≤ 5 MB): screened and described (400 `reference` at once when it is not a readable
+  JPG, PNG or WebP).
 
 At least one of `text` and `reference` is needed (400 `text`). 409 `scenes_disabled` / `scene_ai_disabled`.
 
+The AI's checks need its key, which only the worker reads (the API's Vault proxy can only write keys), so the
+save is a job: **202 `SceneJob`** (kind `template`, `result` null). Poll `scenes/jobs/{id}/`:
+- `succeeded`: saved; `template.saved_template_id` is the template (re-read `scenes/templates/`);
+- `failed`: nothing saved, `error.message` tells staff what to change. Codes: `scene_custom_refused` (the
+  text asks for people, text or brands: field `text`); `template_reference_product`,
+  `template_reference_people`, `template_reference_text` (the picture: field `reference`); otherwise the AI's
+  own (`provider_unavailable`, `ai_not_configured`, `vault_unavailable`, …).
+
+A template save makes a few text calls: it never waits for a running scene and does not hold up one.
+
 **`PATCH scenes/templates/{id}/`** takes `name`, `enabled`, and for AI templates `text`, `reference` and
-`remove_reference`. A new text clears a reference made from the old one; an uploaded one stays. Studio colours
-stay in the ops console (400 `text`).
+`remove_reference`.
+- Nothing for the AI (names, `enabled`, `remove_reference`, a cleared or unchanged text): saved at once,
+  **200** the template.
+- A changed text or a new reference: **202** the job, as for `POST`; the whole edit is saved when it succeeds
+  (other edits made meanwhile are kept). **409 `scene_template_saving`** while an earlier save of this
+  template is being checked.
+
+A new text clears a reference made from the old one; an uploaded one stays. Studio colours stay in the ops
+console (400 `text`).
 
 **`POST scenes/templates/{id}/reference/`** («Rasmini yaratish») → 202 `SceneJob` (kind `preview`). It makes
 the reference from the text: the scene alone at 4:5, one image call within the budget. A second call returns

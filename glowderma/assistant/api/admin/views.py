@@ -189,6 +189,13 @@ def _template_input(data: dict[str, Any], request: Request) -> scene_library.Tem
     )
 
 
+def _template_save(saved: scene_library.TemplateSave, request: Request) -> Response:
+    """200 the template saved at once, or 202 the job whose worker checks the edit with the AI, then saves."""
+    if saved.job is not None:
+        return Response(SceneJobSerializer(saved.job, context={"request": request}).data, status=202)
+    return Response(SceneTemplateSerializer(saved.template, context={"request": request}).data)
+
+
 class SceneTemplatesView(AdminAPIView):
     parser_classes = [JSONParser, MultiPartParser]
 
@@ -207,10 +214,10 @@ class SceneTemplatesView(AdminAPIView):
         serializer.is_valid(raise_exception=True)
         if "name" not in serializer.validated_data:
             raise ValidationError({"name.uz": [field_error("required")]})
-        template = scene_library.create_template(
-            _template_input(serializer.validated_data, request), actor=request.user, request=request
+        saved = scene_library.create_template(
+            _template_input(serializer.validated_data, request), actor=request.user
         )
-        return Response(SceneTemplateSerializer(template, context={"request": request}).data, status=201)
+        return _template_save(saved, request)
 
 
 class SceneTemplateDetailView(AdminAPIView):
@@ -221,10 +228,10 @@ class SceneTemplateDetailView(AdminAPIView):
     def patch(self, request: Request, pk: int) -> Response:
         serializer = SceneTemplateWriteSerializer(data=form_to_nested(request.data), partial=True)
         serializer.is_valid(raise_exception=True)
-        template = scene_library.update_template(
+        saved = scene_library.update_template(
             pk, _template_input(serializer.validated_data, request), actor=request.user, request=request
         )
-        return Response(SceneTemplateSerializer(template, context={"request": request}).data)
+        return _template_save(saved, request)
 
 
 class SceneTemplateReferenceView(AdminAPIView):

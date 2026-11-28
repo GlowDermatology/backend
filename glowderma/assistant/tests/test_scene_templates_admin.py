@@ -4,6 +4,7 @@ edit and hide, «Rasmini yaratish», and how a reference reaches the image model
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import timedelta
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from typing import Any
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
+from django.utils import timezone
 from PIL import Image
 from rest_framework.test import APIClient
 
@@ -21,7 +23,7 @@ from glowderma.assistant.scenes.templates import Template
 from glowderma.assistant.tests.test_scene_jobs import ADMIN, run_and_poll, saved_image, start, template
 from glowderma.core import enums
 from glowderma.core.models import AuditEntry
-from glowderma.integrations.llm.ports import GenerationResult
+from glowderma.integrations.llm.ports import GenerationResult, LLMUnavailable
 from glowderma.integrations.llm.registry import fake_content_model, fake_image_model
 from glowderma.integrations.segmentation.registry import fake_segmenter
 
@@ -77,6 +79,25 @@ def templates(client: APIClient) -> list[dict[str, Any]]:
     return body
 
 
+def checked(client: APIClient, response: Any) -> dict[str, Any]:
+    """A save the AI checks: the request makes no AI call and answers with the job; the worker runs it."""
+    assert response.status_code == 202, response.json()
+    job = response.json()
+    assert job["kind"] == "template" and job["state"] == "queued" and job["result"] is None
+    return run_and_poll(client, job["id"])
+
+
+def saved(client: APIClient, response: Any) -> dict[str, Any]:
+    """The template a checked save wrote, as the templates list shows it."""
+    body = checked(client, response)
+    assert body["state"] == "succeeded", body
+    template_id = body["template"]["saved_template_id"]
+    row = SceneTemplate.objects.get(pk=template_id)
+    card = next((card for card in templates(client) if card["id"] == template_id), None)
+    assert card is not None or not row.enabled
+    return card or {"id": template_id}
+
+
 # --- the cards show the scene alone -------------------------------------------------------------------------
 
 
@@ -107,8 +128,8 @@ def test_a_template_from_a_photo_of_a_table(staff_client: APIClient, ai_on: Scen
         {"name.uz": "Stol", "name.ru": "Стол", "reference": scene_photo()},
         format="multipart",
     )
-    assert response.status_code == 201, response.json()
-    body = response.json()
+    assert fake_content_model().calls == []  # the API reads no AI key: the worker asks the analyst
+    body = saved(staff_client, response)
     assert body["kind"] == "ai_scene" and body["reference_source"] == "upload"
     assert body["preview_url"] == body["reference_url"] and body["saved_by_staff"] is True
     row = SceneTemplate.objects.get(pk=body["id"])
@@ -124,16 +145,24 @@ def test_a_template_from_a_photo_of_a_table(staff_client: APIClient, ai_on: Scen
     [("has_product", "mahsulot bor"), ("has_people", "odam"), ("has_text", "yozuv")],
 )
 def test_a_reference_with_a_product_a_person_or_text_is_refused(
-    staff_client: APIClient, ai_on: SceneSettings, flag: str, words: str
+    staff_client: APIClient,
+    ai_on: SceneSettings,
+    flag: str,
+    words: str,
+    django_capture_on_commit_callbacks: Any,
 ) -> None:
     described(flag=flag)
     response = staff_client.post(
         f"{ADMIN}scenes/templates/", {"name.uz": "Stol", "reference": scene_photo()}, format="multipart"
     )
-    assert response.status_code == 400
-    error = response.json()["errors"][0]
-    assert error["field"] == "reference" and words in error["message"]
+    upload = str(SceneJob.objects.get(pk=response.json()["id"]).candidate.name)
+    with django_capture_on_commit_callbacks(execute=True):
+        body = checked(staff_client, response)
+    assert body["state"] == "failed" and body["error"]["code"] == f"template_reference_{flag[4:]}"
+    assert words in body["error"]["message"]
     assert not SceneTemplate.objects.filter(name_uz="Stol").exists()
+    job = SceneJob.objects.get(pk=body["id"])
+    assert not job.candidate and not job.candidate.storage.exists(upload)  # the refused picture is gone
 
 
 def test_a_template_from_words_in_any_language(staff_client: APIClient, ai_on: SceneSettings) -> None:
@@ -143,13 +172,11 @@ def test_a_template_from_words_in_any_language(staff_client: APIClient, ai_on: S
         {"name": {"uz": "Ipak"}, "text": "pushti ipak, iliq tong yorug‘i"},
         format="json",
     )
-    assert response.status_code == 201, response.json()
-    row = SceneTemplate.objects.get(pk=response.json()["id"])
+    card = saved(staff_client, response)
+    row = SceneTemplate.objects.get(pk=card["id"])
     assert row.prompt == "Pink silk folds, warm morning light."
     assert row.prompt_original == "pushti ipak, iliq tong yorug‘i"
-    assert (
-        response.json()["text"] == "pushti ipak, iliq tong yorug‘i" and response.json()["preview_url"] is None
-    )
+    assert card["text"] == "pushti ipak, iliq tong yorug‘i" and card["preview_url"] is None
 
 
 def test_create_needs_a_name_and_a_scene(staff_client: APIClient, ai_on: SceneSettings) -> None:
@@ -165,10 +192,23 @@ def test_create_needs_a_name_and_a_scene(staff_client: APIClient, ai_on: SceneSe
             model="t",
         )
     )
-    refused = staff_client.post(
-        f"{ADMIN}scenes/templates/", {"name": {"uz": "Qiz"}, "text": "qiz krem tutib turibdi"}, format="json"
+    refused = checked(
+        staff_client,
+        staff_client.post(
+            f"{ADMIN}scenes/templates/",
+            {"name": {"uz": "Qiz"}, "text": "qiz krem tutib turibdi"},
+            format="json",
+        ),
     )
-    assert refused.status_code == 400 and "odamlar" in refused.json()["errors"][0]["message"]
+    assert refused["state"] == "failed" and refused["error"]["code"] == "scene_custom_refused"
+    assert "odamlar" in refused["error"]["message"]
+    assert not SceneTemplate.objects.filter(name_uz="Qiz").exists()
+    unreadable = staff_client.post(
+        f"{ADMIN}scenes/templates/",
+        {"name.uz": "Buzuq", "reference": SimpleUploadedFile("x.png", b"not a picture", "image/png")},
+        format="multipart",
+    )
+    assert unreadable.status_code == 400 and unreadable.json()["errors"][0]["field"] == "reference"
     ai_on.ai_enabled = False
     ai_on.save()
     off = staff_client.post(
@@ -187,17 +227,26 @@ def test_edit_names_text_reference_and_hide(staff_client: APIClient, ai_on: Scen
     assert renamed.status_code == 200 and renamed.json()["names"]["uz"] == "Oq marmar"
     assert fake_content_model().calls == []  # names alone: no AI call
     described("Grey stone, cool light.")
-    replaced = staff_client.patch(
-        f"{ADMIN}scenes/templates/{marble.pk}/", {"reference": scene_photo()}, format="multipart"
+    replaced = saved(
+        staff_client,
+        staff_client.patch(
+            f"{ADMIN}scenes/templates/{marble.pk}/", {"reference": scene_photo()}, format="multipart"
+        ),
     )
-    assert replaced.status_code == 200 and replaced.json()["reference_source"] == "upload"
+    assert replaced["reference_source"] == "upload"
     marble.refresh_from_db()
     assert marble.reference_description == "Grey stone, cool light." and not marble.preview
     translated("Black slate, a single orchid.")
-    retexted = staff_client.patch(
-        f"{ADMIN}scenes/templates/{marble.pk}/", {"text": "qora shifer, bitta orxideya"}, format="json"
+    saved(
+        staff_client,
+        staff_client.patch(
+            f"{ADMIN}scenes/templates/{marble.pk}/", {"text": "qora shifer, bitta orxideya"}, format="json"
+        ),
     )
-    assert retexted.status_code == 200
+    unchanged = staff_client.patch(
+        f"{ADMIN}scenes/templates/{marble.pk}/", {"text": "qora shifer,  bitta orxideya"}, format="json"
+    )
+    assert unchanged.status_code == 200  # the same words: nothing for the AI
     marble.refresh_from_db()
     assert marble.prompt == "Black slate, a single orchid." and marble.reference  # an upload stays
     removed = staff_client.patch(
@@ -236,16 +285,24 @@ def test_a_reference_is_made_from_the_text(staff_client: APIClient, ai_on: Scene
     assert request.images == () and request.aspect_ratio == "4:5" and "No product" in request.prompt
     # a new text: the picture of the old one goes
     translated("A wet black slate ledge.")
-    staff_client.patch(f"{ADMIN}scenes/templates/{marble.pk}/", {"text": "ho‘l qora shifer"}, format="json")
+    saved(
+        staff_client,
+        staff_client.patch(
+            f"{ADMIN}scenes/templates/{marble.pk}/", {"text": "ho‘l qora shifer"}, format="json"
+        ),
+    )
     marble.refresh_from_db()
     assert not marble.reference and marble.reference_source == ""
 
 
 def test_a_reference_needs_words_to_be_made(staff_client: APIClient, ai_on: SceneSettings) -> None:
     described()
-    created = staff_client.post(
-        f"{ADMIN}scenes/templates/", {"name.uz": "Stol", "reference": scene_photo()}, format="multipart"
-    ).json()
+    created = saved(
+        staff_client,
+        staff_client.post(
+            f"{ADMIN}scenes/templates/", {"name.uz": "Stol", "reference": scene_photo()}, format="multipart"
+        ),
+    )
     response = staff_client.post(f"{ADMIN}scenes/templates/{created['id']}/reference/", format="json")
     assert response.status_code == 409 and response.json()["code"] == "scene_template_needs_text"
 
@@ -256,8 +313,11 @@ def test_a_reference_needs_words_to_be_made(staff_client: APIClient, ai_on: Scen
 def test_an_ai_scene_shows_gemini_the_reference(staff_client: APIClient, ai_on: SceneSettings) -> None:
     marble = template("marble")
     described("Grey stone, cool light.")
-    staff_client.patch(
-        f"{ADMIN}scenes/templates/{marble.pk}/", {"reference": scene_photo()}, format="multipart"
+    saved(
+        staff_client,
+        staff_client.patch(
+            f"{ADMIN}scenes/templates/{marble.pk}/", {"reference": scene_photo()}, format="multipart"
+        ),
     )
     marble.refresh_from_db()
     product, image = saved_image()
@@ -267,9 +327,10 @@ def test_an_ai_scene_shows_gemini_the_reference(staff_client: APIClient, ai_on: 
     # replaced while the job waits: the file the job reads stays
     old = str(marble.reference.name)
     described("Another stone.")
-    staff_client.patch(
+    replacing = staff_client.patch(
         f"{ADMIN}scenes/templates/{marble.pk}/", {"reference": scene_photo((90, 90, 90))}, format="multipart"
     )
+    scene_services.run(replacing.json()["id"])  # a template save does not wait for the queued scene
     assert marble.reference.storage.exists(old)
     body = run_and_poll(staff_client, job_id)
     assert body["state"] == "succeeded", body
@@ -305,3 +366,64 @@ def test_a_saved_typed_scene_gets_a_picture_of_its_scene_alone(
     scene_services.run(reference_job.pk)
     row.refresh_from_db()
     assert row.reference_source == "generated"
+
+
+# --- a save the AI checks runs on the worker ---------------------------------------------------------------
+
+
+def test_one_checked_save_of_a_template_at_a_time(staff_client: APIClient, ai_on: SceneSettings) -> None:
+    marble = template("marble")
+    first = staff_client.patch(
+        f"{ADMIN}scenes/templates/{marble.pk}/", {"text": "kulrang tosh"}, format="json"
+    )
+    assert first.status_code == 202
+    second = staff_client.patch(f"{ADMIN}scenes/templates/{marble.pk}/", {"text": "oq tosh"}, format="json")
+    assert second.status_code == 409 and second.json()["code"] == "scene_template_saving"
+    renamed = staff_client.patch(
+        f"{ADMIN}scenes/templates/{marble.pk}/", {"name": {"uz": "Tosh", "ru": "", "en": ""}}, format="json"
+    )
+    assert renamed.status_code == 200  # names need no AI: saved at once
+    translated("Grey stone.")
+    body = run_and_poll(staff_client, first.json()["id"])
+    assert body["state"] == "succeeded" and body["template"]["saved_template_id"] == marble.pk
+    marble.refresh_from_db()
+    assert marble.prompt == "Grey stone." and marble.name_uz == "Tosh"  # the other edit is kept
+
+
+def test_a_checked_save_runs_beside_a_scene_and_fails_cleanly(
+    staff_client: APIClient, ai_on: SceneSettings, django_capture_on_commit_callbacks: Any
+) -> None:
+    product, image = saved_image()
+    scene_id = start(staff_client, product, image, kind="ai_scene", template_id=template("marble").pk).json()[
+        "id"
+    ]
+    scene_services.claim(scene_id)  # a scene is running
+    response = staff_client.post(
+        f"{ADMIN}scenes/templates/", {"name.uz": "Stol", "reference": scene_photo()}, format="multipart"
+    )
+    job_id = response.json()["id"]
+    upload = str(SceneJob.objects.get(pk=job_id).candidate.name)
+    # the AI does not answer: the job fails with its message, nothing is saved and the picture goes
+    fake_content_model().push(LLMUnavailable("down"))
+    with django_capture_on_commit_callbacks(execute=True):
+        body = run_and_poll(staff_client, job_id)
+    assert body["state"] == "failed" and body["error"]["code"] == "provider_unavailable", body
+    assert body["error"]["message"]
+    job = SceneJob.objects.get(pk=job_id)
+    assert not job.candidate and not job.candidate.storage.exists(upload)
+    assert not SceneTemplate.objects.filter(name_uz="Stol").exists()
+
+
+def test_a_lost_checked_save_leaves_no_picture(
+    staff_client: APIClient, ai_on: SceneSettings, django_capture_on_commit_callbacks: Any
+) -> None:
+    response = staff_client.post(
+        f"{ADMIN}scenes/templates/", {"name.uz": "Stol", "reference": scene_photo()}, format="multipart"
+    )
+    job = SceneJob.objects.get(pk=response.json()["id"])
+    upload = str(job.candidate.name)
+    SceneJob.objects.filter(pk=job.pk).update(created_at=timezone.now() - timedelta(hours=1))
+    with django_capture_on_commit_callbacks(execute=True):
+        assert scene_services.reap_stale() == [job.pk]
+    job.refresh_from_db()
+    assert job.error_code == "worker_lost" and not job.candidate and not job.candidate.storage.exists(upload)

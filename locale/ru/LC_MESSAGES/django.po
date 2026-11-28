@@ -10541,3 +10541,9 @@ msgstr "Группы, в которые входит этот пользоват
 #: unfold / django.contrib.admin
 msgid "Specific permissions for this user."
 msgstr "Индивидуальные права этого пользователя."
+
+msgid "Shablonni saqlash"
+msgstr "Сохранение шаблона"
+
+msgid "Shablon hali saqlanmoqda: AI tekshiruvi tugashini kuting."
+msgstr "Шаблон ещё сохраняется: дождитесь окончания проверки AI."

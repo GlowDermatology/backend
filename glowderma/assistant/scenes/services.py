@@ -94,6 +94,16 @@ ERROR_MESSAGES: dict[str, str] = {
     "scene_template_exists": N_("Bu sahna allaqachon shablon sifatida saqlangan."),
     "scene_template_name": N_("Shablon nomini yozing."),
     "scene_custom_text": N_("Sahnani tasvirlang (ko‘pi bilan 400 belgi)."),
+    # a template save (``template_jobs``): an uploaded reference that would put something into every scene
+    "template_reference_product": N_(
+        "Namuna rasmda mahsulot bor: u har bir sahnaga tushib qoladi. Faqat sahnaning o‘zi (sirt, fon, "
+        "bezaklar) bor rasm yuklang."
+    ),
+    "template_reference_people": N_(
+        "Namuna rasmda odam yoki qo‘l bor. Faqat sahnaning o‘zi bor rasm yuklang."
+    ),
+    "template_reference_text": N_("Namuna rasmda yozuv yoki logotip bor. Yozuvsiz rasm yuklang."),
+    "template_scene_needed": N_("Sahnani tasvirlang yoki namuna rasm yuklang."),
     pipeline.PRODUCT_CUT_OFF: N_(
         "Mahsulot rasmga to‘liq sig‘magan: rasmni mahsulot to‘liq ko‘rinadigan qilib oling."
     ),
@@ -273,7 +283,7 @@ def start_job(
     image = ProductImage.objects.filter(pk=image_id, product_id=product_id).first()
     if image is None:
         raise NotFound
-    if kind == enums.SceneJobKind.PREVIEW:  # the console's, never staff's
+    if kind in (enums.SceneJobKind.PREVIEW, enums.SceneJobKind.TEMPLATE):  # not a product photo's
         raise ValidationError(
             {"kind": [field_error("invalid", ERROR_MESSAGES["scene_template_unavailable"])]}
         )
@@ -342,10 +352,13 @@ def claim(job_id: int) -> SceneJob | None:
             return None
         instant = timeutils.now()
         if job.state == enums.JobState.QUEUED:
-            running = SceneJob.objects.filter(
-                state=enums.JobState.RUNNING, heartbeat_at__gte=instant - STALE_AFTER
-            ).exclude(pk=job.pk)
-            if running.exists():
+            # one image job at a time; a template save (a few text calls) neither waits nor blocks
+            running = (
+                SceneJob.objects.filter(state=enums.JobState.RUNNING, heartbeat_at__gte=instant - STALE_AFTER)
+                .exclude(pk=job.pk)
+                .exclude(kind=enums.SceneJobKind.TEMPLATE)
+            )
+            if job.kind != enums.SceneJobKind.TEMPLATE and running.exists():
                 raise SceneBusy()
             job.started_at = instant
         elif job.state != enums.JobState.RUNNING or not _is_stale(job, instant):
@@ -395,13 +408,16 @@ def _cost(row: SceneSettings, usage: pipeline.Usage | None) -> Decimal:
 
 def fail(job: SceneJob, code: str, *, usage: pipeline.Usage | None = None) -> SceneJob | None:
     logger.warning("scene job %s failed: %s", job.pk, code)
-    return _finish(
+    failed = _finish(
         job.pk,
         state=enums.JobState.FAILED,
         error_code=code[:40],
         usage=_usage_dict(usage),
         cost_usd=_cost(get_settings(), usage),
     )
+    if failed is not None and failed.kind == enums.SceneJobKind.TEMPLATE:
+        _drop_files_on_commit(failed)  # the uploaded picture of a save that did not happen
+    return failed
 
 
 def _key(provider: str) -> Secret:
@@ -500,6 +516,10 @@ def run(job_id: int) -> SceneJob | None:
         return None
     if job.kind == enums.SceneJobKind.PREVIEW:
         return _run_preview(job)
+    if job.kind == enums.SceneJobKind.TEMPLATE:
+        from glowderma.assistant.scenes import template_jobs  # it builds on this module
+
+        return template_jobs.run(job)
     if job.kind == enums.SceneJobKind.BANNER:
         from glowderma.assistant.scenes import banner_jobs  # it builds on this module
 
@@ -984,6 +1004,8 @@ def reap_stale(*, now: Any = None) -> list[int]:
             job.error_code = WORKER_LOST
             job.finished_at = instant
             job.save(update_fields=["state", "error_code", "finished_at", "updated_at"])
+            if job.kind == enums.SceneJobKind.TEMPLATE:
+                _drop_files_on_commit(job)
             reaped.append(job.pk)
     return reaped
 

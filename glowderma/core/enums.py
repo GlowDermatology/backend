@@ -376,6 +376,7 @@ class SceneJobKind(TextChoices):
     FIT = "fit", "Ekranlarga moslash"
     PREVIEW = "preview", "Shablon namunasi"  # the console's sample picture of a template (no product)
     BANNER = "banner", "Banner rasmi"  # a home-screen banner's image (products from the catalog, or none)
+    TEMPLATE = "template", "Shablonni saqlash"  # an edited template's AI check, then the save (no image)
 
 
 class SceneReferenceSource(TextChoices):
