@@ -24,8 +24,8 @@ logger = logging.getLogger(__name__)
 RUN_SOFT_TIME_LIMIT = 90
 RUN_TIME_LIMIT = 120
 # a scene: analyst + cutter + up to two image generations + QA, each bounded by its own timeout
-SCENE_SOFT_TIME_LIMIT = 270
-SCENE_TIME_LIMIT = 300
+SCENE_SOFT_TIME_LIMIT = 420  # a banner with three products: three cut-outs and the scene
+SCENE_TIME_LIMIT = 450
 SCENE_BUSY_RETRY_SECONDS = 20
 SCENE_BUSY_RETRIES = 90
 

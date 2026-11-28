@@ -42,7 +42,7 @@ from glowderma.assistant.models import (
     SceneSettings,
     SceneTemplate,
 )
-from glowderma.assistant.scenes import pipeline, prompts
+from glowderma.assistant.scenes import banner, pipeline, prompts
 from glowderma.assistant.scenes.templates import Template
 from glowderma.catalog import services as catalog_services
 from glowderma.catalog.models import ProductImage
@@ -57,7 +57,7 @@ from glowderma.integrations.vault.ports import VaultError
 
 logger = logging.getLogger(__name__)
 
-STALE_AFTER = timedelta(minutes=6)  # longer than the task's hard limit (tasks.SCENE_TIME_LIMIT)
+STALE_AFTER = timedelta(minutes=9)  # longer than the task's hard limit (tasks.SCENE_TIME_LIMIT)
 # a queued job may wait behind another one (one scene at a time): it is lost only after this
 QUEUED_STALE_AFTER = timedelta(minutes=30)
 FAKE_KEY = "fake-key"
@@ -104,6 +104,13 @@ ERROR_MESSAGES: dict[str, str] = {
     "ai_refused": N_("AI bu rasmni qayta ishlamadi. Boshqa rasm bilan urinib ko‘ring."),
     "ai_bad_output": N_("AI javobini tushunib bo‘lmadi. Qayta urinib ko‘ring."),
     "vault_unavailable": N_("AI xizmati vaqtincha ishlamayapti. Birozdan so‘ng qayta urinib ko‘ring."),
+    banner.PRODUCT_PHOTO_MISSING: N_("Tanlangan mahsulotlardan birida rasm yo‘q."),
+    banner.PRODUCT_PHOTO_UNUSABLE: N_(
+        "Mahsulot rasmidan foydalanib bo‘lmadi (mahsulot to‘liq ko‘rinmaydi yoki uni qo‘l yopib turibdi). "
+        "Boshqa mahsulotni tanlang yoki uning asosiy rasmini almashtiring."
+    ),
+    "banner_products": N_("1 tadan 3 tagacha mahsulot tanlang."),
+    "scene_source_changed": N_("Rasm o‘zgartirilgan yoki o‘chirilgan: qaytadan yarating."),
     WORKER_LOST: N_("Jarayon to‘xtab qoldi. Qayta urinib ko‘ring."),
     SERVER_ERROR: MESSAGES["server_error"],
 }
@@ -475,6 +482,10 @@ def run(job_id: int) -> SceneJob | None:
         return None
     if job.kind == enums.SceneJobKind.PREVIEW:
         return _run_preview(job)
+    if job.kind == enums.SceneJobKind.BANNER:
+        from glowderma.assistant.scenes import banner_jobs  # it builds on this module
+
+        return banner_jobs.run(job)
     image = ProductImage.objects.filter(pk=job.source_image_id).first() if job.source_image_id else None
     if image is None or image.sha256 != job.source_sha256:
         return fail(job, "scene_source_changed")
@@ -795,6 +806,8 @@ def accept(
     generated and staff did not tick that they checked it."""
     with transaction.atomic():
         job = _reviewable(job_id)
+        if job.kind == enums.SceneJobKind.BANNER:  # a banner's image is used through use_for_banner
+            raise SceneNotReviewable()
         image = ProductImage.objects.filter(pk=job.source_image_id).first() if job.source_image_id else None
         if image is None or image.sha256 != job.source_sha256 or job.product_id is None:
             raise SceneSourceChanged()

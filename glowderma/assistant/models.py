@@ -609,6 +609,17 @@ class SceneJob(TimeStampedModel):
         related_name="+",
         verbose_name="ko‘rib chiqqan",
     )
+    # A banner image (kind "banner"): {"mode": "products"|"scene", "products": [{"id", "image_id", "sha256",
+    # "name"}], "failed_product_id": id of the product whose photo could not be used}
+    inputs = models.JSONField(default=dict, blank=True, verbose_name="banner uchun tanlangan")
+    accepted_banner = models.ForeignKey(
+        "catalog.Banner",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="qabul qilingan banner",
+    )
 
     class Meta:
         verbose_name = "sahna so‘rovi"

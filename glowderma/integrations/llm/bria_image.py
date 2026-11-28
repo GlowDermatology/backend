@@ -6,6 +6,9 @@ back over it. ``original_quality`` keeps the master's size, so the result lines 
 pipeline still checks the alignment and pastes the original pixels back itself. Live: about 20 s per image,
 billed per image (``billed_calls``), not per token. The HTTP contract and errors are :mod:`.bria_http`'s.
 
+A banner's scene without products uses Fibo 2's text to image (``POST /v2/image/generate``, 1 MP, ``21:9``)
+with the same plain ``scene``.
+
 Bria builds only the background: it cannot paint a part of the product a finger hid
 (:attr:`BriaSceneModel.fills_hidden` is ``False``). It takes one plain English ``scene`` (about 90-110 words,
 no special characters); Gemini's rule-laden ``prompt`` is not sent.
@@ -28,6 +31,10 @@ from .bria_http import BriaHttp
 from .ports import ImageGenerationRequest, ImageGenerationResult, LLMBadOutput, LLMNotConfigured
 
 REPLACE_PATH = "/image/edit/replace_background"
+GENERATE_PATH = "/image/generate"  # text to image (Fibo 2): a banner's scene without products
+GENERATE_RATIOS = frozenset(
+    {"1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "16:10", "2:1", "21:9", "3:1"}
+)
 MODE = "fibo2"
 MIN_WAIT_SECONDS = 90.0  # polling budget: live about 20 s
 
@@ -51,18 +58,35 @@ class BriaSceneModel:
     def generate_image(self, request: ImageGenerationRequest, *, api_key: Secret) -> ImageGenerationResult:
         if not api_key:
             raise LLMNotConfigured("bria: empty key")
-        if request.cutout is None or not request.scene.strip():
-            raise LLMBadOutput("bria: a scene needs the product cut-out and a scene description")
-        body: dict[str, Any] = {
-            "image": base64.b64encode(request.cutout.data).decode(),
-            "prompt": request.scene,
-            "mode": MODE,
-            "original_quality": True,
-            "sync": False,
-        }
+        if not request.scene.strip():
+            raise LLMBadOutput("bria: a scene needs a scene description")
+        body: dict[str, Any]
+        if request.cutout is not None:
+            path = REPLACE_PATH
+            body = {
+                "image": base64.b64encode(request.cutout.data).decode(),
+                "prompt": request.scene,
+                "mode": MODE,
+                "original_quality": True,
+                "sync": False,
+            }
+        elif not request.images:
+            # A scene alone (a banner without products): Fibo 2 text to image at 1 MP, the widest ratios
+            # only at that size (Bria refuses 21:9 with 4 MP).
+            if request.aspect_ratio not in GENERATE_RATIOS:
+                raise LLMBadOutput(f"bria: no {request.aspect_ratio} text to image")
+            path = GENERATE_PATH
+            body = {
+                "prompt": request.scene,
+                "aspect_ratio": request.aspect_ratio,
+                "resolution": "1MP",
+                "sync": False,
+            }
+        else:
+            raise LLMBadOutput("bria: a scene needs the product cut-out")
         timeout = float(request.timeout_seconds)
         content = self._http.run(
-            REPLACE_PATH, body, api_key=api_key, timeout=timeout, deadline=max(MIN_WAIT_SECONDS, timeout)
+            path, body, api_key=api_key, timeout=timeout, deadline=max(MIN_WAIT_SECONDS, timeout)
         )
         try:
             with Image.open(BytesIO(content)) as image:

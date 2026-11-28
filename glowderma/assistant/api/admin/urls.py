@@ -45,4 +45,6 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path(
         "scenes/jobs/<int:pk>/discard/", views.SceneJobDiscardView.as_view(), name="admin-scene-job-discard"
     ),
+    path("scenes/banner-images/", views.BannerImageStartView.as_view(), name="admin-banner-images-start"),
+    path("scenes/jobs/<int:pk>/banner/", views.BannerImageUseView.as_view(), name="admin-scene-job-banner"),
 ]

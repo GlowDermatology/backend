@@ -71,6 +71,22 @@ faint pink fringe where the cut-out met the fingers. Gemini has not been compare
   saqlash**, a name). It gets the English description, goes last in the list, and its preview is the scene the
   staff member made. The console marks it "xodim saqlagan"; edit or switch it off there like any template.
 
+## Banner images (the banner dialog's «AI bilan yaratish»)
+
+- **What.** A banner's image made by the AI scene provider: 1-3 products in a scene (each from its main photo,
+  cut out and pasted back unchanged, as for product scenes) or a scene alone. The image is exactly 2.15:1, the
+  app's banner (no crop on phones); the website's 2:1 banner shows its middle, and every product stands inside
+  that middle, on the right. The lower left stays calm for the title the website and the app draw over it.
+- **How.** Made at 21:9 (Gemini: `aspect_ratio` 21:9; Bria: replace-background on our 21:9 canvas with products,
+  text-to-image `/v2/image/generate` at 21:9 and 1 MP without), cropped to the middle 2.15:1. A text check (the
+  analyst model) rejects text, people, logos and stray products; one retry.
+- **Cost.** Per banner with Bria: one cut-out per product (the cutter) plus one scene image, two with a retry;
+  Gemini: the analyst per product, the image call, the check. Same budgets, daily limit and one-at-a-time worker
+  as scenes (a banner with three products takes up to a few minutes; the task's limit is 450 s).
+- **Use.** Staff check it in the dialog against the banner's real frames (app and website, with the title) and
+  save the banner with it; the image goes through the banner upload path (variants included). An unused image
+  expires with the scenes' candidates.
+
 ## What it does
 
 Staff photograph products on a phone, often in an office and sometimes holding the product. The pipeline builds a clean scene around the product. The product itself is never redrawn.

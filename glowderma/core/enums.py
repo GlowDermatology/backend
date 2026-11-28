@@ -375,6 +375,7 @@ class SceneJobKind(TextChoices):
     AI_SCENE = "ai_scene", "AI sahnasi"
     FIT = "fit", "Ekranlarga moslash"
     PREVIEW = "preview", "Shablon namunasi"  # the console's sample picture of a template (no product)
+    BANNER = "banner", "Banner rasmi"  # a home-screen banner's image (products from the catalog, or none)
 
 
 class SceneJobOutcome(TextChoices):

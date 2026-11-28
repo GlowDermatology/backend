@@ -17,6 +17,9 @@ from glowderma.assistant.api.admin.serializers import (
     AssistantJobSerializer,
     AssistantStartSerializer,
     AssistantStatusSerializer,
+    BannerImageCreateSerializer,
+    BannerImageUseResponseSerializer,
+    BannerImageUseSerializer,
     SceneAcceptResponseSerializer,
     SceneAcceptSerializer,
     SceneJobCreateSerializer,
@@ -131,6 +134,34 @@ SCENE_JOB_TEMPLATE_POST = extend_schema(
     responses={201: SceneTemplateSerializer, **ADMIN_ERRORS},
 )
 
+BANNER_IMAGE_START_POST = extend_schema(
+    operation_id="admin_banner_images_create",
+    description=(
+        "Make a banner's image with AI (scenes must be on, AI scenes too): 1-3 products in a scene "
+        "(`products`, each from its main photo, never redrawn) or a scene alone (`scene`), from an AI "
+        "`template_id` or `custom_prompt`. The image is exactly 2.15:1 (the app's banner; the website shows "
+        "its middle 2:1, `banner.web_crop`), text-free, its lower left kept calm for the title. 202 with a "
+        "new scene job (kind `banner`), 200 with the staff member's banner image still being made. Poll "
+        "`scenes/jobs/{id}/`; refusals as the job's `error.code`: `banner_product_photo_unusable` (with "
+        "`banner.failed_product`), `scene_source_changed`, `scene_custom_refused`, `scene_product_drift`, "
+        "`scene_result_rejected`."
+    ),
+    request=BannerImageCreateSerializer,
+    responses={200: SceneJobSerializer, 202: SceneJobSerializer, **ADMIN_ERRORS},
+)
+
+BANNER_IMAGE_USE_POST = extend_schema(
+    operation_id="admin_scene_jobs_banner_create",
+    description=(
+        "Use a finished banner image (kind `banner`, waiting for review): a new banner with `banner` as in "
+        "`POST banners/` (without `image`), or an existing one (`banner_id`, `banner` as in "
+        "`PATCH banners/{id}/`), saved with the image in one transaction (the same checks and variants as an "
+        "upload). 409 `scene_job_not_ready` once used, discarded or expired."
+    ),
+    request=BannerImageUseSerializer,
+    responses={200: BannerImageUseResponseSerializer, **ADMIN_ERRORS},
+)
+
 SCENE_JOB_DISCARD_POST = extend_schema(
     operation_id="admin_scene_jobs_discard_create",
     request=None,
@@ -145,6 +176,8 @@ __all__ = [
     "ASSISTANT_JOB_DISCARD_POST",
     "ASSISTANT_JOB_START_POST",
     "ASSISTANT_STATUS_GET",
+    "BANNER_IMAGE_START_POST",
+    "BANNER_IMAGE_USE_POST",
     "SCENES_STATUS_GET",
     "SCENE_JOB_ACCEPT_POST",
     "SCENE_JOB_DETAIL_GET",

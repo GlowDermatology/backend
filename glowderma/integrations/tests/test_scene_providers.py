@@ -661,3 +661,38 @@ def test_segmenter_registry(settings: Any) -> None:
     settings.SETTINGS_MODULE = "config.settings.production"
     with pytest.raises(LLMNotConfigured):
         get_segmenter()
+
+
+def test_bria_makes_a_scene_alone_from_text_at_a_wide_ratio() -> None:
+    """A banner without products: Fibo 2 text to image, 21:9 at 1 MP (Bria refuses 21:9 with 4 MP)."""
+    generated = png(Image.new("RGB", (1528, 655), (40, 50, 60)))
+    model, recorder = bria_scene(
+        httpx.Response(202, json={"request_id": "abc", "status_url": STATUS}),
+        httpx.Response(
+            200, json={"status": "COMPLETED", "result": {"image_url": "https://temp.bria.ai/g.png"}}
+        ),
+        httpx.Response(200, content=generated),
+    )
+    request = scene_request(images=(), cutout=None, aspect_ratio="21:9", scene="Silk drapes, warm light.")
+    result = model.generate_image(request, api_key=Secret("bria-key"))
+    assert result.image == generated and result.billed_calls == 1
+    sent = recorder.requests[0]
+    assert str(sent.url) == "https://engine.prod.bria-api.com/v2/image/generate"
+    assert json.loads(sent.content) == {
+        "prompt": "Silk drapes, warm light.",
+        "aspect_ratio": "21:9",
+        "resolution": "1MP",
+        "sync": False,
+    }
+    model, recorder = bria_scene()
+    with pytest.raises(LLMBadOutput):  # a ratio Bria does not make
+        model.generate_image(scene_request(images=(), cutout=None, aspect_ratio="7:3"), api_key=Secret("k"))
+    assert recorder.requests == []
+
+
+def test_the_fake_makes_an_image_from_text_at_the_asked_ratio() -> None:
+    result = FakeImageModel().generate_image(
+        ImageGenerationRequest(model="m", prompt="a calm scene", aspect_ratio="21:9"), api_key=Secret("k")
+    )
+    with Image.open(BytesIO(result.image)) as image:
+        assert image.size == (1344, 576)

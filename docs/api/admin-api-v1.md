@@ -1836,6 +1836,39 @@ Unreviewed candidates expire after `candidate_ttl_hours` (default 72; beat `assi
 Audit: `assistant.scene_accepted` (entity `product`; `{job_id, kind, image_id, source_image_id}`) plus the
 catalog's own `product.image_added` / `product.image_renditions`.
 
+#### 2.20.8 Banner images
+
+An AI image for a home-screen banner (§2.5): exactly **2.15:1**, the app's banner, which shows all of it; the
+website's 2:1 banner shows its middle (`banner.web_crop`). It is text-free (the website and the app draw the
+title over its lower left, which the scene keeps calm) and made at 21:9 by the scene provider, then cropped in
+the middle (never stretched). Needs scenes and AI scenes switched on; shares their budgets, daily limit, worker
+(one scene at a time) and review window. A banner image is a scene job of kind `banner` (no product image).
+
+**`POST scenes/banner-images/`** (optional `Idempotency-Key`; throttle `scene_generate`) Body
+`{"mode": "products"|"scene", "product_ids": [int] (products: 1-3, distinct; the first is the main one, the
+tallest), "template_id": int|null (an AI template), "custom_prompt": str (≤ 400, instead of a template, as in
+§2.20)}` → 202 `SceneJob` (a new one) or 200 (the staff member's banner image still being made). `products`
+places each product's main photo (cut out as for a scene, never redrawn: its own pixels are pasted back) on the
+right, inside the website's window, side by side on one baseline. 400 `product_ids` (count, duplicates, a
+product without a photo: the message names it), `template_id` (missing or not an AI template),
+`custom_prompt`; 409 `scenes_disabled`, `scene_ai_disabled`, `scene_daily_limit`, `scene_budget_exceeded`.
+
+`SceneJob` gains `banner` (null for other kinds): `{mode, products: [{id, name}], failed_product: {id, name} |
+null, web_crop: [x, y, w, h], accepted_banner_id}`; `result.url` is the 2.15:1 WebP. Refusals (`error.code`):
+`banner_product_photo_unusable` (`failed_product` names the product: not whole in its photo, a hand over it, no
+usable cut-out), `scene_source_changed` (a product's main photo was replaced meanwhile),
+`scene_custom_refused`, `scene_product_drift`, `scene_result_rejected` (text, people, logos or another product in
+the image), plus the provider errors of §2.20.
+
+**`POST scenes/jobs/{id}/banner/`** (optional `Idempotency-Key`) Body `{"banner_id": int|null, "banner": {...}}`
+→ 200 `{"job": SceneJob, "banner": Banner}`. Without `banner_id` it creates a banner: `banner` as the fields of
+`POST banners/` without `image`; with it, it updates that banner: `banner` as `PATCH banners/{id}/`. The image is
+stored through the banner upload path (same checks and variants) in the same transaction; the banner's own
+validation applies (400 as §2.5). 404 unknown banner; 409 `scene_job_not_ready` (not a finished banner image, or
+already used, discarded or expired). `POST scenes/jobs/{id}/accept/` refuses a banner image (409); discard as
+any scene. Audit `assistant.banner_image_used` (entity `banner`; `{job_id, mode, new}`) plus the catalog's own
+`banner.created` / `banner.updated`.
+
 ---
 
 ## 3. Enumerations

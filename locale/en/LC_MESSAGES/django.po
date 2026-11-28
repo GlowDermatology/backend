@@ -351,6 +351,10 @@ msgstr "from %(when)s"
 msgid ".txt faylga yuklab olish"
 msgstr "Download as a .txt file"
 
+#: glowderma/assistant/scenes/services.py
+msgid "1 tadan 3 tagacha mahsulot tanlang."
+msgstr "Choose 1 to 3 products."
+
 #: glowderma/reporting/templates/reporting/dashboards/sales.html
 msgid "10 daqiqada bir qayta hisoblanadi"
 msgstr "recalculated every 10 minutes"
@@ -851,6 +855,10 @@ msgstr "Blocked periods"
 #: glowderma/commerce/models.py
 msgid "Band: %(quantity)s × mahsulot #%(product)s · buyurtma №%(order)s (%(state)s)"
 msgstr "Reservation: %(quantity)s × product #%(product)s · order №%(order)s (%(state)s)"
+
+#: model metadata
+msgid "Banner rasmi"
+msgstr "Banner image"
 
 #: glowderma/catalog/admin.py
 msgid "Banner: {obj.title_uz}"
@@ -3316,6 +3324,10 @@ msgstr "The text has a number or claim that is not in the product data: check it
 msgid "Mahsulot rasmga to‘liq sig‘magan: rasmni mahsulot to‘liq ko‘rinadigan qilib oling."
 msgstr "The product does not fit in the photo: take a photo that shows the whole product."
 
+#: glowderma/assistant/scenes/services.py
+msgid "Mahsulot rasmidan foydalanib bo‘lmadi (mahsulot to‘liq ko‘rinmaydi yoki uni qo‘l yopib turibdi). Boshqa mahsulotni tanlang yoki uning asosiy rasmini almashtiring."
+msgstr "A product's photo could not be used (the product is not fully in the frame or a hand covers it). Choose another product or replace its main photo."
+
 #: glowderma/assistant/templates/assistant/console/scenes.html
 msgid "Mahsulot rasmlari uchun sahnalar va ekranlarga moslash. Mahsulotning o‘zi hech qachon qayta chizilmaydi: asl rasmdagi piksellar sahna ustiga qaytariladi. Sahnalar o‘chirilgan holda yetkaziladi; har bir o‘zgarish audit jurnaliga yoziladi va keyingi so‘rovdan boshlab ishlaydi."
 msgstr "Scenes and screen fitting for product photos. The product itself is never redrawn: the photo's own pixels are put back on top of the scene. Scenes ship switched off; every change is written to the audit log and takes effect from the next request."
@@ -4778,6 +4790,10 @@ msgstr "The image must not exceed 5 MB."
 msgid "Rasm bilan ishlash rejimida modelga yuboriladigan rasmlar soni (8 tagacha)."
 msgstr "How many images the photo mode sends to the model (up to 8)."
 
+#: glowderma/assistant/scenes/services.py
+msgid "Rasm o‘zgartirilgan yoki o‘chirilgan: qaytadan yarating."
+msgstr "The photo was changed or deleted: create it again."
+
 #: glowderma/reporting/dashboards/sales.py
 msgid "Rasm yo‘q"
 msgstr "No images"
@@ -5487,6 +5503,10 @@ msgstr "Break end"
 #: glowderma/professionals/api/admin/serializers/messages.py
 msgid "Tanaffusning boshlanishi va tugashini birga kiriting."
 msgstr "Enter both the start and the end of the break."
+
+#: glowderma/assistant/scenes/services.py
+msgid "Tanlangan mahsulotlardan birida rasm yo‘q."
+msgstr "One of the chosen products has no photo."
 
 #: model metadata
 msgid "Tanlangan matnlarni yaxshilash"
@@ -6726,6 +6746,10 @@ msgstr "blocked periods"
 #: model metadata
 msgid "banner"
 msgstr "banner"
+
+#: model metadata
+msgid "banner uchun tanlangan"
+msgstr "chosen for the banner"
 
 #: glowderma/catalog/api/admin/views/banners.py
 #: model metadata
@@ -8275,6 +8299,10 @@ msgstr "appointment event"
 #: model metadata
 msgid "qabul qilingan"
 msgstr "received at"
+
+#: model metadata
+msgid "qabul qilingan banner"
+msgstr "accepted banner"
 
 #: model metadata
 msgid "qabul qilingan rasm"

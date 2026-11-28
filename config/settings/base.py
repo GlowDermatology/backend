@@ -391,6 +391,7 @@ SPECTACULAR_SETTINGS["ENUM_NAME_OVERRIDES"] = {
     **enum_name_overrides(),
     "HealthStatusEnum": ["ok", "error"],
     "SocialProviderEnum": ["google", "facebook"],
+    "BannerImageModeEnum": ["products", "scene"],
 }
 # --- Billz adapter (contract 2.3, M1a; live client M3, docs/integrations/billz.md) ---
 # BILLZ_MODE: "fake" (deterministic in-process catalog, see integrations.billz.fake) or "live"

@@ -417,6 +417,10 @@ msgstr "с %(when)s"
 msgid ".txt faylga yuklab olish"
 msgstr "Скачать файлом .txt"
 
+#: glowderma/assistant/scenes/services.py
+msgid "1 tadan 3 tagacha mahsulot tanlang."
+msgstr "Выберите от 1 до 3 товаров."
+
 #: glowderma/reporting/templates/reporting/dashboards/sales.html
 msgid "10 daqiqada bir qayta hisoblanadi"
 msgstr "пересчитывается раз в 10 минут"
@@ -917,6 +921,10 @@ msgstr "Занятые периоды"
 #: glowderma/commerce/models.py
 msgid "Band: %(quantity)s × mahsulot #%(product)s · buyurtma №%(order)s (%(state)s)"
 msgstr "Резерв: %(quantity)s × товар #%(product)s · заказ №%(order)s (%(state)s)"
+
+#: model metadata
+msgid "Banner rasmi"
+msgstr "Изображение баннера"
 
 #: glowderma/catalog/admin.py
 msgid "Banner: {obj.title_uz}"
@@ -3390,6 +3398,10 @@ msgstr "В тексте есть число или утверждение, ко�
 msgid "Mahsulot rasmga to‘liq sig‘magan: rasmni mahsulot to‘liq ko‘rinadigan qilib oling."
 msgstr "Товар не помещается в кадр: сделайте фото, где товар виден целиком."
 
+#: glowderma/assistant/scenes/services.py
+msgid "Mahsulot rasmidan foydalanib bo‘lmadi (mahsulot to‘liq ko‘rinmaydi yoki uni qo‘l yopib turibdi). Boshqa mahsulotni tanlang yoki uning asosiy rasmini almashtiring."
+msgstr "Фото товара не подошло (товар виден не целиком или его закрывает рука). Выберите другой товар или замените его главное фото."
+
 #: glowderma/assistant/templates/assistant/console/scenes.html
 msgid "Mahsulot rasmlari uchun sahnalar va ekranlarga moslash. Mahsulotning o‘zi hech qachon qayta chizilmaydi: asl rasmdagi piksellar sahna ustiga qaytariladi. Sahnalar o‘chirilgan holda yetkaziladi; har bir o‘zgarish audit jurnaliga yoziladi va keyingi so‘rovdan boshlab ishlaydi."
 msgstr "Сцены и подгонка под экраны для фото товаров. Сам товар никогда не перерисовывается: исходные пиксели фото возвращаются поверх сцены. Сцены поставляются выключенными; каждое изменение записывается в журнал аудита и действует со следующего запроса."
@@ -4856,6 +4868,10 @@ msgstr "Изображение не должно превышать 5 МБ."
 msgid "Rasm bilan ishlash rejimida modelga yuboriladigan rasmlar soni (8 tagacha)."
 msgstr "Сколько фото режим «по фотографиям» отправляет модели (до 8)."
 
+#: glowderma/assistant/scenes/services.py
+msgid "Rasm o‘zgartirilgan yoki o‘chirilgan: qaytadan yarating."
+msgstr "Фото изменили или удалили: создайте заново."
+
 #: glowderma/reporting/dashboards/sales.py
 msgid "Rasm yo‘q"
 msgstr "Нет изображений"
@@ -5565,6 +5581,10 @@ msgstr "Конец перерыва"
 #: glowderma/professionals/api/admin/serializers/messages.py
 msgid "Tanaffusning boshlanishi va tugashini birga kiriting."
 msgstr "Укажите и начало, и конец перерыва."
+
+#: glowderma/assistant/scenes/services.py
+msgid "Tanlangan mahsulotlardan birida rasm yo‘q."
+msgstr "У одного из выбранных товаров нет фото."
 
 #: model metadata
 msgid "Tanlangan matnlarni yaxshilash"
@@ -6810,6 +6830,10 @@ msgstr "занятые периоды"
 #: model metadata
 msgid "banner"
 msgstr "баннер"
+
+#: model metadata
+msgid "banner uchun tanlangan"
+msgstr "выбрано для баннера"
 
 #: glowderma/catalog/api/admin/views/banners.py
 #: model metadata
@@ -8375,6 +8399,10 @@ msgstr "событие записи на приём"
 #: model metadata
 msgid "qabul qilingan"
 msgstr "получено"
+
+#: model metadata
+msgid "qabul qilingan banner"
+msgstr "принятый баннер"
 
 #: model metadata
 msgid "qabul qilingan rasm"

@@ -169,7 +169,8 @@ class FakeImageModel:
 
     Pixels within :data:`PLACEHOLDER_TOLERANCE` of the placeholder grey become a vertical gradient whose
     colours come from a hash of the prompt; everything else (the product) is returned unchanged, so the
-    result lines up with the canvas the way a well-behaved model's would. Markers in the prompt:
+    result lines up with the canvas the way a well-behaved model's would. Without an input image (text to
+    image) the whole frame of ``aspect_ratio`` (576 px high) is that gradient. Markers in the prompt:
     ``[fake-drift]`` shifts the whole image right by 8 % of its width (a model that moved the product),
     ``[fake-no-image]`` → :class:`LLMBadOutput`, plus the content model's ``[fake-unavailable]`` and
     ``[fake-refused]``. :meth:`push` queues a result or an exception. Output is PNG at the input's size.
@@ -206,11 +207,15 @@ class FakeImageModel:
             raise LLMUnavailable("fake: provider down")
         if REFUSED_MARKER in request.prompt:
             raise LLMRefused("fake: request refused")
-        if NO_IMAGE_MARKER in request.prompt or not request.images:
+        if NO_IMAGE_MARKER in request.prompt:
             raise LLMBadOutput("fake: no image in the answer", input_tokens=100, output_tokens=20)
-        with Image.open(BytesIO(request.images[0].data)) as source:
-            source.load()
-            sent = source.convert("RGB")
+        if request.images:
+            with Image.open(BytesIO(request.images[0].data)) as source:
+                source.load()
+                sent = source.convert("RGB")
+        else:  # text to image: a placeholder-grey frame of the asked ratio, painted below
+            ratio_width, ratio_height = (int(part) for part in request.aspect_ratio.split(":"))
+            sent = Image.new("RGB", (round(576 * ratio_width / ratio_height), 576), (128, 128, 128))
         digest = hashlib.sha256(request.prompt.encode()).digest()
         top, bottom = (digest[0], digest[1], digest[2]), (digest[3], digest[4], digest[5])
         gradient = Image.linear_gradient("L").resize(sent.size)

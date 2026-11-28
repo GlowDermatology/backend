@@ -10,7 +10,11 @@ from rest_framework import serializers
 from glowderma.assistant import services
 from glowderma.assistant.models import GenerationJob
 from glowderma.assistant.scenes import services as scene_services
-from glowderma.catalog.api.admin.serializers import ProductImageSerializer, ProductSerializer
+from glowderma.catalog.api.admin.serializers import (
+    BannerSerializer,
+    ProductImageSerializer,
+    ProductSerializer,
+)
 from glowderma.core import enums
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import BoundedListField
@@ -233,7 +237,12 @@ class SceneTemplatesSerializer(serializers.Serializer[Any]):
     results = SceneTemplateSerializer(many=True)
 
 
-STAFF_SCENE_KINDS = [kind for kind in enums.SceneJobKind.values if kind != enums.SceneJobKind.PREVIEW]
+# a product photo's scene jobs (a template preview is the console's; a banner image has its own endpoint)
+STAFF_SCENE_KINDS = [
+    kind
+    for kind in enums.SceneJobKind.values
+    if kind not in (enums.SceneJobKind.PREVIEW, enums.SceneJobKind.BANNER)
+]
 
 
 class SceneJobCreateSerializer(serializers.Serializer[dict[str, Any]]):
@@ -272,6 +281,25 @@ class SceneCandidateSerializer(serializers.Serializer[Any]):
     occluded_pct = serializers.DecimalField(max_digits=5, decimal_places=2)
 
 
+class SceneBannerProductSerializer(serializers.Serializer[Any]):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+
+
+class SceneBannerSerializer(serializers.Serializer[Any]):
+    mode = serializers.ChoiceField(choices=["products", "scene"])
+    products = SceneBannerProductSerializer(many=True, help_text="In the order staff picked them.")
+    failed_product = SceneBannerProductSerializer(
+        allow_null=True,
+        help_text="The product whose photo could not be used (`banner_product_photo_unusable`).",
+    )
+    web_crop = serializers.ListField(
+        child=serializers.FloatField(),
+        help_text="[x, y, w, h] 0-1: the website's 2:1 window of the 2.15:1 image (the app shows all of it).",
+    )
+    accepted_banner_id = serializers.IntegerField(allow_null=True)
+
+
 class SceneJobSerializer(serializers.Serializer[Any]):
     """The poller-compatible scene job: ``state`` / ``error`` like ``Job`` (§2.14) and the candidate."""
 
@@ -287,6 +315,7 @@ class SceneJobSerializer(serializers.Serializer[Any]):
     error = serializers.SerializerMethodField()
     warnings = serializers.ListField(child=serializers.CharField())
     accepted_image_id = serializers.IntegerField(allow_null=True)
+    banner = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField()
     finished_at = serializers.DateTimeField(allow_null=True)
     expires_at = serializers.DateTimeField(allow_null=True)
@@ -311,6 +340,25 @@ class SceneJobSerializer(serializers.Serializer[Any]):
             "name": names.get(language) or names.get("uz") or "",
             "custom_text": snapshot.get("custom_text") or None,
             "saved_template_id": snapshot.get("saved_template_id"),
+        }
+
+    @extend_schema_field(SceneBannerSerializer(allow_null=True))
+    def get_banner(self, obj: Any) -> dict[str, Any] | None:
+        if obj.kind != enums.SceneJobKind.BANNER:
+            return None
+        inputs = obj.inputs or {}
+        products = [
+            {"id": item.get("id"), "name": item.get("name") or ""} for item in inputs.get("products") or []
+        ]
+        failed_id = inputs.get("failed_product_id")
+        failed = next((item for item in products if item["id"] == failed_id), None)
+        crops = obj.crops or {}
+        return {
+            "mode": inputs.get("mode") or "scene",
+            "products": products,
+            "failed_product": failed,
+            "web_crop": crops.get("2:1") or [],
+            "accepted_banner_id": obj.accepted_banner_id,
         }
 
     @extend_schema_field(serializers.JSONField(allow_null=True, help_text="Always null (no progress steps)."))
@@ -341,6 +389,45 @@ class SceneJobSerializer(serializers.Serializer[Any]):
             "code": obj.error_code,
             "message": tr(message, admin_language(request)) if request else message,
         }
+
+
+class BannerImageCreateSerializer(serializers.Serializer[dict[str, Any]]):
+    mode = serializers.ChoiceField(
+        choices=["products", "scene"],
+        help_text="`products`: 1-3 catalog products in a scene (each from its main photo); `scene`: a scene "
+        "alone.",
+    )
+    product_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        required=False,
+        default=list,
+        max_length=3,
+        help_text="`products` only: 1-3 product ids; the first is the main one (the tallest).",
+    )
+    template_id = serializers.IntegerField(
+        required=False, allow_null=True, help_text="An AI template (required unless `custom_prompt`)."
+    )
+    custom_prompt = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=400,
+        help_text="The scene in staff's own words, any language, instead of `template_id`.",
+    )
+
+
+class BannerImageUseSerializer(serializers.Serializer[dict[str, Any]]):
+    banner_id = serializers.IntegerField(
+        required=False, allow_null=True, help_text="An existing banner; null or absent: a new banner."
+    )
+    banner = serializers.JSONField(
+        help_text="The banner's fields as in `POST banners/` (new) or `PATCH banners/{id}/` (existing), "
+        "without `image`."
+    )
+
+
+class BannerImageUseResponseSerializer(serializers.Serializer[Any]):
+    job = SceneJobSerializer()
+    banner = BannerSerializer()
 
 
 class SceneAcceptSerializer(serializers.Serializer[dict[str, Any]]):

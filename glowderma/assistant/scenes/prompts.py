@@ -148,3 +148,136 @@ CUSTOM_SCHEMA: dict[str, Any] = {
     },
     "required": ["scene", "refused", "reason"],
 }
+
+
+# --- banner images (:mod:`.banner`) -------------------------------------------------------------------------
+# The words "banner", "ad" and "poster" are avoided: they invite the model to letter a headline. The title is
+# drawn by the website and the app over the bottom-left corner, so that corner stays calm and dark enough.
+
+BANNER_LAYOUT = (
+    "Wide panoramic composition, 21:9. The left half, and above all the lower left quarter, stays calm and "
+    "uncluttered: soft out-of-focus surface and background with gentle, low-contrast tones, no objects, so "
+    "that something can be placed there later."
+)
+
+BANNER_PRODUCTS_RULES = """The attached wide 21:9 image is a layout: {count} real skincare product(s), cut \
+out of photos, on a plain grey placeholder backdrop.
+TASK: replace ONLY the grey placeholder with the scene described under SCENE, and add a soft, physically \
+plausible contact shadow (on glossy surfaces also a faint reflection) where each product's base meets the \
+surface.
+THE PRODUCTS ARE LOCKED. Do not move, resize, rotate, crop, redraw, relabel, recolour, relight, sharpen or \
+restyle any of them. Every letter, logo and number stays exactly as in the input, at the same place and \
+size: {places}. Their bases rest at y {base}% of the frame.
+Do not add text, letters, logos, stickers, watermarks or borders anywhere. Do not add another product, \
+a duplicate, a mirrored copy or any other packaging.
+THE SCENE. The products stand on the scene surface by themselves. No hands, fingers, arms, people, faces or \
+body parts. The surface meets the bases at y {base}%; camera at product height, straight on. Props stay \
+smaller than the products, never touch or overlap them, and stay beside or behind them on the right half.
+{layout}
+Photorealistic. Fill the whole wide frame edge to edge. Return one image only, same framing as the input."""
+
+BANNER_SCENE_RULES = """A photorealistic wide 21:9 photograph of an empty scene for a premium skincare shop: \
+the setting described under SCENE, with no product, no packaging and no bottle in it.
+No text, letters, numbers, logos, signs, watermarks or borders anywhere. No hands, people, faces or body \
+parts.
+{layout} The right half holds the scene's main interest: the surface, props and light.
+Fill the whole frame edge to edge."""
+
+
+def _product_places(boxes: list[tuple[int, int, int, int]], size: tuple[int, int]) -> str:
+    width, height = size
+    parts = [
+        f"product {number} at x {_percent(x0 / width)}-{_percent(x1 / width)}% and "
+        f"y {_percent(y0 / height)}-{_percent(y1 / height)}%"
+        for number, (x0, y0, x1, y1) in enumerate(boxes, start=1)
+    ]
+    return "; ".join(parts)
+
+
+def banner_products_prompt(
+    boxes: list[tuple[int, int, int, int]],
+    size: tuple[int, int],
+    count: int,
+    scene: str,
+    style: str,
+    *,
+    stricter: bool,
+) -> str:
+    base = _percent(max(box[3] for box in boxes) / size[1])
+    parts = [
+        BANNER_PRODUCTS_RULES.format(
+            count=count, places=_product_places(boxes, size), base=base, layout=BANNER_LAYOUT
+        )
+    ]
+    if stricter:
+        parts.append(STRICTER)
+    parts.append(f"SCENE: {scene.strip()}")
+    if style.strip():
+        parts.append(f"STYLE: {style.strip()}")
+    return "\n".join(parts)
+
+
+def banner_scene_prompt(scene: str, style: str) -> str:
+    parts = [BANNER_SCENE_RULES.format(layout=BANNER_LAYOUT), f"SCENE: {scene.strip()}"]
+    if style.strip():
+        parts.append(f"STYLE: {style.strip()}")
+    return "\n".join(parts)
+
+
+BRIA_BANNER_PRODUCTS = (
+    "Wide panoramic view. The left side stays calm, soft and out of focus with no objects. Soft natural "
+    "contact shadows under the products, which stand on the surface. Premium skincare photography, no "
+    "people, no hands, no text, no logos."
+)
+BRIA_BANNER_SCENE = (
+    "Wide panoramic empty scene with no product and no bottle. The left side stays calm, soft and out of "
+    "focus with no objects; the surface, props and light are on the right. Premium skincare photography, "
+    "no people, no hands, no text, no letters, no logos."
+)
+
+
+def bria_banner(scene: str, style: str, *, with_products: bool) -> str:
+    """Bria's one plain English description for a banner (about 110 words at most)."""
+
+    def plain(text: str) -> list[str]:
+        return _BRIA_UNSAFE.sub(" ", text.replace("’", "'")).split()
+
+    head = plain(scene)
+    ending = plain(BRIA_BANNER_PRODUCTS if with_products else BRIA_BANNER_SCENE)
+    room = max(0, BRIA_MAX_WORDS - len(head) - len(ending))
+    return " ".join(head + plain(style)[:room] + ending)
+
+
+BANNER_QA_FIELDS = (
+    "text_or_letters",
+    "hands_or_people",
+    "logo_or_brand_outside_product",
+    "extra_product",
+    "busy_lower_left",
+)
+BANNER_QA_FAILS = ("text_or_letters", "hands_or_people", "logo_or_brand_outside_product", "extra_product")
+BANNER_QA_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {name: {"type": "boolean"} for name in BANNER_QA_FIELDS},
+    "required": list(BANNER_QA_FIELDS),
+}
+
+
+def banner_qa_prompt(*, with_products: bool) -> str:
+    products = (
+        '"extra_product": a product or packaging that is not one of the main products standing on the right '
+        "(a duplicate, a mirrored copy, another bottle or box).\n"
+        '"text_or_letters": any text, letters or numbers that are not printed on the products themselves.\n'
+        '"logo_or_brand_outside_product": any logo, brand mark or watermark not printed on the products.'
+        if with_products
+        else '"extra_product": any product, bottle, jar, tube or packaging at all.\n'
+        '"text_or_letters": any text, letters or numbers anywhere.\n'
+        '"logo_or_brand_outside_product": any logo, brand mark or watermark anywhere.'
+    )
+    return (
+        "This is a wide image for the home page of a skincare shop. Answer with JSON only.\n"
+        f"{products}\n"
+        '"hands_or_people": any hand, finger, arm, face or person anywhere in the image.\n'
+        '"busy_lower_left": the lower left quarter is busy or high-contrast (objects, bright patterns) '
+        "instead of calm."
+    )

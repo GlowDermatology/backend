@@ -23,6 +23,8 @@ from glowderma.assistant.api.admin.schemas import (
     ASSISTANT_JOB_DISCARD_POST,
     ASSISTANT_JOB_START_POST,
     ASSISTANT_STATUS_GET,
+    BANNER_IMAGE_START_POST,
+    BANNER_IMAGE_USE_POST,
     SCENE_JOB_ACCEPT_POST,
     SCENE_JOB_DETAIL_GET,
     SCENE_JOB_DISCARD_POST,
@@ -36,6 +38,8 @@ from glowderma.assistant.api.admin.serializers import (
     AssistantApplySerializer,
     AssistantJobCreateSerializer,
     AssistantJobSerializer,
+    BannerImageCreateSerializer,
+    BannerImageUseSerializer,
     SceneAcceptSerializer,
     SceneJobCreateSerializer,
     SceneJobSerializer,
@@ -44,8 +48,16 @@ from glowderma.assistant.api.admin.serializers import (
     SceneTemplateSerializer,
 )
 from glowderma.assistant.models import SceneJob, SceneTemplate
+from glowderma.assistant.scenes import banner_jobs
 from glowderma.assistant.scenes import services as scene_services
-from glowderma.catalog.api.admin.serializers import ProductImageSerializer, ProductSerializer
+from glowderma.catalog.api.admin.serializers import (
+    BannerPatchSerializer,
+    BannerSerializer,
+    BannerWriteSerializer,
+    ProductImageSerializer,
+    ProductSerializer,
+)
+from glowderma.catalog.models import Banner
 from glowderma.core import enums
 from glowderma.core.idempotency import idempotent
 
@@ -240,3 +252,56 @@ class SceneJobDiscardView(AdminAPIView):
     def post(self, request: Request, pk: int) -> Response:
         job = scene_services.discard(pk, actor=request.user, request=request)
         return Response(SceneJobSerializer(_scene_job(job.pk), context={"request": request}).data)
+
+
+class BannerImageStartView(AdminAPIView):
+    """«AI bilan yaratish» of the banner dialog: a banner's image with products or a scene alone."""
+
+    throttle_classes = [StaffRateThrottle, SceneGenerateThrottle]
+
+    @BANNER_IMAGE_START_POST
+    @idempotent(required=False)
+    def post(self, request: Request) -> Response:
+        serializer = BannerImageCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        result = banner_jobs.start(
+            mode=data["mode"],
+            product_ids=list(data.get("product_ids") or []),
+            template_id=data.get("template_id"),
+            custom_prompt=data.get("custom_prompt") or "",
+            actor=request.user,
+        )
+        body = SceneJobSerializer(result.job, context={"request": request}).data
+        return Response(body, status=202 if result.created else 200)
+
+
+class BannerImageUseView(AdminAPIView):
+    """Save a banner (new or existing) with a finished banner image."""
+
+    @BANNER_IMAGE_USE_POST
+    @idempotent(required=False)
+    def post(self, request: Request, pk: int) -> Response:
+        serializer = BannerImageUseSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        banner_id = serializer.validated_data.get("banner_id")
+        fields = serializer.validated_data["banner"]
+        if not isinstance(fields, dict):
+            fields = {}
+        if banner_id is None:
+            write = BannerWriteSerializer(data=fields)
+        else:
+            existing = Banner.objects.select_related("link_category").filter(pk=banner_id).first()
+            if existing is None:
+                raise NotFound
+            write = BannerPatchSerializer(instance=existing, data=fields, partial=True)
+        write.is_valid(raise_exception=True)
+        job, banner = banner_jobs.use_for_banner(
+            pk, write.to_input(), banner_id=banner_id, actor=request.user, request=request
+        )
+        return Response(
+            {
+                "job": SceneJobSerializer(_scene_job(job.pk), context={"request": request}).data,
+                "banner": BannerSerializer(banner).data,
+            }
+        )
