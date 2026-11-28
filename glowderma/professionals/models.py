@@ -394,3 +394,27 @@ class BlockedPeriod(models.Model):
             "end": end,
             "professional_id": self.professional_id,
         }
+
+
+HOME_SPECIALISTS_LIMIT = 8  # the most specialists staff place on the landing
+
+
+class HomeSpecialist(TimeStampedModel):
+    """A specialist staff placed on the landing's «Mutaxassisga yoziling», in order (admin «Bosh sahifa»).
+    With none, the landing lists every published specialist; ``customers`` skips one that is not published."""
+
+    professional = models.OneToOneField(
+        "professionals.Professional",
+        on_delete=models.CASCADE,
+        related_name="home_pick",
+        verbose_name="mutaxassis",
+    )
+    position = models.PositiveSmallIntegerField(unique=True, verbose_name="tartib")
+
+    class Meta:
+        verbose_name = "bosh sahifa mutaxassisi"
+        verbose_name_plural = "bosh sahifa mutaxassislari"
+        ordering = ["position"]
+
+    def __str__(self) -> str:
+        return f"#{self.position + 1}"

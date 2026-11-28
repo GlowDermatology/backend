@@ -1,5 +1,6 @@
 """Admin serializers of `customers` (contract §2.6; display rules §5.3), one subject per module: ``listing``
-(the list query), ``card`` (the customer card), ``cashback`` (the adjustment) and ``sessions``.
+(the list query), ``card`` (the customer card), ``cashback`` (the adjustment), ``sessions`` and ``home``
+(the «Bosh sahifa» landing sections).
 
 Every serializer reads the frozen rows of ``loyalty.selectors`` / ``customers.selectors`` (attributes named as
 the contract keys); none touches another module's ORM row except the annotated ``Customer`` of the list.
@@ -26,6 +27,12 @@ from glowderma.customers.api.admin.serializers.cashback import (
     CashbackAdjustmentResultSerializer,
     CashbackAdjustmentSerializer,
 )
+from glowderma.customers.api.admin.serializers.home import (
+    HomeSectionItemSerializer,
+    HomeSectionSerializer,
+    HomeSectionsSerializer,
+    HomeSectionWriteSerializer,
+)
 from glowderma.customers.api.admin.serializers.listing import (
     CustomerListQuerySerializer,
 )
@@ -47,6 +54,10 @@ __all__ = [
     "CustomerListQuerySerializer",
     "CustomerTierSerializer",
     "CustomerTotalsSerializer",
+    "HomeSectionItemSerializer",
+    "HomeSectionSerializer",
+    "HomeSectionWriteSerializer",
+    "HomeSectionsSerializer",
     "LedgerEntrySerializer",
     "NextTierSerializer",
     "OnlineOrdersSerializer",

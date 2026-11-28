@@ -24,7 +24,11 @@ class HomeStatsSerializer(serializers.Serializer[dict[str, Any]]):
 
 
 class HomeSpotlightSerializer(serializers.Serializer[dict[str, Any]]):
-    reason = serializers.ChoiceField(choices=enums.HomeSpotlightReason.values)
+    reason = serializers.ChoiceField(
+        choices=enums.HomeSpotlightReason.values,
+        allow_null=True,
+        help_text="Why the product is shown; null = a frame staff picked that has none of the reasons.",
+    )
     product = ProductCardSerializer()
 
 
@@ -57,19 +61,40 @@ class HomeSerializer(serializers.Serializer[dict[str, Any]]):
         many=True,
         help_text=(
             "Up to 6 products with an image, each once, taken one per reason in turn (promo, bestseller, "
-            "low_stock, new), rotated by the Tashkent hour."
+            "low_stock, new), rotated by the Tashkent hour; or the frames staff picked, in their order."
         ),
     )
     rails = HomeRailSerializer(
         many=True,
-        help_text="`new`, `promo`, `bestsellers` (at least 4 items) in that order; empty rails are left out.",
+        help_text=(
+            "`new`, `promo`, `bestsellers` (at least 4 items unless staff picked them) in that order; empty "
+            "rails are left out. A rail staff filled by hand shows their products (still visible, and on "
+            "promo for `promo`)."
+        ),
+    )
+    categories = serializers.ListField(
+        child=serializers.CharField(),
+        allow_null=True,
+        help_text=(
+            "The category slugs staff picked for «Nimadan boshlaymiz?», in order (active ones only); "
+            "null = every active category, as `catalog/categories/` lists them."
+        ),
+    )
+    specialists = serializers.ListField(
+        child=serializers.IntegerField(),
+        allow_null=True,
+        help_text=(
+            "The specialist ids staff picked for the landing, in order (listed ones only); null = every "
+            "specialist `specialists/` lists."
+        ),
     )
     cashback = HomeCashbackSerializer(allow_null=True, help_text="The active cashback policy; null = none.")
     feed_cursor = serializers.CharField(
         allow_null=True,
         help_text=(
             "The `catalog/feed/` cursor right after the `new` rail's last product (the landing's unfiltered "
-            "feed starts there, so it does not repeat the rail); null = no products."
+            "feed starts there, so it does not repeat the rail); null = start at the newest (no products, "
+            "or a `new` rail staff filled by hand)."
         ),
     )
 

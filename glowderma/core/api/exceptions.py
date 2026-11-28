@@ -116,6 +116,8 @@ ENDPOINT_FIELD_CODES = frozenset(
         # product image renditions (admin §2.3): a staff crop
         "invalid_crop",
         "crop_too_small",
+        # the landing's hand-picked sections (admin «Bosh sahifa»): a pick customers could not see now
+        "home_pick_unavailable",
     }
 )
 # View ``audience`` values whose errors use the customer envelope (``details``) and the i18n catalog.

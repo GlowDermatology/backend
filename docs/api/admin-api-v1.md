@@ -1915,6 +1915,37 @@ already used, discarded or expired). `POST scenes/jobs/{id}/accept/` refuses a b
 any scene. Audit `assistant.banner_image_used` (entity `banner`; `{job_id, mode, new}`) plus the catalog's own
 `banner.created` / `banner.updated`.
 
+### 2.21 Home page («Bosh sahifa»)
+
+Staff choose what the storefront landing shows in six sections, in the page's order: `spotlight` (the hero
+carousel, at most 6), the rails `new` («Yangi kelganlar»), `promo` («Aksiyada») and `bestsellers` («Ko‘p
+sotilgan») of «Hozir nima olinmoqda» (12 each), `categories` («Nimadan boshlaymiz?», 12) and `specialists`
+(«Mutaxassisga yoziling», 8). A section with no picks is **automatic**, exactly as before: the spotlight takes
+one product per reason in turn and rotates by the hour, the rails are the newest, the products on promo and the
+cached bestsellers (at least 4), the categories are every active one and the specialists every listed one.
+
+Picks are stored by their owner (`catalog.HomePick` for products and categories, `professionals.HomeSpecialist`
+for specialists) and the landing re-checks them on every read: a pick that cannot show is skipped (a product
+hidden, without a photo in the spotlight, or no longer on promo in `promo`; an inactive category; an unpublished
+specialist), and a section left with nothing is automatic again. A picked spotlight keeps its order (no
+rotation) and a picked `bestsellers` rail shows with fewer than 4 products.
+
+**`GET home-sections/`** → 200 `{"results": [HomeSection]}`, the six sections in the order above.
+`HomeSection` = `{key, manual, limit, picks: [Item], automatic: [Item]}`: `manual` = staff filled it, `picks`
+the saved picks in order (empty when automatic), `automatic` what the automatic rule shows now (the starting
+point of «Qo‘lda tahrirlash»). `Item` = `{id, name, image_url, issue}`: `id` is the product or specialist id as
+a string or the category slug (what `PUT` takes back), `name` the Uzbek name, `image_url` the 400 px WebP
+variant or null, `issue` (`HomePickIssue`) why a saved pick does not show now, null when it does.
+
+**`PUT home-sections/{key}/`** (optional `Idempotency-Key`) Body `{"ids": [str]}` (`[]` = automatic again) →
+200 `HomeSection`. Checks in order: at most `limit` (`max_items`, "Ko‘pi bilan {limit} ta."), each once
+(`invalid`, "Har bir element bir marta tanlansin."), every id known (`does_not_exist`), then every pick shows on
+the landing now (`home_pick_unavailable`, one error per pick: "«{name}» saytda ko‘rinmaydi.", "«{name}»
+rasmsiz: karuselga rasmi bor mahsulot qo‘ying.", "«{name}» aksiyada emas.", "«{name}» saytda ko‘rinmaydi:
+profil e’lon qilinmagan yoki filiali faol emas."); all errors on `ids`. 404 unknown `key`. Audit
+`home_section.saved` (entity `home_section`, id = the key; `{ids}` before and after). The website reads the
+landing through its `shop:home` cache tag, which the admin's save revalidates, so a saved section shows at once.
+
 ---
 
 ## 3. Enumerations
@@ -1978,6 +2009,8 @@ any scene. Audit `assistant.banner_image_used` (entity `banner`; `{job_id, mode,
 | LogoutScope | `current`, `others`, `all` | `auth/logout/` |
 | ExportFormat | `csv`, `xlsx` | |
 | IntegrationMode | `fake`, `live` | `health/?ready=1`; the ops console settings page (§2.11) |
+| HomeSectionKey | `spotlight`, `new`, `promo`, `bestsellers`, `categories`, `specialists` | §2.21 `key` |
+| HomePickIssue | `hidden`, `no_image`, `not_promo` | §2.21 `issue` |
 | SeoSeverity (B-W1) | `error`, `warning`, `info` | `seo_status.issues[].severity` (§2.3, §2.4) |
 | SeoIssueCode (B-W1) | `name_missing`, `name_translation_missing`, `description_missing`, `description_short`, `images_missing`, `alt_text_fallback`, `category_missing`, `seo_title_missing`, `seo_title_short`, `seo_title_long`, `seo_description_missing`, `seo_description_short`, `seo_description_long`, `image_missing`, `no_active_products` | `seo_status.issues[].code` (§2.3, §2.4) |
 
@@ -2004,6 +2037,7 @@ and the hand-run fixes listed in rule 1 are superuser-only; `staff.*` is manager
 | Appointments | `appointment.confirmed`, `appointment.rejected`, `appointment.attended`, `appointment.created`, `appointment.rescheduled` (`{…, from_start, from_end, reschedule_no}`), `appointment.cancelled` (`{…, reason}`) |
 | Shell | `settings.updated` (changed leaves only, each `{from, to}`; legal-text leaves as `{changed, old_len, new_len, sha256}`, §2.11), `settings.terms_published` (`{from, to, sha256}`, §2.11) — both written by the ops console settings page since 2026-11-07, `export.downloaded` |
 | M2 (customer API) | The customer, payment and POS actions listed in `docs/api/customer-api-v1.md` §3 ("Audit actions added in M2"): `customer.*` (B-W1 adds `customer.session_revoked`, also by staff from §2.6, and `customer.sessions_revoked`), `auth.device_mismatch`, `appointment.requested`, `appointment.cancelled` (`by: "customer"`), `payment.late_capture`, `pos.*`. The `audit-log/` filters accept them unchanged. |
+| Home page (§2.21; prefix `home_section`, business tier) | `home_section.saved` (entity `home_section`, id = the section key; `{ids}` before / after: product or specialist ids as strings, category slugs), written by `catalog` (products, categories) and `professionals` (specialists) |
 | Specialists and services (admin API, §2.17) | `professional.created` (the new row), `professional.updated` (changed fields `{field: old}` / `{field: new}`), `professional.deactivated` (changed fields + `upcoming_appointments`, `forced`), `professional.activated`, `professional.photo_updated` (`{photo}` / `{photo, sha256}`), `professional.photo_deleted`, `professional.services_updated` (`{services: [{service_id, price, duration_min, is_active}]}` before / after), `schedule.hours_updated` (`{days: [WorkingDay]}` before / after), `schedule.override_created`, `schedule.override_deleted` (`{override_id, date, start, end, location_id, note}`), `schedule.block_created`, `schedule.block_deleted` (`{block_id, start, end, kind, label}`) — all with object type `professional` and the specialist's id, so `audit-log/?object_type=professional&object_id=…` is one specialist's history; `service.created`, `service.updated`, `service.deactivated`, `service.activated` (object type `service`); `location.created`, `location.updated` (object type `location`). One row per operation, none when nothing changed. |
 | Django admin (editable models) | `<model>.created`, `<model>.updated`, `<model>.deleted` for `location`, `professional`, `service`, `professional_service`, `working_hours`, `blocked_period`; `working_hours_override.created`, `working_hours_override.updated`, `working_hours_override.deleted` (the override is the seventh editable model, T13) |
 

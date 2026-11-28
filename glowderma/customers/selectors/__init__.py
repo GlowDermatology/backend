@@ -14,8 +14,9 @@ Three reads have no selector in their owning module yet and are implemented here
 selectors module yet).
 
 The customer API reads (customer contract §2.2, §2.3) live beside them: ``account`` (activity, the profile
-and addresses) and ``catalog`` (categories, banners, products). ``common`` holds the media and translation
-helpers. Callers import this facade.
+and addresses) and ``catalog`` (categories, banners, products, the landing). ``landing`` holds the landing's
+automatic rules and its hand-picked sections, which ``catalog.home`` and the admin «Bosh sahifa»
+(``admin.home``) share. ``common`` holds the media and translation helpers. Callers import this facade.
 """
 
 from glowderma.customers.selectors.account.activity import (
@@ -44,6 +45,10 @@ from glowderma.customers.selectors.admin.card import (
     get_customer,
     ledger_entry,
     newest_order,
+)
+from glowderma.customers.selectors.admin.home import (
+    home_section,
+    home_sections,
 )
 from glowderma.customers.selectors.admin.listing import (
     DEFAULT_ORDERING,
@@ -75,11 +80,7 @@ from glowderma.customers.selectors.catalog.feed import (
     product_feed,
 )
 from glowderma.customers.selectors.catalog.home import (
-    BESTSELLERS_RAIL_MIN,
-    LOW_STOCK_MAX,
-    LOW_STOCK_MIN,
-    RAIL_SIZE,
-    SPOTLIGHT_SIZE,
+    RAIL_KEYS,
     cashback_payload,
     home_payload,
 )
@@ -100,6 +101,13 @@ from glowderma.customers.selectors.common import (
     product_name,
     seo_payload,
 )
+from glowderma.customers.selectors.landing.automatic import (
+    BESTSELLERS_RAIL_MIN,
+    LOW_STOCK_MAX,
+    LOW_STOCK_MIN,
+    RAIL_SIZE,
+    SPOTLIGHT_SIZE,
+)
 
 __all__ = [
     "BANNER_LIMIT",
@@ -115,6 +123,7 @@ __all__ = [
     "NAME_COLLATION",
     "ORDERINGS",
     "PHONE_SEARCH_MIN_DIGITS",
+    "RAIL_KEYS",
     "RAIL_SIZE",
     "SEARCH_MAX_LENGTH",
     "SPOTLIGHT_SIZE",
@@ -147,6 +156,8 @@ __all__ = [
     "filter_in_stock",
     "get_customer",
     "home_payload",
+    "home_section",
+    "home_sections",
     "is_dormant",
     "last_activity_at",
     "ledger_entry",

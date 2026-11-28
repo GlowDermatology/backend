@@ -5,9 +5,10 @@ override — is created, changed and deleted here, validated against the model i
 The Django admin (:mod:`glowderma.professionals.admin`) routes ``save_model`` / ``delete_model`` / inline
 formsets through :func:`save_row` and :func:`delete_row` (``editable_rows``, with the named helpers other code
 — seeders, M2 — uses). The admin REST API (FND-1, ``api/admin/``) has its own operations, one subject per
-module: ``specialists``, ``specialist_photos``, ``schedules``, ``specialist_services`` and ``locations``; they
-raise the contract's DRF errors and audit one row per operation (``professional.*``, ``service.*``,
-``schedule.*``, ``location.*``, contract "Mutaxassislar va xizmatlar"). ``common`` holds their shared rules.
+module: ``specialists``, ``specialist_photos``, ``schedules``, ``specialist_services``, ``locations`` and
+``home`` (the landing's specialists); they raise the contract's DRF errors and audit one row per operation
+(``professional.*``, ``service.*``, ``schedule.*``, ``location.*``, contract "Mutaxassislar va xizmatlar";
+``home_section.saved``). ``common`` holds their shared rules.
 """
 
 from glowderma.professionals.services.common import (
@@ -40,6 +41,10 @@ from glowderma.professionals.services.editable_rows import (
     snapshot,
     store_photo,
     update_professional,
+)
+from glowderma.professionals.services.home import (
+    HOME_SPECIALIST_HIDDEN,
+    set_home_specialists,
 )
 from glowderma.professionals.services.locations import (
     create_location,
@@ -80,6 +85,7 @@ __all__ = [
     "DURATION_STEP_MIN",
     "EDITABLE_MODELS",
     "ENTITY_NAMES",
+    "HOME_SPECIALIST_HIDDEN",
     "IMAGE_MESSAGES",
     "LOCATION_LOCK",
     "MAX_PRICE",
@@ -113,6 +119,7 @@ __all__ = [
     "invite_specialist",
     "remove_blocked_period",
     "save_row",
+    "set_home_specialists",
     "set_specialist_account_role",
     "set_specialist_photo",
     "set_working_hours",

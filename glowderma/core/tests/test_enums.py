@@ -231,6 +231,8 @@ ASSISTANT_TABLE: dict[str, list[str]] = {
 HOME_TABLE: dict[str, list[str]] = {
     "HomeSpotlightReason": ["promo", "new", "bestseller", "low_stock"],
     "HomeRailKey": ["new", "promo", "bestsellers"],
+    "HomeSectionKey": ["spotlight", "new", "promo", "bestsellers", "categories", "specialists"],
+    "HomePickIssue": ["hidden", "no_image", "not_promo"],
 }
 # Product scenes and screen-fit renditions (admin §2.3 / §2.20).
 SCENES_TABLE: dict[str, list[str]] = {

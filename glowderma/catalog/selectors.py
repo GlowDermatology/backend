@@ -7,16 +7,16 @@ annotation of :func:`order_products` — never in ``LIKE``, equality, ``DISTINCT
 (``core.search.SearchKey``: case and ё as decision GC-1, every apostrophe variant removed).
 """
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import TypedDict
 
-from django.db.models import Count, F, Prefetch, Q, QuerySet, Value
+from django.db.models import Count, Exists, F, OuterRef, Prefetch, Q, QuerySet, Value
 from django.db.models.functions import Coalesce, Collate, NullIf
 
 from glowderma.catalog import seo
-from glowderma.catalog.models import Banner, Category, Product, ProductImage, ProductStock
+from glowderma.catalog.models import Banner, Category, HomePick, Product, ProductImage, ProductStock
 from glowderma.core import enums, timeutils
 from glowderma.core.consistency import Finding, finding
 from glowderma.core.search import SearchKey, search_key
@@ -193,6 +193,68 @@ def customer_visible_products() -> QuerySet[Product]:
         category__isnull=False,
         category__is_active=True,
     )
+
+
+# --- the landing's hand-picked sections (admin «Bosh sahifa»; ``customers`` builds the page) ----------------
+
+
+@dataclass(frozen=True, slots=True)
+class HomePicks:
+    """The hand-filled landing sections, in order: product ids per product section (``spotlight``, ``new``,
+    ``promo``, ``bestsellers``) and the category slugs of ``categories``. A section with no picks is absent
+    (it is automatic)."""
+
+    products: dict[str, list[int]]
+    categories: list[str]
+
+
+def home_picks() -> HomePicks:
+    products: dict[str, list[int]] = {}
+    categories: list[str] = []
+    # A pick holds a product or a category (``catalog_homepick_section_target``): one of the two is null.
+    rows: Iterable[tuple[str, int | None, str | None]] = HomePick.objects.order_by(
+        "section", "position"
+    ).values_list("section", "product_id", "category__slug")
+    for section, product_id, category_slug in rows:
+        if product_id is not None:
+            products.setdefault(section, []).append(product_id)
+        elif category_slug is not None:
+            categories.append(category_slug)
+    return HomePicks(products=products, categories=categories)
+
+
+def product_pick_issues(section: str, product_ids: Iterable[int]) -> dict[int, str | None]:
+    """Why each product could not show in ``section`` now (a ``HomePickIssue``), ``None`` when it can; an
+    unknown id is absent. One query."""
+    ids = list(product_ids)
+    if not ids:
+        return {}
+    rows = (
+        Product.objects.filter(pk__in=ids)
+        .annotate(
+            visible=Exists(customer_visible_products().filter(pk=OuterRef("pk"))),
+            has_image=Exists(ProductImage.objects.filter(product_id=OuterRef("pk"))),
+        )
+        .values_list("pk", "visible", "has_image", "promo")
+    )
+    issues: dict[int, str | None] = {}
+    for pk, visible, has_image, promo in rows:
+        issue: str | None = None
+        if not visible:
+            issue = enums.HomePickIssue.HIDDEN
+        elif section == enums.HomeSectionKey.SPOTLIGHT and not has_image:
+            issue = enums.HomePickIssue.NO_IMAGE
+        elif section == enums.HomeSectionKey.PROMO and not promo:
+            issue = enums.HomePickIssue.NOT_PROMO
+        issues[pk] = issue
+    return issues
+
+
+def category_pick_issues(slugs: Iterable[str]) -> dict[str, str | None]:
+    """``hidden`` for an inactive category, ``None`` for an active one, by slug; an unknown slug is absent."""
+    wanted = list(slugs)
+    rows = Category.objects.filter(slug__in=wanted).values_list("slug", "is_active") if wanted else []
+    return {slug: None if active else enums.HomePickIssue.HIDDEN for slug, active in rows}
 
 
 # --- ops console sales & catalog dashboard (glowderma.reporting.dashboards) ---------------------------------

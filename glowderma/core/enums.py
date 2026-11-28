@@ -765,6 +765,25 @@ class HomeRailKey(TextChoices):
     BESTSELLERS = "bestsellers", "Ko‘p sotilganlar"
 
 
+class HomeSectionKey(TextChoices):
+    """A landing section staff can fill by hand (admin «Bosh sahifa»); one with no picks stays automatic."""
+
+    SPOTLIGHT = "spotlight", "Asosiy karusel"
+    NEW = "new", "Yangi kelganlar"
+    PROMO = "promo", "Aksiyada"
+    BESTSELLERS = "bestsellers", "Ko‘p sotilgan"
+    CATEGORIES = "categories", "Nimadan boshlaymiz?"
+    SPECIALISTS = "specialists", "Mutaxassislar"
+
+
+class HomePickIssue(TextChoices):
+    """Why a hand-picked item is not on the landing now (it is skipped until it is fixed)."""
+
+    HIDDEN = "hidden", "Saytda ko‘rinmaydi"
+    NO_IMAGE = "no_image", "Rasmi yo‘q"
+    NOT_PROMO = "not_promo", "Aksiyada emas"
+
+
 CONTRACT_ENUMS: tuple[type[TextChoices], ...] = (
     OrderStatus,
     PaymentStatus,
@@ -854,6 +873,8 @@ CONTRACT_ENUMS: tuple[type[TextChoices], ...] = (
     AppointmentRangeDetail,
     HomeSpotlightReason,
     HomeRailKey,
+    HomeSectionKey,
+    HomePickIssue,
     ProductImageSource,
     RenditionMode,
     SceneTemplateKind,

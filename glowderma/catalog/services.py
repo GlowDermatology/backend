@@ -25,9 +25,11 @@ from rest_framework.exceptions import NotFound, ValidationError
 
 from glowderma.catalog import selectors
 from glowderma.catalog.models import (
+    HOME_PICK_LIMITS,
     PRODUCT_SLUG_CONSTRAINT,
     Banner,
     Category,
+    HomePick,
     Product,
     ProductImage,
     ProductStock,
@@ -1279,3 +1281,77 @@ def import_products(rows: Iterable[BillzProduct]) -> dict[str, int]:
         if outcome == "created":
             counters["new_from_billz"] += 1
     return counters
+
+
+# --- the landing's hand-picked sections (admin «Bosh sahifa») ---------------------------------------------
+
+HOME_PICKS_LOCK = "catalog_home_picks"
+HOME_PICK_MESSAGES: dict[str, str] = {
+    enums.HomePickIssue.HIDDEN: N_("«%(name)s» saytda ko‘rinmaydi."),
+    enums.HomePickIssue.NO_IMAGE: N_("«%(name)s» rasmsiz: karuselga rasmi bor mahsulot qo‘ying."),
+    enums.HomePickIssue.NOT_PROMO: N_("«%(name)s» aksiyada emas."),
+}
+
+
+def _pick_targets(section: str, refs: Sequence[str]) -> list[tuple[int, str, str | None]]:
+    """``(pk, name, issue)`` per ref, in order: product ids, or category slugs for ``categories``. An unknown
+    ref is a ``does_not_exist`` error."""
+    if section == enums.HomeSectionKey.CATEGORIES:
+        categories = {row.slug: row for row in Category.objects.filter(slug__in=refs)}
+        if set(refs) - set(categories):
+            raise ValidationError({"ids": [field_error("does_not_exist")]})
+        category_issues = selectors.category_pick_issues(refs)
+        return [(categories[ref].pk, categories[ref].name_uz, category_issues[ref]) for ref in refs]
+    ids = [int(ref) for ref in refs if ref.isdigit()]
+    names = dict(Product.objects.filter(pk__in=ids).values_list("pk", "name_uz"))
+    if len(ids) != len(refs) or set(ids) - set(names):
+        raise ValidationError({"ids": [field_error("does_not_exist")]})
+    issues = selectors.product_pick_issues(section, ids)
+    return [(pk, names[pk], issues[pk]) for pk in ids]
+
+
+def set_home_picks(section: str, refs: Sequence[str], *, actor: Any, request: Any = None) -> list[str]:
+    """Replaces ``section``'s picks with ``refs`` in that order (product ids, or category slugs for
+    ``categories``); an empty list makes the section automatic again. Refuses a pick that could not show on
+    the landing now (hidden, no photo for the carousel, not on promo for the promo rail), so staff save only
+    what customers will see. Audited as ``home_section.saved``. Returns the saved refs."""
+    if section not in HOME_PICK_LIMITS:
+        raise ValueError(f"{section!r} is not a catalog home section")
+    limit = HOME_PICK_LIMITS[section]
+    if len(refs) > limit:
+        raise ValidationError({"ids": [field_error("max_items", limit=limit)]})
+    if len(set(refs)) != len(refs):
+        raise ValidationError({"ids": [field_error("invalid", N_("Har bir element bir marta tanlansin."))]})
+    targets = _pick_targets(section, refs)
+    problems = [
+        field_error("home_pick_unavailable", HOME_PICK_MESSAGES[issue] % {"name": name})
+        for _, name, issue in targets
+        if issue is not None
+    ]
+    if problems:
+        raise ValidationError({"ids": problems})
+    field = "category_id" if section == enums.HomeSectionKey.CATEGORIES else "product_id"
+    with transaction.atomic():
+        _advisory_lock(HOME_PICKS_LOCK)
+        before = [
+            _pick_ref(pick) for pick in HomePick.objects.filter(section=section).select_related("category")
+        ]
+        HomePick.objects.filter(section=section).delete()
+        HomePick.objects.bulk_create(
+            HomePick(section=section, position=position, **{field: pk})
+            for position, (pk, _, _) in enumerate(targets)
+        )
+        audit.record(
+            action="home_section.saved",
+            entity_type="home_section",
+            entity_id=section,
+            actor=actor,
+            request=request,
+            before={"ids": before},
+            after={"ids": list(refs)},
+        )
+    return list(refs)
+
+
+def _pick_ref(pick: HomePick) -> str:
+    return pick.category.slug if pick.category is not None else str(pick.product_id)

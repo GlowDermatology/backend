@@ -366,17 +366,18 @@ modules =
     glowderma.customers.api.admin.views.customers
     glowderma.customers.api.admin.views.cashback
     glowderma.customers.api.admin.views.sessions
+    glowderma.customers.api.admin.views.home
 
 # customers.services is a package (services/__init__.py is the facade callers import): the signed-in writes
 # above social sign-in, above the sign-in flows, above what they all share.
 [importlinter:contract:customers-services]
-name = customers.services: me above social above auth above common
+name = customers.services: me, cashback, purge and home above social above auth above common
 type = layers
 containers =
     glowderma.customers.services
 exhaustive = true
 layers =
-    me | cashback | purge
+    me | cashback | purge | home
     social
     auth
     common
@@ -424,13 +425,14 @@ layers =
     reauth
 
 [importlinter:contract:customers-selectors]
-name = customers.selectors: admin, account and catalog reads above the shared helpers
+name = customers.selectors: admin, account and catalog reads above the landing's rules, above the shared helpers
 type = layers
 containers =
     glowderma.customers.selectors
 exhaustive = true
 layers =
     admin | account | catalog
+    landing
     common
 
 # professionals: the admin API (routes above views, above their schemas and payloads, above serializers), the
@@ -476,7 +478,7 @@ containers =
     glowderma.professionals.services
 exhaustive = true
 layers =
-    editable_rows | specialist_photos | schedules | specialist_services
+    editable_rows | specialist_photos | schedules | specialist_services | home
     specialists | locations
     common
 

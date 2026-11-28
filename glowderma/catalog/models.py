@@ -469,3 +469,69 @@ class Banner(TimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.title_uz} (#{self.pk})"
+
+
+HOME_PRODUCT_SECTIONS = (
+    enums.HomeSectionKey.SPOTLIGHT,
+    enums.HomeSectionKey.NEW,
+    enums.HomeSectionKey.PROMO,
+    enums.HomeSectionKey.BESTSELLERS,
+)
+# The most picks a section takes: the spotlight carousel's frames, a rail's cards, the category grid.
+HOME_PICK_LIMITS: dict[str, int] = {
+    enums.HomeSectionKey.SPOTLIGHT: 6,
+    enums.HomeSectionKey.NEW: 12,
+    enums.HomeSectionKey.PROMO: 12,
+    enums.HomeSectionKey.BESTSELLERS: 12,
+    enums.HomeSectionKey.CATEGORIES: 12,
+}
+
+
+class HomePick(TimeStampedModel):
+    """A product or a category staff placed on a landing section, in order (admin «Bosh sahifa»). A section
+    with no picks is automatic; ``customers`` builds the page and skips a pick that cannot show now."""
+
+    section = models.CharField(max_length=16, choices=enums.HomeSectionKey.choices, verbose_name="bo‘lim")
+    position = models.PositiveSmallIntegerField(verbose_name="tartib")
+    product = models.ForeignKey(
+        "catalog.Product",
+        null=True,
+        on_delete=models.CASCADE,
+        related_name="home_picks",
+        verbose_name="mahsulot",
+    )
+    category = models.ForeignKey(
+        "catalog.Category",
+        null=True,
+        on_delete=models.CASCADE,
+        related_name="home_picks",
+        verbose_name="kategoriya",
+    )
+
+    class Meta:
+        verbose_name = "bosh sahifa tanlovi"
+        verbose_name_plural = "bosh sahifa tanlovlari"
+        constraints = [
+            models.UniqueConstraint(fields=["section", "position"], name="catalog_homepick_section_position"),
+            models.UniqueConstraint(
+                fields=["section", "product"],
+                condition=Q(product__isnull=False),
+                name="catalog_homepick_section_product",
+            ),
+            models.UniqueConstraint(
+                fields=["section", "category"],
+                condition=Q(category__isnull=False),
+                name="catalog_homepick_section_category",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(section__in=HOME_PRODUCT_SECTIONS, product__isnull=False, category__isnull=True)
+                    | Q(section=enums.HomeSectionKey.CATEGORIES, product__isnull=True, category__isnull=False)
+                ),
+                name="catalog_homepick_section_target",
+            ),
+        ]
+        ordering = ["section", "position"]
+
+    def __str__(self) -> str:
+        return f"{self.section} #{self.position + 1}"

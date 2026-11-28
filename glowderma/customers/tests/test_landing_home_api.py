@@ -98,6 +98,8 @@ def test_empty_storefront(at_hour: Callable[[int], None]) -> None:
         "stats": {"products": 0, "products_in_stock": 0, "categories": 0, "specialists": 0, "clinics": 0},
         "spotlight": [],
         "rails": [],
+        "categories": None,
+        "specialists": None,
         "cashback": None,
         "feed_cursor": None,
     }

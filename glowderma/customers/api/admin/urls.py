@@ -10,6 +10,8 @@ from glowderma.customers.api.admin.views import (
     CustomerSessionDetailView,
     CustomerSessionsViewSet,
     CustomerViewSet,
+    HomeSectionDetailView,
+    HomeSectionsView,
 )
 
 customers = CustomerViewSet.as_view({"get": "list"})
@@ -33,4 +35,6 @@ urlpatterns: list[URLPattern | URLResolver] = [
         CustomerSessionDetailView.as_view(),
         name="admin-customers-session-detail",
     ),
+    path("home-sections/", HomeSectionsView.as_view(), name="admin-home-sections"),
+    path("home-sections/<str:key>/", HomeSectionDetailView.as_view(), name="admin-home-section-detail"),
 ]

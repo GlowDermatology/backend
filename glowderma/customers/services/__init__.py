@@ -16,8 +16,9 @@ write other modules only through their services (``accounts``, ``commerce``, ``a
 customer-level lock (``FOR NO KEY UPDATE``) before any other row (C§2.7.1); a signed-in write re-checks the
 customer and the request's session under it (``accounts.services.lock_signed_in_customer``, C§6.17).
 
-The package groups them by subject: ``cashback`` (the admin adjustment), ``purge`` (the ops console's full
-purge of a customer without money), ``auth`` (registration, login,
+The package groups them by subject: ``cashback`` (the admin adjustment), ``home`` (the admin «Bosh sahifa»
+picks, saved by ``catalog`` and ``professionals``), ``purge`` (the ops console's full purge of a customer
+without money), ``auth`` (registration, login,
 reset and the dormant-account rule), ``social`` (the token checks, sign-in, the social ticket, its completion
 and the Apple token revocation), ``me`` (re-authentication, social links, password, contacts, profile,
 addresses and deletion) and ``common`` (identifiers, results, passwords, terms, identities and the audit
@@ -62,6 +63,9 @@ from glowderma.customers.services.common.results import (
     DeviceStep,
     PhoneStep,
     SignIn,
+)
+from glowderma.customers.services.home import (
+    save_home_section,
 )
 from glowderma.customers.services.me.addresses import (
     add_address,
@@ -182,6 +186,7 @@ __all__ = [
     "remove_address",
     "reset_password",
     "revoke_refused_apple_tokens",
+    "save_home_section",
     "send_attach_phone_code",
     "send_verify_email_code",
     "session_is_fresh",

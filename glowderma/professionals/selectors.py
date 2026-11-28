@@ -20,6 +20,7 @@ from glowderma.core import enums, timeutils
 from glowderma.core.search import SearchFold
 from glowderma.professionals.models import (
     BlockedPeriod,
+    HomeSpecialist,
     Location,
     Professional,
     Service,
@@ -244,6 +245,22 @@ def booking_catalogue() -> QuerySet[Professional]:
             ),
         )
     )
+
+
+def home_specialist_ids() -> list[int]:
+    """The specialists staff placed on the landing (admin «Bosh sahifa»), in order; empty = automatic (the
+    landing lists every specialist ``specialists/`` lists)."""
+    return list(HomeSpecialist.objects.order_by("position").values_list("professional_id", flat=True))
+
+
+def specialist_pick_issues(professional_ids: Collection[int]) -> dict[int, str | None]:
+    """``hidden`` for a specialist ``specialists/`` does not list (unpublished, or no active clinic), ``None``
+    for a listed one; an unknown id is absent."""
+    if not professional_ids:
+        return {}
+    listed = set(booking_catalogue().filter(pk__in=professional_ids).values_list("pk", flat=True))
+    known = Professional.objects.filter(pk__in=professional_ids).values_list("pk", flat=True)
+    return {pk: None if pk in listed else enums.HomePickIssue.HIDDEN for pk in known}
 
 
 def active_locations() -> QuerySet[Location]:

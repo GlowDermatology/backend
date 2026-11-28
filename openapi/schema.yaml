@@ -4120,6 +4120,155 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/home-sections/:
+    get:
+      operationId: admin_home_sections_list
+      description: 'Every landing section in the page''s order (spotlight, the `new`,
+        `promo` and `bestsellers` rails, categories, specialists): its saved picks
+        with their `issue` and what the automatic rule shows now.'
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HomeSections'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/home-sections/{key}/:
+    put:
+      operationId: admin_home_sections_update
+      description: 'Replaces the section''s picks (`[]` = automatic again). Checks:
+        at most `limit` ("Ko‘pi bilan {limit} ta."), each once, every id known (`does_not_exist`),
+        and every pick shows on the landing now (`home_pick_unavailable`, one error
+        per pick: hidden, no photo for the spotlight, not on promo for the `promo`
+        rail, an inactive category, an unpublished specialist). Audited as `home_section.saved`.
+        Returns the section.'
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: key
+        schema:
+          type: string
+          enum:
+          - bestsellers
+          - categories
+          - new
+          - promo
+          - specialists
+          - spotlight
+        description: The section.
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HomeSectionWriteRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HomeSection'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/integrations/billz/import/:
     post:
       operationId: admin_billz_import_create
@@ -25092,13 +25241,30 @@ components:
           items:
             $ref: '#/components/schemas/HomeSpotlight'
           description: Up to 6 products with an image, each once, taken one per reason
-            in turn (promo, bestseller, low_stock, new), rotated by the Tashkent hour.
+            in turn (promo, bestseller, low_stock, new), rotated by the Tashkent hour;
+            or the frames staff picked, in their order.
         rails:
           type: array
           items:
             $ref: '#/components/schemas/HomeRail'
-          description: '`new`, `promo`, `bestsellers` (at least 4 items) in that order;
-            empty rails are left out.'
+          description: '`new`, `promo`, `bestsellers` (at least 4 items unless staff
+            picked them) in that order; empty rails are left out. A rail staff filled
+            by hand shows their products (still visible, and on promo for `promo`).'
+        categories:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: The category slugs staff picked for «Nimadan boshlaymiz?»,
+            in order (active ones only); null = every active category, as `catalog/categories/`
+            lists them.
+        specialists:
+          type: array
+          items:
+            type: integer
+          nullable: true
+          description: The specialist ids staff picked for the landing, in order (listed
+            ones only); null = every specialist `specialists/` lists.
         cashback:
           allOf:
           - $ref: '#/components/schemas/HomeCashback'
@@ -25109,13 +25275,16 @@ components:
           nullable: true
           description: The `catalog/feed/` cursor right after the `new` rail's last
             product (the landing's unfiltered feed starts there, so it does not repeat
-            the rail); null = no products.
+            the rail); null = start at the newest (no products, or a `new` rail staff
+            filled by hand).
       required:
       - cashback
+      - categories
       - content_language
       - feed_cursor
       - online_sales_enabled
       - rails
+      - specialists
       - spotlight
       - stats
     HomeCashback:
@@ -25155,6 +25324,16 @@ components:
       - from_amount
       - percent
       - to_amount
+    HomePickIssueEnum:
+      enum:
+      - hidden
+      - no_image
+      - not_promo
+      type: string
+      description: |-
+        * `hidden` - hidden
+        * `no_image` - no_image
+        * `not_promo` - not_promo
     HomeRail:
       type: object
       properties:
@@ -25177,11 +25356,116 @@ components:
         * `new` - new
         * `promo` - promo
         * `bestsellers` - bestsellers
+    HomeSection:
+      type: object
+      properties:
+        key:
+          $ref: '#/components/schemas/HomeSectionKeyEnum'
+        manual:
+          type: boolean
+          description: Staff filled it by hand; false = automatic.
+        limit:
+          type: integer
+          description: The most picks the section takes.
+        picks:
+          type: array
+          items:
+            $ref: '#/components/schemas/HomeSectionItem'
+          description: The saved picks in order; empty when automatic.
+        automatic:
+          type: array
+          items:
+            $ref: '#/components/schemas/HomeSectionItem'
+          description: What the automatic rule shows now (the starting point of a
+            hand-filled list).
+      required:
+      - automatic
+      - key
+      - limit
+      - manual
+      - picks
+    HomeSectionItem:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Product or specialist id as a string; the category slug.
+        name:
+          type: string
+          description: The Uzbek name.
+        image_url:
+          type: string
+          nullable: true
+          description: 400 px WebP variant; null = no picture.
+        issue:
+          nullable: true
+          description: |-
+            Why a pick does not show on the landing now (it is skipped); null = it shows.
+
+            * `hidden` - hidden
+            * `no_image` - no_image
+            * `not_promo` - not_promo
+          oneOf:
+          - $ref: '#/components/schemas/HomePickIssueEnum'
+          - $ref: '#/components/schemas/NullEnum'
+      required:
+      - id
+      - image_url
+      - issue
+      - name
+    HomeSectionKeyEnum:
+      enum:
+      - spotlight
+      - new
+      - promo
+      - bestsellers
+      - categories
+      - specialists
+      type: string
+      description: |-
+        * `spotlight` - spotlight
+        * `new` - new
+        * `promo` - promo
+        * `bestsellers` - bestsellers
+        * `categories` - categories
+        * `specialists` - specialists
+    HomeSectionWriteRequest:
+      type: object
+      properties:
+        ids:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 160
+          description: The picks in order (ids as strings, category slugs), at most
+            the section's `limit`; [] = automatic again.
+      required:
+      - ids
+    HomeSections:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/HomeSection'
+      required:
+      - results
     HomeSpotlight:
       type: object
       properties:
         reason:
-          $ref: '#/components/schemas/HomeSpotlightReasonEnum'
+          nullable: true
+          description: |-
+            Why the product is shown; null = a frame staff picked that has none of the reasons.
+
+            * `promo` - promo
+            * `new` - new
+            * `bestseller` - bestseller
+            * `low_stock` - low_stock
+          oneOf:
+          - $ref: '#/components/schemas/HomeSpotlightReasonEnum'
+          - $ref: '#/components/schemas/NullEnum'
         product:
           $ref: '#/components/schemas/ProductCard'
       required:

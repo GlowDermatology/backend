@@ -65,6 +65,8 @@ BUSINESS_PREFIXES: Final = frozenset(
         "category",
         "customer",
         "delivery",
+        # the admin «Bosh sahifa»: a landing section's hand-picked items (§2.21)
+        "home_section",
         "location",
         "loyalty",
         "notification",

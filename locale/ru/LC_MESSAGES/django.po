@@ -673,6 +673,10 @@ msgstr "Акция снята"
 msgid "Aksiya qo‘shildi"
 msgstr "Акция добавлена"
 
+#: model metadata
+msgid "Aksiyada"
+msgstr "По акции"
+
 #: glowderma/assistant/templates/assistant/console/_credential.html
 #: glowderma/loyalty/admin.py
 msgid "Almashtirilgan"
@@ -751,6 +755,10 @@ msgstr "Исходное фото изменено или удалено: соз
 #: glowderma/professionals/services/common.py
 msgid "Asosiy filial biriktirilgan filiallar orasida bo‘lishi kerak."
 msgstr "Основной филиал должен входить в список назначенных филиалов."
+
+#: model metadata
+msgid "Asosiy karusel"
+msgstr "Главная карусель"
 
 #: config/settings/ops_admin.py
 msgid "Audit jurnali"
@@ -2370,6 +2378,11 @@ msgstr "Вернуть все в очередь"
 msgid "Hammasini tugatish"
 msgstr "Завершить все"
 
+#: glowderma/catalog/services.py
+#: glowderma/professionals/services/home.py
+msgid "Har bir element bir marta tanlansin."
+msgstr "Каждый элемент можно выбрать только один раз."
+
 #: glowderma/reporting/templates/reporting/dashboards/money.html
 msgid "Har bir son o‘sha qatorlarning ro‘yxatiga olib boradi; ro‘yxat ko‘pi bilan 100 qatorni ochadi — undan ko‘p bo‘lsa, son ostida «Ro‘yxatda 100 / N» yoziladi."
 msgstr "Каждое число ведёт к списку этих строк; список открывает не более 100 строк — если их больше, под числом указано «В списке 100 / N»."
@@ -3211,6 +3224,10 @@ msgstr "Телефон косметолога"
 msgid "Kosmetologiya"
 msgstr "Косметология"
 
+#: model metadata
+msgid "Ko‘p sotilgan"
+msgstr "Хиты продаж"
+
 #: glowderma.core.api.exceptions.FIELD_MESSAGES
 #: glowderma/core/api/exceptions.py
 msgid "Ko‘pi bilan 2 ta kasr raqam."
@@ -3819,6 +3836,7 @@ msgid "Mutaxassisda {n} ta kelgusi qabul bor (kutilayotgan yoki tasdiqlangan). Q
 msgstr "Предстоящих записей у специалиста (ожидающих или подтверждённых): {n}. Записи не изменятся: сначала перенесите их на другое время или к другому специалисту либо отмените, или всё равно деактивируйте специалиста."
 
 #: config/settings/ops_admin.py
+#: model metadata
 msgid "Mutaxassislar"
 msgstr "Специалисты"
 
@@ -3979,6 +3997,10 @@ msgstr "В очереди"
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Navbatlar, integratsiyalar va tungi tekshiruvlar"
 msgstr "Очереди, интеграции и ночные проверки"
+
+#: model metadata
+msgid "Nimadan boshlaymiz?"
+msgstr "С чего начнём?"
 
 #: glowderma.core.labels.ACTIVE_STATE
 msgid "Nofaol"
@@ -6476,6 +6498,10 @@ msgstr "Новый API-ключ"
 msgid "Yangi kalit Vault’ga %(version)s-versiya sifatida yozildi va tekshirilmoqda. Tekshiruvdan o‘tsa faol bo‘ladi; o‘tmasa eski kalit ishlashda davom etadi."
 msgstr "Новый ключ записан в Vault как версия %(version)s и проверяется. Если проверка пройдена, он станет активным; иначе продолжит работать старый ключ."
 
+#: model metadata
+msgid "Yangi kelganlar"
+msgstr "Новинки"
+
 #: glowderma/reporting/dashboards/customers.py
 msgid "Yangi mijozlar · %(days)s kun"
 msgid_plural "Yangi mijozlar · %(days)s kun"
@@ -6983,6 +7009,22 @@ msgid "bog‘liq obyekt"
 msgstr "связанный объект"
 
 #: model metadata
+msgid "bosh sahifa mutaxassisi"
+msgstr "специалист главной страницы"
+
+#: model metadata
+msgid "bosh sahifa mutaxassislari"
+msgstr "специалисты главной страницы"
+
+#: model metadata
+msgid "bosh sahifa tanlovi"
+msgstr "выбор главной страницы"
+
+#: model metadata
+msgid "bosh sahifa tanlovlari"
+msgstr "выбор главной страницы"
+
+#: model metadata
 msgid "boshlangan"
 msgstr "начато"
 
@@ -7009,6 +7051,10 @@ msgstr "дополнительные филиалы"
 #: model metadata
 msgid "bosqich"
 msgstr "этап"
+
+#: model metadata
+msgid "bo‘lim"
+msgstr "раздел"
 
 #: glowderma/core/templatetags/ops_admin.py
 msgid "bo‘sh"
@@ -9663,6 +9709,22 @@ msgstr "срок резерва (минуты)"
 #: glowderma/core/api/exceptions.py
 msgid "{limit} belgidan oshmasin."
 msgstr "Не более {limit} символов."
+
+#: glowderma/catalog/services.py
+msgid "«%(name)s» aksiyada emas."
+msgstr "«%(name)s» не участвует в акции."
+
+#: glowderma/catalog/services.py
+msgid "«%(name)s» rasmsiz: karuselga rasmi bor mahsulot qo‘ying."
+msgstr "У «%(name)s» нет фото: в карусель ставьте товар с фото."
+
+#: glowderma/catalog/services.py
+msgid "«%(name)s» saytda ko‘rinmaydi."
+msgstr "«%(name)s» не виден на сайте."
+
+#: glowderma/professionals/services/home.py
+msgid "«%(name)s» saytda ko‘rinmaydi: profil e’lon qilinmagan yoki filiali faol emas."
+msgstr "«%(name)s» не виден на сайте: профиль не опубликован или филиал не активен."
 
 #: glowderma/reporting/templates/reporting/dashboards/money.html
 msgid "«Hisobot» — %(when)s dagi tungi natija"
