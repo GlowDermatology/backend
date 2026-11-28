@@ -62,7 +62,7 @@ from glowderma.catalog import topics as catalog_topics
 from glowderma.commerce import delivery_review, selectors, services, topics, uzum_flow, yandex_flow
 from glowderma.commerce.billz_sales import PurchaseJournal, get_sale_port, sale_request
 from glowderma.commerce.models import Order, StockReservation
-from glowderma.core import alerts, audit, enums, integration_modes, outbox, timeutils
+from glowderma.core import alerts, audit, enums, integration_modes, outbox, storefront, timeutils
 from glowderma.core.api.exceptions import InvalidTransition
 from glowderma.core.labels import stamp
 from glowderma.core.models import OutboxMessage
@@ -1218,5 +1218,7 @@ def refresh_bestsellers() -> list[int]:
     end = timeutils.now()
     start = end - timedelta(days=selectors.BESTSELLERS_DAYS)
     ids = [row.product_id for row in selectors.top_products(start, end, limit=selectors.BESTSELLERS_LIMIT)]
+    if cache.get(selectors.BESTSELLERS_CACHE_KEY) != ids:
+        storefront.changed(storefront.HOME)  # the landing's bestsellers rail and carousel
     cache.set(selectors.BESTSELLERS_CACHE_KEY, ids, timeout=selectors.BESTSELLERS_CACHE_SECONDS)
     return ids

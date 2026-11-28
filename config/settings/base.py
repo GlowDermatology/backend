@@ -183,6 +183,23 @@ if ADMIN_PANEL_URL:
     _admin_panel = urlsplit(ADMIN_PANEL_URL)
     if _admin_panel.scheme not in {"http", "https"} or not _admin_panel.netloc or _admin_panel.query:
         raise ImproperlyConfigured("ADMIN_PANEL_URL must be an absolute http(s) URL without a query")
+# Storefront cache revalidation (core.storefront, integrations.storefront): the website's POST
+# /api/revalidate (e.g. https://glowderma.uz/api/revalidate) and its GLOWDERMA_REVALIDATE_SECRET (32+ chars).
+# Both empty = no call: the website then refreshes on its cache lifetimes alone. Set both or neither.
+STOREFRONT_REVALIDATE_URL = env_str("STOREFRONT_REVALIDATE_URL", "").strip()
+STOREFRONT_REVALIDATE_SECRET = env_str("STOREFRONT_REVALIDATE_SECRET", "").strip()
+if bool(STOREFRONT_REVALIDATE_URL) != bool(STOREFRONT_REVALIDATE_SECRET):
+    raise ImproperlyConfigured(
+        "Set both STOREFRONT_REVALIDATE_URL and STOREFRONT_REVALIDATE_SECRET, or neither"
+    )
+if STOREFRONT_REVALIDATE_URL:
+    _storefront = urlsplit(STOREFRONT_REVALIDATE_URL)
+    if _storefront.scheme not in {"http", "https"} or not _storefront.netloc or _storefront.query:
+        raise ImproperlyConfigured(
+            "STOREFRONT_REVALIDATE_URL must be an absolute http(s) URL without a query"
+        )
+    if len(STOREFRONT_REVALIDATE_SECRET) < 32:  # noqa: PLR2004 - the website refuses a shorter secret
+        raise ImproperlyConfigured("STOREFRONT_REVALIDATE_SECRET must be at least 32 characters")
 REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "glowderma.core.api.exceptions.envelope_exception_handler",
     "DEFAULT_PAGINATION_CLASS": "glowderma.core.api.pagination.EnvelopePagination",

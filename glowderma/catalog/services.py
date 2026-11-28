@@ -34,7 +34,7 @@ from glowderma.catalog.models import (
     ProductImage,
     ProductStock,
 )
-from glowderma.core import audit, enums, integration_modes, renditions, timeutils
+from glowderma.core import audit, enums, integration_modes, renditions, storefront, timeutils
 from glowderma.core.api.exceptions import Conflict, field_error
 from glowderma.core.images import ImageError, ProcessedImage, process_image
 from glowderma.core.media import media_name
@@ -445,6 +445,7 @@ def _touch_product(product_id: int) -> None:
     """A gallery change is a change of the product page: ``updated_at`` moves (the website's sitemap
     ``lastmod``, B-W1); ``last_change`` does not (contract §2.3)."""
     Product.objects.filter(pk=product_id).update(updated_at=timeutils.now())
+    storefront.changed(storefront.PRODUCTS)
 
 
 def _ordered_images(product: Product) -> list[ProductImage]:
@@ -903,12 +904,14 @@ def delete_category(category: Category, *, actor: Any, request: Any = None) -> N
         Banner.objects.filter(link_category=locked).update(
             link_kind=enums.BannerLinkKind.NONE, link_category=None, updated_at=timeutils.now()
         )
+        storefront.changed(storefront.BANNERS)
         snapshot = _category_snapshot(locked)
         _delete_file_on_commit(locked.image)
         locked.delete()
         for position, remaining in enumerate(Category.objects.order_by("position", "id")):
             if remaining.position != position:
                 Category.objects.filter(pk=remaining.pk).update(position=position)
+                storefront.changed(storefront.CATEGORIES)
         audit.record(
             action="category.deleted",
             entity_type="category",
@@ -927,6 +930,7 @@ def reorder_categories(slugs: Sequence[str], *, actor: Any, request: Any = None)
             raise ValidationError({"slugs": [field_error("mismatch")]})
         for position, slug in enumerate(slugs):
             Category.objects.filter(slug=slug).update(position=position)
+        storefront.changed(storefront.CATEGORIES)
         audit.record(
             action="category.reordered",
             entity_type="category",
@@ -1077,6 +1081,7 @@ def delete_banner(banner: Banner, *, actor: Any, request: Any = None) -> None:
         for position, remaining in enumerate(Banner.objects.order_by("position", "id")):
             if remaining.position != position:
                 Banner.objects.filter(pk=remaining.pk).update(position=position)
+                storefront.changed(storefront.BANNERS)
         audit.record(
             action="banner.deleted",
             entity_type="banner",
@@ -1095,6 +1100,7 @@ def reorder_banners(ids: Sequence[int], *, actor: Any, request: Any = None) -> l
             raise ValidationError({"ids": [field_error("mismatch")]})
         for position, banner_id in enumerate(ids):
             Banner.objects.filter(pk=banner_id).update(position=position)
+        storefront.changed(storefront.BANNERS)
         audit.record(
             action="banner.reordered",
             entity_type="banner",
@@ -1149,6 +1155,8 @@ def sync_stock(product: Product, quantity: int, synced_at: Any) -> bool:
             )
             return False
         ProductStock.objects.filter(pk=stock.pk).update(quantity=quantity, synced_at=synced_at)
+    if previous != quantity:
+        storefront.changed(storefront.PRODUCTS)
     return previous != quantity
 
 
@@ -1182,6 +1190,8 @@ def upsert_from_billz(row: BillzProduct) -> UpsertOutcome:
         if row.volume is not None:  # None = not asserted (no BILLZ_VOLUME_FIELD): never blank a stored volume
             fields["volume"] = row.volume
         Product.objects.filter(pk=product.pk).update(**fields)
+        if changed:
+            storefront.changed(storefront.PRODUCTS)
         stock_changed = sync_stock(product, row.stock, row.synced_at)
         return "updated" if changed or stock_changed else "unchanged"
 
@@ -1337,6 +1347,7 @@ def set_home_picks(section: str, refs: Sequence[str], *, actor: Any, request: An
             _pick_ref(pick) for pick in HomePick.objects.filter(section=section).select_related("category")
         ]
         HomePick.objects.filter(section=section).delete()
+        storefront.changed(storefront.HOME)
         HomePick.objects.bulk_create(
             HomePick(section=section, position=position, **{field: pk})
             for position, (pk, _, _) in enumerate(targets)

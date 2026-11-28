@@ -11,3 +11,6 @@ class LoyaltyConfig(AppConfig):
 
         # health/?ready=1 (admin §2.15): core cannot import loyalty, so the check is registered here
         readiness.register_cashback_policy_check(selectors.cashback_policy_missing)
+        from glowderma.loyalty import storefront
+
+        storefront.connect()  # the landing's cashback tiers (core.storefront)

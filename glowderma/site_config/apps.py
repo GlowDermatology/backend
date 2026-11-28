@@ -25,3 +25,6 @@ class SiteConfigConfig(AppConfig):
 
     def ready(self) -> None:
         post_migrate.connect(ensure_singleton, sender=self, dispatch_uid="site_config.ensure_singleton")
+        from glowderma.site_config import storefront
+
+        storefront.connect()  # the website's settings reads (core.storefront)

@@ -51,6 +51,7 @@ from .base import (
     SMTP_USE_SSL,
     SMTP_USE_TLS,
     SMTP_USER,
+    STOREFRONT_REVALIDATE_URL,
     UZUM_CHECKOUT_BASE_URL,
     UZUM_MODE,
     VAULT_AI_PREFIX,
@@ -297,6 +298,8 @@ def _https_url(name: str, value: str) -> None:
 _https_url("PAYMENT_WEB_RETURN_URL", PAYMENT_WEB_RETURN_URL.format(order_id=1, lang="uz", locale_prefix=""))
 if ADMIN_PANEL_URL:  # staff invite / password links carry a one-time token (feat/admin-ux)
     _https_url("ADMIN_PANEL_URL", ADMIN_PANEL_URL)
+if STOREFRONT_REVALIDATE_URL:  # carries the revalidation secret (core.storefront)
+    _https_url("STOREFRONT_REVALIDATE_URL", STOREFRONT_REVALIDATE_URL)
 if OAUTH_MODE == "live" and APPLE_SERVICES_IDS:
     # the website's Sign in with Apple code exchange repeats the redirect URI its authorization used (B-W1)
     _https_url("APPLE_WEB_REDIRECT_URI", APPLE_WEB_REDIRECT_URI)

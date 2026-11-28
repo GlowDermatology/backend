@@ -9,7 +9,7 @@ from django.core.files.base import ContentFile
 from django.db import transaction
 from rest_framework.exceptions import ValidationError as ApiValidationError
 
-from glowderma.core import audit, timeutils
+from glowderma.core import audit, storefront, timeutils
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.images import ImageError, process_image
 from glowderma.core.media import media_name
@@ -76,6 +76,7 @@ def delete_specialist_photo(professional_id: int, *, actor: Any, request: Any = 
         if not previous:
             return
         Professional.objects.filter(pk=professional.pk).update(photo="", updated_at=timeutils.now())
+        storefront.changed(storefront.SPECIALISTS)
         remove_file_on_commit(professional.photo.storage, previous)
         audit.record(
             action="professional.photo_deleted",

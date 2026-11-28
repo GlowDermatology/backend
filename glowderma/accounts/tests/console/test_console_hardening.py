@@ -90,6 +90,7 @@ TOPIC_PAYLOADS: dict[str, dict[str, Any]] = {
     "push.session_replaced": {"session_id": "s-1", "sid": "s-1", "fcm_token": "FCM-REPLACED-SECRET"},
     "refund.submit": {"refund_id": 1, "payment_id": 2, "order_id": 25, "provider_txn_id": "t-1", "amount": 9},
     "sms.send": {"sms_code_id": 16, "lang": "uz", "platform": "ios"},
+    "storefront.revalidate": {"tags": ["shop:home", "shop:products"]},
     "yandex.dispatch": {
         "order_id": 26,
         "courier_claim_id": 16,

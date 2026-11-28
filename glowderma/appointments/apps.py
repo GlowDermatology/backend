@@ -13,3 +13,6 @@ class AppointmentsConfig(AppConfig):
 
         bookings.register(selectors.upcoming_counts_by_professional)
         bookings.register_location_upcoming(selectors.location_has_upcoming)
+        from glowderma.appointments import storefront
+
+        storefront.connect()  # a booking changes the website's free slots (core.storefront)

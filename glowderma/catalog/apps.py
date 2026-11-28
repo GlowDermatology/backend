@@ -8,4 +8,6 @@ class CatalogConfig(AppConfig):
     def ready(self) -> None:
         # Registers the outbox handler of ``job.queued`` (and the Celery task) in every process that can run
         # ``core.dispatch_outbox`` — the worker autodiscovers it, the API process needs the import.
-        from glowderma.catalog import tasks  # noqa: F401
+        from glowderma.catalog import storefront, tasks  # noqa: F401
+
+        storefront.connect()  # the website's cache tags of catalog writes (core.storefront)

@@ -49,7 +49,7 @@ from glowderma.commerce.models import (
     OrderItem,
     StockReservation,
 )
-from glowderma.core import alerts, audit, enums, integration_modes, outbox, timeutils
+from glowderma.core import alerts, audit, enums, integration_modes, outbox, storefront, timeutils
 from glowderma.core.api.exceptions import (
     AlreadyPaid,
     AuthFailed,
@@ -660,6 +660,16 @@ def mark_paid(
         confirm_payment_effects(order_id, payment_id, at, floor=instant)
 
 
+def _settle_reservations(order: Order, **fields: Any) -> int:
+    """Moves ``order``'s active stock reservations (to ``fields["state"]``: converted or released) and returns
+    how many moved. What the products have available changes, so the website's product reads go stale
+    (``core.storefront``)."""
+    moved = StockReservation.objects.filter(order=order, state=StockReservation.State.ACTIVE).update(**fields)
+    if moved:
+        storefront.changed(storefront.PRODUCTS)
+    return moved
+
+
 def confirm_payment_effects(
     order_id: int, payment_id: int, at: datetime | None = None, *, floor: datetime | None = None
 ) -> None:
@@ -691,8 +701,8 @@ def confirm_payment_effects(
                 return  # replay of an applied capture
             raise InvalidTransition(f"Order {order_id} is {order.status}, not awaiting payment")
         instant = at or ledger_instant(order.customer_id, floor or timeutils.now())
-        converted = StockReservation.objects.filter(order=order, state=StockReservation.State.ACTIVE).update(
-            state=StockReservation.State.CONVERTED, converted_at=instant, updated_at=instant
+        converted = _settle_reservations(
+            order, state=StockReservation.State.CONVERTED, converted_at=instant, updated_at=instant
         )
         loyalty_services.capture_hold(order.pk, at=instant)
         items = [
@@ -842,7 +852,8 @@ def expire_reservation(order_id: int, at: datetime | None = None, *, skip_locked
         if pending is not None:
             result = payment_services.fail_payment(pending.id, "expired", instant, unilateral=True)
             payment_failed = result.changed
-        released = StockReservation.objects.filter(order=order, state=StockReservation.State.ACTIVE).update(
+        released = _settle_reservations(
+            order,
             state=StockReservation.State.RELEASED,
             released_at=instant,
             release_reason=StockReservation.ReleaseReason.EXPIRED,
@@ -1042,7 +1053,8 @@ def cancel_order(
             if pending is not None:
                 payment_services.fail_payment(pending.id, "cancelled", instant, unilateral=True)
             stock_released = (
-                StockReservation.objects.filter(order=order, state=StockReservation.State.ACTIVE).update(
+                _settle_reservations(
+                    order,
                     state=StockReservation.State.RELEASED,
                     released_at=instant,
                     release_reason=StockReservation.ReleaseReason.CANCELLED,
@@ -3162,7 +3174,8 @@ def cancel_by_customer(order_id: int, customer_id: int, *, at: datetime | None =
         if pending is not None:
             payment_services.fail_payment(pending.id, "cancelled", instant, unilateral=True)
         stock_released = (
-            StockReservation.objects.filter(order=order, state=StockReservation.State.ACTIVE).update(
+            _settle_reservations(
+                order,
                 state=StockReservation.State.RELEASED,
                 released_at=instant,
                 release_reason=StockReservation.ReleaseReason.CANCELLED,

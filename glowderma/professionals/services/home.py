@@ -9,7 +9,7 @@ from typing import Any
 from django.db import transaction
 from rest_framework.exceptions import ValidationError
 
-from glowderma.core import audit, enums
+from glowderma.core import audit, enums, storefront
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.uzsource import N_
 from glowderma.professionals import selectors
@@ -44,6 +44,7 @@ def set_home_specialists(refs: Sequence[str], *, actor: Any, request: Any = None
         common.advisory_lock(HOME_SPECIALISTS_LOCK)
         before = [str(pk) for pk in selectors.home_specialist_ids()]
         HomeSpecialist.objects.all().delete()
+        storefront.changed(storefront.HOME)
         HomeSpecialist.objects.bulk_create(
             HomeSpecialist(professional_id=pk, position=position) for position, pk in enumerate(ids)
         )

@@ -99,3 +99,5 @@ class IntegrationsConfig(AppConfig):
         warn_yandex_without_alerts()
         # health/?ready=1: live providers' configured flags and sync ages (core cannot import integrations)
         readiness.register(PROBE)
+        # The storefront.revalidate outbox handler (core.storefront), in every process that dispatches.
+        from glowderma.integrations.storefront import tasks  # noqa: F401
