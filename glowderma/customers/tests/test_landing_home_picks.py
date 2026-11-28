@@ -169,8 +169,8 @@ def test_query_count_stays_bounded_with_every_section_picked(staff: StaffUser) -
         pick(staff, enums.HomeSectionKey.CATEGORIES, categories)
         pick(staff, enums.HomeSectionKey.SPECIALISTS, specialists)
         picked = cost()
-        for key in enums.HomeSectionKey.values:
-            pick(staff, key, [])
+        for section in enums.HomeSectionKey.values:
+            pick(staff, section, [])
         return automatic, picked
 
     small = costs(2)

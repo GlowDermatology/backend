@@ -88,7 +88,8 @@ def test_the_list_has_every_section_in_the_landings_order_and_its_automatic_choi
     assert by_key["bestsellers"]["automatic"] == []  # no cached bestsellers (and fewer than 4 hide anyway)
     assert set(ids(by_key["spotlight"]["automatic"])) == {str(row.pk) for row in [*newest, on_promo]}
     assert ids(by_key["specialists"]["automatic"]) == [str(specialist.pk)]
-    category_slugs = {row.category.slug for row in [*newest, on_promo]} | {row.slug for row in categories}
+    product_categories = {row.category for row in [*newest, on_promo] if row.category is not None}
+    category_slugs = {row.slug for row in product_categories} | {row.slug for row in categories}
     assert set(ids(by_key["categories"]["automatic"])) == category_slugs
     item = by_key["promo"]["automatic"][0]
     assert item["name"] == on_promo.name_uz and item["issue"] is None
