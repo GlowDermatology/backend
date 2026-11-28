@@ -315,3 +315,32 @@ def test_each_provider_uses_its_own_key(monkeypatch: pytest.MonkeyPatch) -> None
     row.scene_provider = enums.SceneImageProvider.GEMINI
     used = scene_services.providers(row)
     assert asked == ["gemini"] and used.image_key is not None and used.image_key.reveal() == "gemini-key"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_dropped_candidates_leave_no_name_behind(staff_client: APIClient, scenes_on: SceneSettings) -> None:
+    """Discarding or expiring deletes the files and forgets their names, so the deploy's media check
+    (every referenced name must exist) stays green."""
+    from django.core.files.storage import default_storage
+
+    from glowderma.core import media_storage
+
+    product, image = saved_image()
+    names = []
+    for expire in (False, True):
+        job_id = start(
+            staff_client, product, image, kind="studio", template_id=template("studio-white").pk
+        ).json()["id"]
+        scene_services.run(job_id)
+        job = SceneJob.objects.get(pk=job_id)
+        assert job.candidate.name
+        names.append(job.candidate.name)
+        if expire:
+            SceneJob.objects.filter(pk=job_id).update(expires_at=timeutils.now() - timedelta(minutes=1))
+            assert scene_services.expire_candidates() == 1
+        else:
+            assert staff_client.post(f"{ADMIN}scenes/jobs/{job_id}/discard/").status_code == 200
+        job.refresh_from_db()
+        assert job.candidate.name == "" and job.overlay.name == ""
+    assert not any(default_storage.exists(name) for name in names)
+    assert not set(names) & set(media_storage.stored_names())

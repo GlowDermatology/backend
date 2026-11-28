@@ -872,10 +872,15 @@ def _delete_later(storage: Any, name: str) -> None:
 
 
 def _drop_files_on_commit(job: SceneJob) -> None:
+    """Deletes the candidate's files after the commit and forgets their names, so the row never refers to
+    a file that is gone (``media_storage_check`` fails a deploy on such a name)."""
     for field in (job.candidate, job.overlay):
         name = str(field.name or "")
         if name:
             _delete_later(field.storage, name)
+    SceneJob.objects.filter(pk=job.pk).update(candidate="", overlay="")
+    job.candidate.name = ""
+    job.overlay.name = ""
 
 
 def accept(
