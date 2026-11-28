@@ -157,7 +157,8 @@ CUSTOM_SCHEMA: dict[str, Any] = {
 BANNER_LAYOUT = (
     "Wide panoramic composition, 21:9. The left half, and above all the lower left quarter, stays calm and "
     "uncluttered: soft out-of-focus surface and background with gentle, low-contrast tones, no objects, so "
-    "that something can be placed there later."
+    "that something can be placed there later. Every prop the SCENE names goes on the right half, even where "
+    "the SCENE puts it on the left."
 )
 
 BANNER_PRODUCTS_RULES = """The attached wide 21:9 image is a layout: {count} real skincare product(s), cut \
@@ -182,6 +183,15 @@ No text, letters, numbers, logos, signs, watermarks or borders anywhere. No hand
 parts.
 {layout} The right half holds the scene's main interest: the surface, props and light.
 Fill the whole frame edge to edge."""
+
+
+_LEFT = re.compile(r"\b(far |upper |lower )?left\b", re.IGNORECASE)
+
+
+def banner_scene(scene: str) -> str:
+    """A template's scene for a banner: whatever it places on the left goes to the right (the left half
+    is the title's), e.g. «a sprig of eucalyptus at the far left edge» → «… at the far right edge»."""
+    return _LEFT.sub(lambda match: f"{match.group(1) or ''}right", scene)
 
 
 def _product_places(boxes: list[tuple[int, int, int, int]], size: tuple[int, int]) -> str:
@@ -211,28 +221,31 @@ def banner_products_prompt(
     ]
     if stricter:
         parts.append(STRICTER)
-    parts.append(f"SCENE: {scene.strip()}")
+    parts.append(f"SCENE: {banner_scene(scene).strip()}")
     if style.strip():
         parts.append(f"STYLE: {style.strip()}")
     return "\n".join(parts)
 
 
 def banner_scene_prompt(scene: str, style: str) -> str:
-    parts = [BANNER_SCENE_RULES.format(layout=BANNER_LAYOUT), f"SCENE: {scene.strip()}"]
+    parts = [BANNER_SCENE_RULES.format(layout=BANNER_LAYOUT), f"SCENE: {banner_scene(scene).strip()}"]
     if style.strip():
         parts.append(f"STYLE: {style.strip()}")
     return "\n".join(parts)
 
 
+# Bria weighs the first words most: the layout leads, then the scene, the style and the fixed ending.
+BRIA_BANNER_LEAD = (
+    "Wide panoramic view. The left half is empty: a calm, softly out of focus continuation of the surface "
+    "and the wall, with no objects and no props. All props stand on the right half."
+)
 BRIA_BANNER_PRODUCTS = (
-    "Wide panoramic view. The left side stays calm, soft and out of focus with no objects. Soft natural "
-    "contact shadows under the products, which stand on the surface. Premium skincare photography, no "
-    "people, no hands, no text, no logos."
+    "Soft natural contact shadows under the products, which stand on the surface on the right. Premium "
+    "skincare photography, no people, no hands, no text, no logos."
 )
 BRIA_BANNER_SCENE = (
-    "Wide panoramic empty scene with no product and no bottle. The left side stays calm, soft and out of "
-    "focus with no objects; the surface, props and light are on the right. Premium skincare photography, "
-    "no people, no hands, no text, no letters, no logos."
+    "An empty scene with no product and no bottle. Premium skincare photography, no people, no hands, no "
+    "text, no letters, no logos."
 )
 
 
@@ -242,10 +255,10 @@ def bria_banner(scene: str, style: str, *, with_products: bool) -> str:
     def plain(text: str) -> list[str]:
         return _BRIA_UNSAFE.sub(" ", text.replace("’", "'")).split()
 
-    head = plain(scene)
+    lead, head = plain(BRIA_BANNER_LEAD), plain(banner_scene(scene))
     ending = plain(BRIA_BANNER_PRODUCTS if with_products else BRIA_BANNER_SCENE)
-    room = max(0, BRIA_MAX_WORDS - len(head) - len(ending))
-    return " ".join(head + plain(style)[:room] + ending)
+    room = max(0, BRIA_MAX_WORDS - len(lead) - len(head) - len(ending))
+    return " ".join(lead + head + plain(style)[:room] + ending)
 
 
 BANNER_QA_FIELDS = (

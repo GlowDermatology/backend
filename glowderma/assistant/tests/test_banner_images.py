@@ -256,7 +256,7 @@ def test_a_banner_with_products_is_made_and_used_for_a_new_banner(
     saved = Banner.objects.get(pk=used.json()["banner"]["id"])
     assert saved.title_uz == "Yangi kolleksiya" and saved.link_product_id == serum.pk
     assert round(saved.image_width / saved.image_height, 2) == 2.15  # exactly the app's banner
-    assert saved.image.storage.exists(variant_name(saved.image.name, "medium"))  # the copy the app loads
+    assert saved.image.storage.exists(variant_name(str(saved.image.name), "medium"))  # the copy the app loads
     assert used.json()["job"]["outcome"] == "accepted"
     assert used.json()["job"]["banner"]["accepted_banner_id"] == saved.pk
     assert AuditEntry.objects.filter(action="assistant.banner_image_used", entity_id=str(saved.pk)).exists()
@@ -368,3 +368,14 @@ def test_a_banner_image_is_not_a_product_scene(staff_client: APIClient, ai_on: S
     assert wrong.status_code == 400
     discarded = staff_client.post(f"{ADMIN}scenes/jobs/{job_id}/discard/", format="json")
     assert discarded.status_code == 200 and discarded.json()["outcome"] == "discarded"
+
+
+def test_a_templates_props_on_the_left_go_right_for_a_banner() -> None:
+    """Live (Bria): «a sprig of eucalyptus … at the far left edge» landed under the title until the scene
+    was turned for banners and the layout rule led the description."""
+    marble = "A marble surface, a sprig of eucalyptus lying flat at the far left edge."
+    assert prompts.banner_scene(marble).endswith("at the far right edge.")
+    words = prompts.bria_banner(marble, prompts.DEFAULT_STYLE, with_products=True)
+    assert words.startswith("Wide panoramic view. The left half is empty") and "left edge" not in words
+    gemini = prompts.banner_scene_prompt(marble, "")
+    assert "far right edge" in gemini and "even where the SCENE puts it on the left" in gemini
