@@ -28,6 +28,7 @@ from glowderma.assistant.api.admin.serializers import (
     SceneTemplateSaveSerializer,
     SceneTemplateSerializer,
     SceneTemplatesSerializer,
+    SceneTemplateWriteSerializer,
 )
 from glowderma.core.api.schema import ADMIN_ERRORS
 
@@ -162,6 +163,51 @@ BANNER_IMAGE_USE_POST = extend_schema(
     responses={200: BannerImageUseResponseSerializer, **ADMIN_ERRORS},
 )
 
+SCENE_TEMPLATE_CREATE = extend_schema(
+    operation_id="admin_scene_templates_create",
+    description=(
+        "A new AI template (§2.20.9), last in the list: `name` (`uz` required) and `text` (the scene "
+        "in any language: translated to English and screened, 400 `text` when refused) and/or "
+        "`reference` (a picture of the scene alone: screened, 400 `reference` when it shows a product, a "
+        "person or text, and described for Bria). JSON or multipart (`name.uz`, …, the file part "
+        "`reference`). 400 `text` `scene` without either; 409 `scenes_disabled` / `scene_ai_disabled`. The "
+        "translation and screening run in the request (a few seconds; 400 with a message when the AI "
+        "does not answer)."
+    ),
+    request={
+        "multipart/form-data": SceneTemplateWriteSerializer,
+        "application/json": SceneTemplateWriteSerializer,
+    },
+    responses={201: SceneTemplateSerializer, **ADMIN_ERRORS},
+)
+
+SCENE_TEMPLATE_PATCH = extend_schema(
+    operation_id="admin_scene_templates_partial_update",
+    description=(
+        "Edit a template (§2.20.9): `name`, `enabled` (false hides it from the dialogs; the ops console "
+        "shows it again), and for an AI template `text`, `reference` (replace) or `remove_reference`. A "
+        "changed text clears a reference made from the old one (an uploaded one stays). A studio "
+        "template's colours stay in the ops console (400 `text`)."
+    ),
+    request={
+        "multipart/form-data": SceneTemplateWriteSerializer,
+        "application/json": SceneTemplateWriteSerializer,
+    },
+    responses={200: SceneTemplateSerializer, **ADMIN_ERRORS},
+)
+
+SCENE_TEMPLATE_REFERENCE_POST = extend_schema(
+    operation_id="admin_scene_templates_reference_create",
+    description=(
+        "«Rasmini yaratish»: an AI template's reference made from its text (a picture of the scene alone, "
+        "4:5), one image call within the scene budget. 202 the job (kind `preview`; a second call returns "
+        "the pending one); poll `scenes/jobs/{id}/`, then re-read the templates. 409 "
+        "`scene_template_needs_text` without text, `scene_budget_exceeded`, `scene_ai_disabled`."
+    ),
+    request=None,
+    responses={202: SceneJobSerializer, **ADMIN_ERRORS},
+)
+
 SCENE_JOB_DISCARD_POST = extend_schema(
     operation_id="admin_scene_jobs_discard_create",
     request=None,
@@ -185,4 +231,7 @@ __all__ = [
     "SCENE_JOB_START_POST",
     "SCENE_TEMPLATES_GET",
     "SCENE_JOB_TEMPLATE_POST",
+    "SCENE_TEMPLATE_CREATE",
+    "SCENE_TEMPLATE_PATCH",
+    "SCENE_TEMPLATE_REFERENCE_POST",
 ]

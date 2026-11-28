@@ -8355,6 +8355,219 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+    post:
+      operationId: admin_scene_templates_create
+      description: 'A new AI template (§2.20.9), last in the list: `name` (`uz` required)
+        and `text` (the scene in any language: translated to English and screened,
+        400 `text` when refused) and/or `reference` (a picture of the scene alone:
+        screened, 400 `reference` when it shows a product, a person or text, and described
+        for Bria). JSON or multipart (`name.uz`, …, the file part `reference`). 400
+        `text` `scene` without either; 409 `scenes_disabled` / `scene_ai_disabled`.
+        The translation and screening run in the request (a few seconds; 400 with
+        a message when the AI does not answer).'
+      tags:
+      - admin
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SceneTemplateWriteRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SceneTemplateWriteRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SceneTemplate'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/scenes/templates/{id}/:
+    patch:
+      operationId: admin_scene_templates_partial_update
+      description: 'Edit a template (§2.20.9): `name`, `enabled` (false hides it from
+        the dialogs; the ops console shows it again), and for an AI template `text`,
+        `reference` (replace) or `remove_reference`. A changed text clears a reference
+        made from the old one (an uploaded one stays). A studio template''s colours
+        stay in the ops console (400 `text`).'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedSceneTemplateWriteRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedSceneTemplateWriteRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SceneTemplate'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/scenes/templates/{id}/reference/:
+    post:
+      operationId: admin_scene_templates_reference_create
+      description: '«Rasmini yaratish»: an AI template''s reference made from its
+        text (a picture of the scene alone, 4:5), one image call within the scene
+        budget. 202 the job (kind `preview`; a second call returns the pending one);
+        poll `scenes/jobs/{id}/`, then re-read the templates. 409 `scene_template_needs_text`
+        without text, `scene_budget_exceeded`, `scene_ai_disabled`.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SceneJob'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/segments/:
     get:
       operationId: admin_segments_list
@@ -28123,6 +28336,29 @@ components:
           maxLength: 140
         seo:
           $ref: '#/components/schemas/SeoTextsRequest'
+    PatchedSceneTemplateWriteRequest:
+      type: object
+      description: |-
+        `POST scenes/templates/` (all of it) and `PATCH scenes/templates/{id}/` (`partial`): JSON or multipart
+        (dotted names: `name.uz`, …; the file part `reference`).
+      properties:
+        name:
+          $ref: '#/components/schemas/SceneTemplateNamesRequest'
+        text:
+          type: string
+          description: The scene in staff's words, any language (translated to English
+            and screened).
+          maxLength: 400
+        reference:
+          type: string
+          format: binary
+          description: 'A picture of the scene alone (JPG, PNG, WebP; ≤ 5 MB): screened
+            (no product, person or text) and described in the same request.'
+        remove_reference:
+          type: boolean
+          default: false
+        enabled:
+          type: boolean
     PatchedSegmentWriteRequest:
       type: object
       description: '``POST segments/`` (``name`` 2..60 unique, ``rules``) and ``PATCH
@@ -29930,15 +30166,49 @@ components:
           format: uri
           nullable: true
           readOnly: true
-          description: A 4:5 sample picture of the scene (a sample product, or the
-            scene staff saved as this template); null until the console made one.
+          description: 'The card''s 4:5 picture of the scene alone: an AI template''s
+            reference, a studio template''s background. Until an AI template has a
+            reference it is its older sample picture (with a sample product), or null.'
+        names:
+          type: object
+          additionalProperties:
+            type: string
+          readOnly: true
+          description: '`{uz, ru, en}`: every language, for the editor.'
+        text:
+          type: string
+          readOnly: true
+          description: An AI template's scene in the words staff typed (else the English
+            text the AI reads).
+        reference_url:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+          description: 'An AI template''s reference: a picture of the scene alone
+            (uploaded or made from the text).'
+        reference_source:
+          type: string
+          description: '`upload`, `generated`, or empty (no reference).'
+        enabled:
+          type: boolean
+        saved_by_staff:
+          type: boolean
+          readOnly: true
+          description: Made in the admin panel.
       required:
       - colours
+      - enabled
       - id
       - key
       - kind
       - name
+      - names
       - preview_url
+      - reference_source
+      - reference_url
+      - saved_by_staff
+      - text
     SceneTemplateKindEnum:
       enum:
       - studio
@@ -29947,6 +30217,22 @@ components:
       description: |-
         * `studio` - studio
         * `ai_scene` - ai_scene
+    SceneTemplateNamesRequest:
+      type: object
+      properties:
+        uz:
+          type: string
+          maxLength: 60
+        ru:
+          type: string
+          default: ''
+          maxLength: 60
+        en:
+          type: string
+          default: ''
+          maxLength: 60
+      required:
+      - uz
     SceneTemplateSaveRequest:
       type: object
       properties:
@@ -29957,6 +30243,29 @@ components:
           maxLength: 60
       required:
       - name
+    SceneTemplateWriteRequest:
+      type: object
+      description: |-
+        `POST scenes/templates/` (all of it) and `PATCH scenes/templates/{id}/` (`partial`): JSON or multipart
+        (dotted names: `name.uz`, …; the file part `reference`).
+      properties:
+        name:
+          $ref: '#/components/schemas/SceneTemplateNamesRequest'
+        text:
+          type: string
+          description: The scene in staff's words, any language (translated to English
+            and screened).
+          maxLength: 400
+        reference:
+          type: string
+          format: binary
+          description: 'A picture of the scene alone (JPG, PNG, WebP; ≤ 5 MB): screened
+            (no product, person or text) and described in the same request.'
+        remove_reference:
+          type: boolean
+          default: false
+        enabled:
+          type: boolean
     SceneTemplates:
       type: object
       properties:

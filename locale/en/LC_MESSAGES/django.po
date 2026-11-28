@@ -437,6 +437,10 @@ msgstr "The AI did not process this photo. Try another photo."
 msgid "AI bu so‘rovni bajarmadi. Ma’lumotlarni tekshirib, qayta urinib ko‘ring."
 msgstr "The AI did not complete this request. Check the data and try again."
 
+#: glowderma/assistant/scenes/library.py
+msgid "AI hozir javob bermadi: birozdan so‘ng qayta saqlab ko‘ring."
+msgstr "The AI did not answer: try saving again in a moment."
+
 #: glowderma/assistant/scenes/services.py
 #: glowderma/assistant/services.py
 msgid "AI javobini tushunib bo‘lmadi. Qayta urinib ko‘ring."
@@ -1440,6 +1444,7 @@ msgstr "This slug is already taken."
 msgid "Bu takliflar hali tayyor emas yoki allaqachon ko‘rib chiqilgan."
 msgstr "These suggestions are not ready yet or were already reviewed."
 
+#: glowderma/assistant/scenes/library.py
 #: glowderma/assistant/scenes/services.py
 msgid "Bu tavsif bo‘yicha sahna yaratib bo‘lmaydi: unda odamlar, qo‘llar, yozuv yoki brend bo‘lmasligi kerak. Faqat fon va atrofni tasvirlang."
 msgstr "A scene can't be made from this description: it must not contain people, hands, text or brands. Describe only the background and surroundings."
@@ -3783,6 +3788,18 @@ msgstr "Sample product (ID)"
 msgid "Namuna mahsulotda sinash"
 msgstr "Test on a sample product"
 
+#: glowderma/assistant/scenes/library.py
+msgid "Namuna rasmda mahsulot bor: u har bir sahnaga tushib qoladi. Faqat sahnaning o‘zi (sirt, fon, bezaklar) bor rasm yuklang."
+msgstr "The reference shows a product: it would appear in every scene. Upload a picture of the scene alone (surface, backdrop, props)."
+
+#: glowderma/assistant/scenes/library.py
+msgid "Namuna rasmda odam yoki qo‘l bor. Faqat sahnaning o‘zi bor rasm yuklang."
+msgstr "The reference shows a person or a hand. Upload a picture of the scene alone."
+
+#: glowderma/assistant/scenes/library.py
+msgid "Namuna rasmda yozuv yoki logotip bor. Yozuvsiz rasm yuklang."
+msgstr "The reference shows text or a logo. Upload a picture without text."
+
 #: glowderma/assistant/templates/assistant/console/scene_template.html
 msgid "Namuna rasmi"
 msgstr "Preview"
@@ -4814,6 +4831,14 @@ msgstr "Images"
 msgid "Rasmlardan ma’lumot"
 msgstr "From photos"
 
+#: glowderma/assistant/scenes/library.py
+msgid "Rasmni o‘qib bo‘lmadi: JPG, PNG yoki WebP, 5 MB gacha."
+msgstr "The picture could not be read: JPG, PNG or WebP, up to 5 MB."
+
+#: glowderma/assistant/scenes/services.py
+msgid "Rasmni yaratish uchun shablonga sahna tavsifini yozing."
+msgstr "Describe the template's scene to create its picture."
+
 #: glowderma.core.labels.NOTIFICATION_STATE
 #: glowderma/loyalty/admin.py
 #: model metadata
@@ -4979,9 +5004,14 @@ msgstr "Scenes are switched off."
 msgid "Sahnalar uchun ajratilgan byudjet tugadi. Administratorga murojaat qiling."
 msgstr "The scenes budget is used up. Contact an administrator."
 
+#: glowderma/assistant/scenes/library.py
 #: glowderma/assistant/scenes/services.py
 msgid "Sahnani tasvirlang (ko‘pi bilan 400 belgi)."
 msgstr "Describe the scene (at most 400 characters)."
+
+#: glowderma/assistant/scenes/library.py
+msgid "Sahnani tasvirlang yoki namuna rasm yuklang."
+msgstr "Describe the scene or upload a reference picture."
 
 #: admin history (professionals.WorkingHoursOverride)
 #: glowderma.core.labels.NOTIFICATION_EXPORT_HEADERS
@@ -5161,6 +5191,10 @@ msgstr "Sat"
 #: model metadata
 msgid "Shablon namunasi"
 msgstr "Template preview"
+
+#: glowderma/assistant/scenes/library.py
+msgid "Shablon nomini yozing (60 belgigacha)."
+msgstr "Enter the template's name (up to 60 characters)."
 
 #: glowderma/assistant/scenes/services.py
 msgid "Shablon nomini yozing."
@@ -5400,6 +5434,10 @@ msgstr "Studio scenes and screen fitting are shown in the admin panel."
 msgid "Studiya sahnasi"
 msgstr "Studio scene"
 
+#: glowderma/assistant/scenes/library.py
+msgid "Studiya shablonining ranglari ops konsolida o‘zgartiriladi."
+msgstr "A studio template's colours are changed in the ops console."
+
 #: glowderma/assistant/console/forms.py
 msgid "Studiya: {\"fill\": \"solid\" | \"linear\" | \"radial\", \"colours\": [\"#rrggbb\", …], \"floor\": \"#rrggbb\", \"floor_at\": 0.8, \"shadow_opacity\": 0.35, \"shadow_colour\": \"#rrggbb\"}."
 msgstr "Studio: {\"fill\": \"solid\" | \"linear\" | \"radial\", \"colours\": [\"#rrggbb\", …], \"floor\": \"#rrggbb\", \"floor_at\": 0.8, \"shadow_opacity\": 0.35, \"shadow_colour\": \"#rrggbb\"}."
@@ -5589,6 +5627,10 @@ msgstr "Description writing"
 #: glowderma/reporting/dashboards/sales.py
 msgid "Tavsif yo‘q"
 msgstr "No description"
+
+#: model metadata
+msgid "Tavsifdan yaratilgan"
+msgstr "Made from the description"
 
 #: admin history (delivery.DeliverySettings)
 msgid "Taxminga QQS (%)"
@@ -7909,6 +7951,22 @@ msgid "namuna rasmi"
 msgstr "preview"
 
 #: model metadata
+msgid "namuna rasmi manbai"
+msgstr "reference source"
+
+#: model metadata
+msgid "namuna rasmi tavsifi"
+msgstr "reference description"
+
+#: model metadata
+msgid "namuna sahna rasmi"
+msgstr "reference picture"
+
+#: model metadata
+msgid "namunada mahsulot yo‘q"
+msgstr "preview without a product"
+
+#: model metadata
 msgid "narx"
 msgstr "price"
 
@@ -9265,6 +9323,10 @@ msgstr "staff note"
 #: glowderma/assistant/templates/assistant/console/scenes.html
 msgid "xodim saqlagan"
 msgstr "saved by staff"
+
+#: model metadata
+msgid "xodim yozgan tavsif"
+msgstr "description as staff typed it"
 
 #: model metadata
 msgid "xodimlar"

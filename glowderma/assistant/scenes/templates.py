@@ -2,7 +2,7 @@
 
 A studio template is composed on our server (no generative model): ``params`` for
 :func:`glowderma.core.compose.studio_scene`. An AI template's ``prompt`` describes the scene for the image
-model; the fixed rules (:mod:`.prompts`) wrap it.
+model, and/or its reference picture shows it; the fixed rules (:mod:`.prompts`) wrap them.
 """
 
 from __future__ import annotations
@@ -20,6 +20,15 @@ class Template:
     name: dict[str, str]
     params: dict[str, object] = field(default_factory=dict)
     prompt: str = ""
+    # an AI template's reference: a picture of the scene alone (Gemini sees it) and its English description
+    # (Bria's best mode takes text only, so it gets the description)
+    reference: bytes | None = field(default=None, repr=False)
+    reference_description: str = ""
+
+    @property
+    def scene(self) -> str:
+        """The scene in words: the template's text, then the reference's description."""
+        return " ".join(part.strip() for part in (self.prompt, self.reference_description) if part.strip())
 
 
 STARTER: tuple[Template, ...] = (

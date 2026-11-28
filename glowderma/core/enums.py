@@ -378,6 +378,11 @@ class SceneJobKind(TextChoices):
     BANNER = "banner", "Banner rasmi"  # a home-screen banner's image (products from the catalog, or none)
 
 
+class SceneReferenceSource(TextChoices):
+    UPLOAD = "upload", "Yuklangan"
+    GENERATED = "generated", "Tavsifdan yaratilgan"
+
+
 class SceneJobOutcome(TextChoices):
     PENDING = "pending", "Ko‘rib chiqilmoqda"
     ACCEPTED = "accepted", "Qabul qilindi"

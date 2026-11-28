@@ -54,22 +54,28 @@ Live on the owner's photos (Bria cut-out, Bria scene, Gemini QA): 3 of 4 accepte
 product interior identical in all; the QA check refused one with an extra bottle in the scene. A jar keeps a
 faint pink fringe where the cut-out met the fingers. Gemini has not been compared yet (no billing).
 
-## Template previews, typed scenes and saved templates
+## Template cards, references and the admin editor
 
-- **Previews.** Every template card in the scene dialog shows a 4:5 sample picture. It is the bundled sample
-  product (`assistant/scenes/assets/sample-product.webp`, the owner's green bottle, cut out once) placed in the
-  scene. Studio previews are drawn at once and for free, and redrawn when the colours change. AI previews cost
-  one image call each (Bria: $0.032), are made only when someone presses **Namuna yaratish** (or **Yo‘q
-  namunalarni yaratish** on the scenes page), run as jobs of kind `preview` (in the budget, one at a time, one
-  pending per template), and are cleared when the prompt changes. A failed preview shows its reason on the
-  template page.
-- **Typed scenes.** In the AI tab staff can pick **O‘z sahnasi** and describe the scene in any language (at most
-  400 characters). The worker turns it into an English scene description with the analyst model (one cheap text
-  call) and refuses one that asks for people, hands, text or brands (`scene_custom_refused`). Everything else is
-  as for a template: the product rule, the checks, the budget.
-- **Saved templates.** A finished typed scene can be saved as a template for everyone (**Shablon sifatida
-  saqlash**, a name). It gets the English description, goes last in the list, and its preview is the scene the
-  staff member made. The console marks it "xodim saqlagan"; edit or switch it off there like any template.
+- **Cards show the scene alone.**
+  - A studio card is its background, drawn on our server for free. Older cards showed the sample bottle;
+    they are redrawn the first time the templates are listed.
+  - An AI card is the template's **reference**: a picture of the scene with no product.
+- **References.** Staff upload one (a photo of a table, a shelf, a fabric…) or press «Rasmini yaratish» to
+  make one from the text: one image call within the budget, the scene alone at 4:5.
+  - An upload is screened by the analyst: a product, a person or lettering in it is refused, since it would
+    appear in every scene.
+  - The analyst also writes an English description of it.
+  - Gemini receives the reference picture itself. Bria's `fibo2` takes text only, so it follows the description
+    (live: closer to the reference than Bria's `ref_images` mode, which drew a prop out of the bottle).
+- **Editor (Next admin).** Any admin can use it, from the pen on a template card or «Yangi shablon» in the scene
+  and banner dialogs. It changes names, the text (any language, translated and screened when saved), the
+  reference, and visibility («Ro‘yxatdan olib tashlash»; the console shows hidden ones again). Studio colours
+  stay in this console.
+- **Typed scenes and saved templates.** A typed scene works as before. «Shablon sifatida saqlash» makes a
+  template whose reference is generated from its words (no longer the staff member's own product).
+- **After deploy:** press **Yo‘q namunalarni yaratish** once. It makes references for the AI templates that have
+  none (one image call each; with Bria about $0.03 per template). Until then their cards keep the older picture
+  with the sample bottle.
 
 ## Banner images (the banner dialog's «AI bilan yaratish»)
 

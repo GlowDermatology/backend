@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from rest_framework.exceptions import NotFound
+from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.parsers import MultiPartParser
 from rest_framework.request import Request
 from rest_framework.response import Response
 
@@ -30,6 +31,9 @@ from glowderma.assistant.api.admin.schemas import (
     SCENE_JOB_DISCARD_POST,
     SCENE_JOB_START_POST,
     SCENE_JOB_TEMPLATE_POST,
+    SCENE_TEMPLATE_CREATE,
+    SCENE_TEMPLATE_PATCH,
+    SCENE_TEMPLATE_REFERENCE_POST,
     SCENE_TEMPLATES_GET,
     SCENES_STATUS_GET,
 )
@@ -46,9 +50,11 @@ from glowderma.assistant.api.admin.serializers import (
     SceneStatusSerializer,
     SceneTemplateSaveSerializer,
     SceneTemplateSerializer,
+    SceneTemplateWriteSerializer,
 )
 from glowderma.assistant.models import SceneJob, SceneTemplate
 from glowderma.assistant.scenes import banner_jobs
+from glowderma.assistant.scenes import library as scene_library
 from glowderma.assistant.scenes import services as scene_services
 from glowderma.catalog.api.admin.serializers import (
     BannerPatchSerializer,
@@ -57,8 +63,11 @@ from glowderma.catalog.api.admin.serializers import (
     ProductImageSerializer,
     ProductSerializer,
 )
+from glowderma.catalog.api.admin.views.forms import form_to_nested
 from glowderma.catalog.models import Banner
 from glowderma.core import enums
+from glowderma.core.api.exceptions import field_error
+from glowderma.core.api.parsers import JSONParser
 from glowderma.core.idempotency import idempotent
 
 
@@ -168,13 +177,74 @@ class ScenesStatusView(AdminAPIView):
         return Response(SceneStatusSerializer(scene_services.status()).data)
 
 
+def _template_input(data: dict[str, Any], request: Request) -> scene_library.TemplateInput:
+    names = data.get("name")
+    return scene_library.TemplateInput(
+        name=dict(names) if names is not None else None,
+        text=data.get("text"),
+        # the file part (the form helper keeps text fields only)
+        reference=request.FILES.get("reference") or data.get("reference"),
+        remove_reference=bool(data.get("remove_reference")),
+        enabled=data.get("enabled"),
+    )
+
+
 class SceneTemplatesView(AdminAPIView):
+    parser_classes = [JSONParser, MultiPartParser]
+
     @SCENE_TEMPLATES_GET
     def get(self, request: Request) -> Response:
+        scene_services.ensure_studio_previews()  # older studio cards showed a sample product
         templates = SceneTemplate.objects.filter(enabled=True).order_by("position", "id")
         return Response(
             {"results": SceneTemplateSerializer(templates, many=True, context={"request": request}).data}
         )
+
+    @SCENE_TEMPLATE_CREATE
+    @idempotent(required=False)
+    def post(self, request: Request) -> Response:
+        serializer = SceneTemplateWriteSerializer(data=form_to_nested(request.data))
+        serializer.is_valid(raise_exception=True)
+        if "name" not in serializer.validated_data:
+            raise ValidationError({"name.uz": [field_error("required")]})
+        template = scene_library.create_template(
+            _template_input(serializer.validated_data, request), actor=request.user, request=request
+        )
+        return Response(SceneTemplateSerializer(template, context={"request": request}).data, status=201)
+
+
+class SceneTemplateDetailView(AdminAPIView):
+    parser_classes = [JSONParser, MultiPartParser]
+
+    @SCENE_TEMPLATE_PATCH
+    @idempotent(required=False)
+    def patch(self, request: Request, pk: int) -> Response:
+        serializer = SceneTemplateWriteSerializer(data=form_to_nested(request.data), partial=True)
+        serializer.is_valid(raise_exception=True)
+        template = scene_library.update_template(
+            pk, _template_input(serializer.validated_data, request), actor=request.user, request=request
+        )
+        return Response(SceneTemplateSerializer(template, context={"request": request}).data)
+
+
+class SceneTemplateReferenceView(AdminAPIView):
+    """«Rasmini yaratish»: an AI template's reference made from its text (a billed job, polled at
+    `scenes/jobs/{id}/`)."""
+
+    throttle_classes = [StaffRateThrottle, SceneGenerateThrottle]
+
+    @SCENE_TEMPLATE_REFERENCE_POST
+    @idempotent(required=False)
+    def post(self, request: Request, pk: int) -> Response:
+        template = SceneTemplate.objects.filter(pk=pk).first()
+        if template is None:
+            raise NotFound
+        if template.kind != enums.SceneTemplateKind.AI_SCENE:
+            raise ValidationError({"kind": [field_error("invalid")]})
+        if not scene_services.get_settings().ai_enabled:
+            raise scene_services.AiScenesDisabled()
+        job = scene_services.start_preview(pk, actor=request.user)  # an AI template: always a job
+        return Response(SceneJobSerializer(job, context={"request": request}).data, status=202)
 
 
 class SceneJobStartView(AdminAPIView):

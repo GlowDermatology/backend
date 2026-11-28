@@ -14,6 +14,7 @@ by any of them; the domain writes are audited (``assistant.*``).
 from __future__ import annotations
 
 import json
+import mimetypes
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
 
@@ -716,9 +717,11 @@ class SceneTemplatePreviewView(ConsolePage):
 
     def get(self, request: HttpRequest, pk: int) -> FileResponse:
         row = SceneTemplate.objects.filter(pk=pk).first()
-        if row is None or not row.preview:
+        picture = (row.reference or row.preview) if row is not None else None
+        if not picture:
             raise Http404
-        response = FileResponse(row.preview.open("rb"), content_type="image/webp")
+        kind = mimetypes.guess_type(str(picture.name))[0] or "image/webp"
+        response = FileResponse(picture.open("rb"), content_type=kind)
         # The name is content-hashed (a new picture is a new name): cacheable, privately (staff only).
         response["Cache-Control"] = "private, max-age=86400"
         return response
@@ -754,7 +757,8 @@ class SceneTemplateView(ConsolePage):
         return HttpResponseRedirect(reverse("admin:assistant_scene_template", args=[pk]))
 
     def _preview(self, request: HttpRequest, row: SceneTemplate) -> HttpResponse:
-        """«Namuna yaratish»: a studio preview is drawn at once; an AI one is a billed job on the worker."""
+        """«Namuna yaratish»: a studio card is drawn at once; an AI template's reference (the scene alone) is
+        made from its text by a billed job on the worker."""
         from glowderma.assistant.scenes import services as scene_services
 
         try:

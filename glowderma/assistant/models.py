@@ -490,11 +490,29 @@ class SceneTemplate(models.Model):
     position = models.PositiveSmallIntegerField(default=0, verbose_name="tartib")
     params = models.JSONField(default=dict, blank=True, verbose_name="studiya parametrlari")
     prompt = models.TextField(blank=True, default="", verbose_name="sahna tavsifi")
-    # the sample picture staff see on the template's card (4:5 WEBP): the bundled sample product in this
-    # scene, or the scene a staff member saved as this template; cleared when params or prompt change
+    # what the AI is shown and told: the staff's own words (any language) behind ``prompt`` (English)
+    prompt_original = models.TextField(blank=True, default="", verbose_name="xodim yozgan tavsif")
+    # an AI template's reference: a picture of the scene alone (no product), uploaded by staff or made from
+    # ``prompt``. Gemini sees it; Bria (text only in its best mode) gets ``reference_description``, the
+    # analyst's English description of it. The template's card shows it.
+    reference = models.FileField(
+        upload_to="scene-references/", max_length=255, blank=True, verbose_name="namuna sahna rasmi"
+    )
+    reference_source = models.CharField(
+        max_length=16,
+        choices=enums.SceneReferenceSource.choices,
+        blank=True,
+        default="",
+        verbose_name="namuna rasmi manbai",
+    )
+    reference_description = models.TextField(blank=True, default="", verbose_name="namuna rasmi tavsifi")
+    # the card's picture of a studio template (its background, 4:5 WEBP). Before references existed it
+    # was the bundled sample product in the scene: an AI template's card shows that until it gets a
+    # reference; ``preview_scene_only`` tells a background-only studio picture from such an old one.
     preview = models.FileField(
         upload_to="scene-previews/", max_length=255, blank=True, verbose_name="namuna rasmi"
     )
+    preview_scene_only = models.BooleanField(default=False, verbose_name="namunada mahsulot yo‘q")
     created_by = models.ForeignKey(
         "accounts.StaffUser",
         null=True,
@@ -511,8 +529,8 @@ class SceneTemplate(models.Model):
         ordering = ["position", "id"]
         constraints = [
             models.CheckConstraint(
-                condition=~Q(kind=enums.SceneTemplateKind.AI_SCENE) | ~Q(prompt=""),
-                name="assistant_scene_template_ai_prompt",
+                condition=~Q(kind=enums.SceneTemplateKind.AI_SCENE) | ~Q(prompt="") | ~Q(reference=""),
+                name="assistant_scene_template_ai_scene",
             ),
         ]
 
@@ -521,7 +539,14 @@ class SceneTemplate(models.Model):
 
     @property
     def preview_url(self) -> str | None:
+        """The card's picture: an AI template's reference, else its stored preview."""
+        if self.reference:
+            return absolute_media_url(str(self.reference.name))
         return absolute_media_url(str(self.preview.name)) if self.preview else None
+
+    @property
+    def reference_url(self) -> str | None:
+        return absolute_media_url(str(self.reference.name)) if self.reference else None
 
 
 class SceneJob(TimeStampedModel):

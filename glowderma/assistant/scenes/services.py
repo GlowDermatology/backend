@@ -62,7 +62,8 @@ STALE_AFTER = timedelta(minutes=9)  # longer than the task's hard limit (tasks.S
 QUEUED_STALE_AFTER = timedelta(minutes=30)
 FAKE_KEY = "fake-key"
 SAMPLE_PRODUCT = Path(__file__).with_name("assets") / "sample-product.webp"  # the owner's own product
-PREVIEW_WIDTH = 600  # the template card's sample picture (4:5)
+PREVIEW_WIDTH = 600  # a studio template's card picture (4:5)
+REFERENCE_SIZE = pipeline.REFERENCE_SIZE
 CUSTOM_KEY = "custom"
 CUSTOM_NAMES = {"uz": "O‘z sahnasi", "ru": "Своя сцена", "en": "Custom scene"}
 TEMPLATE_NAME_MAX = 60
@@ -236,6 +237,9 @@ def _template_snapshot(template: SceneTemplate) -> dict[str, Any]:
         "name": {"uz": template.name_uz, "ru": template.name_ru, "en": template.name_en},
         "params": template.params,
         "prompt": template.prompt,
+        # the reference file as it was at the start (a replaced one is kept while a job still reads it)
+        "reference": str(template.reference.name or ""),
+        "reference_description": template.reference_description,
     }
 
 
@@ -451,13 +455,27 @@ def config_of(row: SceneSettings) -> pipeline.Config:
     )
 
 
-def template_of(snapshot: dict[str, Any]) -> Template:
+def _reference_bytes(name: str) -> bytes | None:
+    if not name:
+        return None
+    storage = SceneTemplate._meta.get_field("reference").storage
+    try:
+        with storage.open(name, "rb") as handle:
+            return bytes(handle.read())
+    except OSError:  # deleted meanwhile: the scene's words still hold
+        logger.warning("scene reference %s is missing", name)
+        return None
+
+
+def template_of(snapshot: dict[str, Any], *, with_reference: bool = True) -> Template:
     return Template(
         key=str(snapshot.get("key") or ""),
         kind=snapshot.get("kind") or "studio",
         name=dict(snapshot.get("name") or {}),
         params=dict(snapshot.get("params") or {}),
         prompt=str(snapshot.get("prompt") or ""),
+        reference=_reference_bytes(str(snapshot.get("reference") or "")) if with_reference else None,
+        reference_description=str(snapshot.get("reference_description") or ""),
     )
 
 
@@ -593,15 +611,56 @@ def _preview_content(final: Image.Image, key: str) -> ContentFile[bytes]:
 
 
 def _store_preview(template: SceneTemplate, content: ContentFile[bytes] | None) -> None:
-    """Replace (``None``: clear) a template's preview; the old file goes once the transaction commits."""
+    """Replace (``None``: clear) a studio template's card picture; the old file goes once the transaction
+    commits."""
     old = str(template.preview.name or "")
     if content is None:
         template.preview = ""
+        template.preview_scene_only = False
     else:
         template.preview.save(content.name or "preview.webp", content, save=False)
-    template.save(update_fields=["preview", "updated_at"])
+        template.preview_scene_only = True
+    template.save(update_fields=["preview", "preview_scene_only", "updated_at"])
     if old and old != str(template.preview.name or ""):
         _delete_later(template.preview.storage, old)
+
+
+def reference_in_use(name: str) -> bool:
+    """Whether a queued or running job still reads this reference file (its snapshot names it)."""
+    return (
+        bool(name)
+        and SceneJob.objects.filter(state__in=ACTIVE_SCENE_STATES, template_snapshot__reference=name).exists()
+    )
+
+
+def store_reference(
+    template: SceneTemplate,
+    content: ContentFile[bytes] | None,
+    *,
+    source: str = "",
+    description: str = "",
+) -> None:
+    """Replace (``None``: clear) an AI template's reference. The old file goes once the transaction commits,
+    unless a queued job still reads it (it is then left behind: a small file, never a broken job). The old
+    sample picture (``preview``, with the sample product) goes with it."""
+    old = str(template.reference.name or "")
+    if content is None:
+        template.reference = ""
+        template.reference_source = ""
+        template.reference_description = ""
+    else:
+        template.reference.save(content.name or "reference.webp", content, save=False)
+        template.reference_source = source
+        template.reference_description = description
+    stale_preview = str(template.preview.name or "") if content is not None else ""
+    if stale_preview:
+        template.preview = ""
+        template.preview_scene_only = False
+    template.save()
+    if old and old != str(template.reference.name or "") and not reference_in_use(old):
+        _delete_later(template.reference.storage, old)
+    if stale_preview:
+        _delete_later(template.preview.storage, stale_preview)
 
 
 def _same_scene(template: SceneTemplate, snapshot: dict[str, Any]) -> bool:
@@ -609,33 +668,47 @@ def _same_scene(template: SceneTemplate, snapshot: dict[str, Any]) -> bool:
         template.kind == snapshot.get("kind")
         and template.prompt == (snapshot.get("prompt") or "")
         and template.params == (snapshot.get("params") or {})
+        and str(template.reference.name or "") == (snapshot.get("reference") or "")
     )
 
 
 def render_studio_preview(template: SceneTemplate) -> None:
-    """A studio template's preview, composed on our server at once (no provider, no cost)."""
-    result = pipeline.preview(
-        sample_product(),
-        template_of(_template_snapshot(template)),
-        None,
-        config_of(get_settings()),
-        pipeline.Usage(),
-    )
-    _store_preview(template, _preview_content(result.final, template.key))
+    """A studio template's card: its background alone (no product), composed on our server (no cost)."""
+    background = compose.studio_background(REFERENCE_SIZE, dict(template.params or {}))
+    _store_preview(template, _preview_content(background, template.key))
+
+
+def ensure_studio_previews() -> None:
+    """Studio cards drawn before references existed show the sample product: redraw them (idempotent: a
+    background-only picture is left alone)."""
+    for template in SceneTemplate.objects.filter(
+        kind=enums.SceneTemplateKind.STUDIO, preview_scene_only=False
+    ):
+        with transaction.atomic():
+            locked = SceneTemplate.objects.select_for_update().filter(pk=template.pk).first()
+            if locked is not None and not locked.preview_scene_only:
+                render_studio_preview(locked)
 
 
 def template_changed(template: SceneTemplate) -> None:
-    """After params or prompt changed: the old preview is wrong. A studio one is redrawn at once; an AI one
-    waits for «Namuna yaratish» (a billed call)."""
+    """After params or prompt changed: a studio card is redrawn at once; an AI template's reference made from
+    the old text no longer shows it and is cleared (an uploaded one stays: staff chose that picture)."""
     if template.kind == enums.SceneTemplateKind.STUDIO:
         render_studio_preview(template)
-    elif template.preview:
+    elif template.reference_source == enums.SceneReferenceSource.GENERATED:
+        store_reference(template, None)
+    elif template.preview and not template.reference:
         _store_preview(template, None)
 
 
+class SceneTemplateNeedsText(Conflict):
+    default_code = "scene_template_needs_text"
+    default_detail = N_("Rasmni yaratish uchun shablonga sahna tavsifini yozing.")
+
+
 def start_preview(template_id: int, *, actor: Any) -> SceneJob | None:
-    """«Namuna yaratish»: a studio preview is drawn now (``None``); an AI one is queued as a job (one at a
-    time per template: a second click returns the pending job), within the scene budget."""
+    """«Rasmini yaratish»: a studio card is drawn now (``None``); an AI template's reference is made from its
+    text by a job (one pending per template: a second click returns it), within the scene budget."""
     row = get_settings()
     with transaction.atomic():
         template = SceneTemplate.objects.select_for_update().filter(pk=template_id).first()
@@ -644,6 +717,8 @@ def start_preview(template_id: int, *, actor: Any) -> SceneJob | None:
         if template.kind == enums.SceneTemplateKind.STUDIO:
             render_studio_preview(template)
             return None
+        if not template.prompt:
+            raise SceneTemplateNeedsText()
         pending = SceneJob.objects.filter(
             kind=enums.SceneJobKind.PREVIEW, template=template, state__in=ACTIVE_SCENE_STATES
         ).first()
@@ -659,20 +734,30 @@ def start_preview(template_id: int, *, actor: Any) -> SceneJob | None:
             created_by=actor,
         )
         outbox.enqueue(topics.SCENE_QUEUED, {"job_id": job.pk}, dedupe_key=f"{topics.SCENE_QUEUED}:{job.pk}")
-    logger.info("scene preview job %s queued", job.pk)
+    logger.info("scene reference job %s queued", job.pk)
     return job
 
 
 def start_missing_previews(*, actor: Any) -> tuple[int, int]:
-    """The console's «Yo‘q namunalarni yaratish»: (studio previews drawn, AI preview jobs queued)."""
+    """The console's «Yo‘q namunalarni yaratish»: (studio cards drawn, AI reference jobs queued). An AI
+    template without a reference (its card still shows the sample product, or nothing) gets one."""
     drawn = queued = 0
-    for template_id, kind in SceneTemplate.objects.filter(preview="").values_list("pk", "kind"):
-        job = start_preview(template_id, actor=actor)
-        if kind == enums.SceneTemplateKind.STUDIO:
-            drawn += 1
-        elif job is not None:
+    studio = SceneTemplate.objects.filter(kind=enums.SceneTemplateKind.STUDIO).filter(
+        Q(preview="") | Q(preview_scene_only=False)
+    )
+    for template_id in studio.values_list("pk", flat=True):
+        start_preview(template_id, actor=actor)
+        drawn += 1
+    ai = SceneTemplate.objects.filter(kind=enums.SceneTemplateKind.AI_SCENE, reference="").exclude(prompt="")
+    for template_id in ai.values_list("pk", flat=True):
+        if start_preview(template_id, actor=actor) is not None:
             queued += 1
     return drawn, queued
+
+
+def _reference_content(picture: Image.Image, key: str) -> ContentFile[bytes]:
+    data = compose.encode(picture.convert("RGB"), "WEBP", 88)
+    return ContentFile(data, name=f"{key}-{hashlib.sha256(data).hexdigest()[:12]}.webp")
 
 
 def _run_preview(job: SceneJob) -> SceneJob | None:
@@ -680,8 +765,9 @@ def _run_preview(job: SceneJob) -> SceneJob | None:
     usage = pipeline.Usage()
     snapshot = dict(job.template_snapshot or {})
     try:
-        result = pipeline.preview(
-            sample_product(), template_of(snapshot), providers(row), config_of(row), usage
+        # made from the words alone: the old reference (if any) is what is being replaced
+        picture = pipeline.reference_scene(
+            template_of(snapshot, with_reference=False), providers(row), config_of(row), usage
         )
     except pipeline.SceneError as exc:
         return fail(job, exc.code, usage=exc.usage or usage)
@@ -689,7 +775,7 @@ def _run_preview(job: SceneJob) -> SceneJob | None:
         return fail(job, exc.code, usage=usage)
     except VaultError:
         return fail(job, "vault_unavailable", usage=usage)
-    content = _preview_content(result.final, str(snapshot.get("key") or "preview"))
+    content = _reference_content(picture, str(snapshot.get("key") or "reference"))
     with transaction.atomic():
         locked = SceneJob.objects.select_for_update().filter(pk=job.pk).first()
         if locked is None or locked.state != enums.JobState.RUNNING:
@@ -700,11 +786,10 @@ def _run_preview(job: SceneJob) -> SceneJob | None:
             else None
         )
         if template is not None and _same_scene(template, snapshot):  # not edited meanwhile
-            _store_preview(template, content)
+            store_reference(template, content, source=enums.SceneReferenceSource.GENERATED)
         instant = timeutils.now()
         locked.state = enums.JobState.SUCCEEDED
         locked.outcome = enums.SceneJobOutcome.ACCEPTED  # nothing to review: never expires
-        locked.warnings = result.warnings
         locked.usage = _usage_dict(usage)
         locked.cost_usd = _cost(row, usage)
         locked.finished_at = instant
@@ -718,9 +803,10 @@ def _run_preview(job: SceneJob) -> SceneJob | None:
 
 
 def save_as_template(job_id: int, *, name: str, actor: Any, request: Any = None) -> SceneTemplate:
-    """A scene staff typed becomes an AI template for everyone: its English description, named by them, with
-    the scene they got as the card's preview. Allowed while the scene waits for review or after it was
-    accepted; once per job."""
+    """A scene staff typed becomes an AI template for everyone: its English description, named by them.
+    Allowed while the scene waits for review or after it was accepted; once per job. The card shows the scene
+    alone (no product): its reference is made from the description by a job, within the budget (until then
+    the card shows the description's icon)."""
     clean = " ".join(name.split())[:TEMPLATE_NAME_MAX]
     if not clean:
         raise ValidationError({"name": [field_error("required", ERROR_MESSAGES["scene_template_name"])]})
@@ -738,16 +824,6 @@ def save_as_template(job_id: int, *, name: str, actor: Any, request: Any = None)
         key = f"{CUSTOM_KEY}-{job.pk}"
         if snapshot.get("saved_template_id") or SceneTemplate.objects.filter(key=key).exists():
             raise SceneTemplateExists()
-        if job.candidate:
-            field = job.candidate
-        elif job.accepted_image_id and (
-            accepted := ProductImage.objects.filter(pk=job.accepted_image_id).first()
-        ):
-            field = accepted.file
-        else:
-            raise SceneNotReviewable()
-        with field.storage.open(str(field.name), "rb") as handle:
-            picture = pipeline.load_photo(bytes(handle.read()))
         last = SceneTemplate.objects.order_by("-position").values_list("position", flat=True).first() or 0
         template = SceneTemplate.objects.create(
             key=key,
@@ -758,9 +834,9 @@ def save_as_template(job_id: int, *, name: str, actor: Any, request: Any = None)
             enabled=True,
             position=last + 1,
             prompt=str(snapshot["prompt"]),
+            prompt_original=str(snapshot.get("custom_text") or ""),
             created_by=actor,
         )
-        _store_preview(template, _preview_content(picture, key))
         snapshot["saved_template_id"] = template.pk
         job.template_snapshot = snapshot
         job.save(update_fields=["template_snapshot", "updated_at"])
@@ -772,6 +848,10 @@ def save_as_template(job_id: int, *, name: str, actor: Any, request: Any = None)
             request=request,
             after={"name": clean, "from_job": job.pk, "prompt": {"length": len(template.prompt)}},
         )
+    try:
+        start_preview(template.pk, actor=actor)
+    except SceneBudgetExceeded:
+        logger.info("scene template %s: no reference made (budget)", template.key)
     return template
 
 

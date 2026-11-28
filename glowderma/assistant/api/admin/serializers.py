@@ -210,9 +210,36 @@ class SceneTemplateSerializer(serializers.Serializer[Any]):
         help_text="A studio template's colours (#rrggbb) for a swatch."
     )
     preview_url = serializers.SerializerMethodField(
-        help_text="A 4:5 sample picture of the scene (a sample product, or the scene staff saved as this "
-        "template); null until the console made one."
+        help_text="The card's 4:5 picture of the scene alone: an AI template's reference, a studio "
+        "template's background. Until an AI template has a reference it is its older sample picture "
+        "(with a sample product), or null."
     )
+    names = serializers.SerializerMethodField(help_text="`{uz, ru, en}`: every language, for the editor.")
+    text = serializers.SerializerMethodField(
+        help_text="An AI template's scene in the words staff typed (else the English text the AI reads)."
+    )
+    reference_url = serializers.SerializerMethodField(
+        help_text="An AI template's reference: a picture of the scene alone (uploaded or made from the text)."
+    )
+    reference_source = serializers.CharField(
+        allow_blank=True, help_text="`upload`, `generated`, or empty (no reference)."
+    )
+    enabled = serializers.BooleanField()
+    saved_by_staff = serializers.SerializerMethodField(help_text="Made in the admin panel.")
+
+    def get_names(self, obj: Any) -> dict[str, str]:
+        return {"uz": obj.name_uz, "ru": obj.name_ru, "en": obj.name_en}
+
+    def get_text(self, obj: Any) -> str:
+        return str(obj.prompt_original or obj.prompt or "")
+
+    @extend_schema_field(serializers.URLField(allow_null=True))
+    def get_reference_url(self, obj: Any) -> str | None:
+        url: str | None = obj.reference_url
+        return url
+
+    def get_saved_by_staff(self, obj: Any) -> bool:
+        return obj.created_by_id is not None
 
     def get_name(self, obj: Any) -> str:
         request = self.context.get("request")
@@ -235,6 +262,32 @@ class SceneTemplateSerializer(serializers.Serializer[Any]):
 
 class SceneTemplatesSerializer(serializers.Serializer[Any]):
     results = SceneTemplateSerializer(many=True)
+
+
+class SceneTemplateNamesSerializer(serializers.Serializer[dict[str, Any]]):
+    uz = serializers.CharField(max_length=60, allow_blank=True)
+    ru = serializers.CharField(max_length=60, allow_blank=True, required=False, default="")
+    en = serializers.CharField(max_length=60, allow_blank=True, required=False, default="")
+
+
+class SceneTemplateWriteSerializer(serializers.Serializer[dict[str, Any]]):
+    """`POST scenes/templates/` (all of it) and `PATCH scenes/templates/{id}/` (`partial`): JSON or multipart
+    (dotted names: `name.uz`, …; the file part `reference`)."""
+
+    name = SceneTemplateNamesSerializer(required=False)
+    text = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=400,
+        help_text="The scene in staff's words, any language (translated to English and screened).",
+    )
+    reference = serializers.ImageField(
+        required=False,
+        help_text="A picture of the scene alone (JPG, PNG, WebP; ≤ 5 MB): screened (no product, person or "
+        "text) and described in the same request.",
+    )
+    remove_reference = serializers.BooleanField(required=False, default=False)
+    enabled = serializers.BooleanField(required=False)
 
 
 # a product photo's scene jobs (a template preview is the console's; a banner image has its own endpoint)

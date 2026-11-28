@@ -21,6 +21,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from decimal import Decimal
 from io import BytesIO
+from typing import Any
 
 from PIL import Image, ImageOps
 
@@ -403,8 +404,9 @@ def ai_scene(
         cutout = sent.copy()
         cutout.putalpha(prepared.placed.alpha)
         cutout_part = ImagePart(data=compose.encode(cutout, "PNG"), mime_type="image/png")
-        scene = prompts.bria_scene(template.prompt, config.style)
+        scene = prompts.bria_scene(template.scene or FALLBACK_SCENE, config.style)
     image_key = providers.image_key if providers.image_key is not None else providers.api_key
+    reference = reference_part(template)
     # The model sees the canvas at its own 4:5 size; the result is resized back to the master.
     attempts: list[Attempt] = []
     last_error = PRODUCT_DRIFT
@@ -413,14 +415,22 @@ def ai_scene(
         attempt = Attempt(number=number, seconds=0.0)
         attempts.append(attempt)
         prompt = prompts.scene_prompt(
-            prepared.layout, template.prompt, config.style, occluded=fill, stricter=number > 1
+            prepared.layout,
+            template.scene or FALLBACK_SCENE,
+            config.style,
+            occluded=fill,
+            stricter=number > 1,
+            reference=reference is not None,
         )
         try:
             answer = providers.image_model.generate_image(
                 ImageGenerationRequest(
                     model=config.image_model,
                     prompt=prompt,
-                    images=(ImagePart(data=compose.encode(sent, "PNG"), mime_type="image/png"),),
+                    images=(
+                        ImagePart(data=compose.encode(sent, "PNG"), mime_type="image/png"),
+                        *((reference,) if reference is not None else ()),
+                    ),
                     aspect_ratio="4:5",
                     image_size=config.image_size,
                     thinking_level=config.thinking_level,
@@ -485,6 +495,89 @@ def ai_scene(
     error = SceneError(last_error, f"{len(attempts)} attempts rejected", usage=usage)
     error.attempts = attempts  # type: ignore[attr-defined]
     raise error
+
+
+FALLBACK_SCENE = "A calm, softly lit premium skincare setting with a clean surface and a soft backdrop."
+
+
+def reference_part(template: Template) -> ImagePart | None:
+    """A template's reference picture as an input image (JPEG, long side 1024), or ``None``."""
+    if not template.reference:
+        return None
+    return image_part(load_photo(template.reference), SEND_SIDE)
+
+
+def describe_reference(
+    picture: Image.Image, providers: Providers, config: Config, usage: Usage
+) -> dict[str, Any]:
+    """A reference staff uploaded: its English description and whether it shows a product, a person or text
+    (one analyst call)."""
+    answer = providers.content_model.generate(
+        GenerationRequest(
+            model=config.qa_model,
+            system_instruction="You describe and screen reference photos of scenes for an image model.",
+            prompt=prompts.REFERENCE_DESCRIBE_PROMPT,
+            response_schema=prompts.REFERENCE_DESCRIBE_SCHEMA,
+            images=(image_part(picture, 1024),),
+            temperature=0.2,
+            max_output_tokens=600,
+            timeout_seconds=config.qa_timeout,
+            max_retries=config.max_retries,
+        ),
+        api_key=providers.api_key,
+    )
+    usage.add_text(answer.input_tokens, answer.output_tokens)
+    scene = _plain_english(" ".join(str(answer.data.get("scene") or "").split())) or ""
+    return {
+        "scene": scene,
+        **{flag: bool(answer.data.get(flag)) for flag in ("has_product", "has_people", "has_text")},
+    }
+
+
+REFERENCE_SIZE = (960, 1200)  # a reference made from a template's text, 4:5
+
+
+def reference_scene(template: Template, providers: Providers, config: Config, usage: Usage) -> Image.Image:
+    """A picture of the template's scene alone (no product), 4:5: the card staff see and the reference the
+    image model follows. Checked like a banner without products (no product, text or person)."""
+    from . import banner  # banner builds on this module
+
+    scene = template.scene or FALLBACK_SCENE
+    bria_text = "" if providers.image_model.fills_hidden else prompts.bria_reference(scene, config.style)
+    image_key = providers.image_key if providers.image_key is not None else providers.api_key
+    last = RESULT_REJECTED
+    for _number in range(1, max(1, config.max_attempts) + 1):
+        try:
+            answer = providers.image_model.generate_image(
+                ImageGenerationRequest(
+                    model=config.image_model,
+                    prompt=prompts.reference_scene_prompt(scene, config.style),
+                    aspect_ratio="4:5",
+                    image_size=config.image_size,
+                    thinking_level=config.thinking_level,
+                    timeout_seconds=config.image_timeout,
+                    max_retries=config.max_retries,
+                    scene=bria_text,
+                ),
+                api_key=image_key,
+            )
+        except LLMError as exc:
+            usage.add_image(exc.input_tokens, 0, exc.output_tokens)
+            raise
+        usage.add_image(answer.input_tokens, answer.output_text_tokens, answer.output_image_tokens)
+        usage.bria_scene_calls += answer.billed_calls
+        try:
+            picture = compose.decode(answer.image).convert("RGB")
+        except Exception:  # noqa: BLE001 - provider bytes that do not decode
+            raise LLMBadOutput("the reference image does not decode") from None
+        picture = ImageOps.fit(picture, REFERENCE_SIZE, Image.Resampling.LANCZOS)
+        if config.qa_check:
+            qa = banner.qa(picture, providers, config, usage, with_products=False)
+            if any(qa.get(name) for name in prompts.BANNER_QA_FAILS):
+                last = RESULT_REJECTED
+                continue
+        return picture
+    raise SceneError(last, "reference rejected", usage=usage)
 
 
 def custom_scene(text: str, providers: Providers, config: Config, usage: Usage) -> str:

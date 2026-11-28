@@ -190,7 +190,7 @@ def _in_master(box: compose.Box, size: tuple[int, int]) -> compose.Box:
     return (box[0] - left, box[1], box[2] - left, box[3])
 
 
-def _qa(
+def qa(
     final: Image.Image,
     providers: pipeline.Providers,
     config: pipeline.Config,
@@ -254,13 +254,16 @@ def with_products(
     size = canvas_size()
     placed, targets = place_products(cutouts, size)
     sent = compose.canvas(placed)
+    reference = pipeline.reference_part(template)
     cutout_part: ImagePart | None = None
     scene = ""
     if not providers.image_model.fills_hidden:  # Bria: the products on transparency and a plain scene
         layer = sent.copy()
         layer.putalpha(placed.alpha)
         cutout_part = ImagePart(data=compose.encode(layer, "PNG"), mime_type="image/png")
-        scene = prompts.bria_banner(template.prompt, config.style, with_products=True)
+        scene = prompts.bria_banner(
+            template.scene or pipeline.FALLBACK_SCENE, config.style, with_products=True
+        )
     attempts: list[pipeline.Attempt] = []
     last_error = pipeline.PRODUCT_DRIFT
     for number in range(1, max(1, config.max_attempts) + 1):
@@ -272,9 +275,18 @@ def with_products(
                 ImageGenerationRequest(
                     model=config.image_model,
                     prompt=prompts.banner_products_prompt(
-                        targets, size, len(cutouts), template.prompt, config.style, stricter=number > 1
+                        targets,
+                        size,
+                        len(cutouts),
+                        template.scene or pipeline.FALLBACK_SCENE,
+                        config.style,
+                        stricter=number > 1,
+                        reference=reference is not None,
                     ),
-                    images=(ImagePart(data=compose.encode(sent, "PNG"), mime_type="image/png"),),
+                    images=(
+                        ImagePart(data=compose.encode(sent, "PNG"), mime_type="image/png"),
+                        *((reference,) if reference is not None else ()),
+                    ),
                     aspect_ratio=GEN_RATIO,
                     image_size=config.image_size,
                     thinking_level=config.thinking_level,
@@ -307,7 +319,7 @@ def with_products(
             raise pipeline.SceneError(pipeline.RULE_BROKEN, f"core differs by {difference}")
         final = _crop(whole)
         if config.qa_check:
-            attempt.qa = _qa(final, providers, config, usage, with_products=True)
+            attempt.qa = qa(final, providers, config, usage, with_products=True)
             if any(attempt.qa.get(name) for name in prompts.BANNER_QA_FAILS):
                 attempt.error, last_error = pipeline.RESULT_REJECTED, pipeline.RESULT_REJECTED
                 attempt.seconds = round(time.monotonic() - began, 2)
@@ -330,9 +342,12 @@ def scene_only(
 ) -> Result:
     """A scene alone (no product), made at 21:9 and cropped to the middle 2.15:1, at the model's own size."""
     started = time.monotonic()
+    reference = pipeline.reference_part(template)
     scene = ""
     if not providers.image_model.fills_hidden:
-        scene = prompts.bria_banner(template.prompt, config.style, with_products=False)
+        scene = prompts.bria_banner(
+            template.scene or pipeline.FALLBACK_SCENE, config.style, with_products=False
+        )
     attempts: list[pipeline.Attempt] = []
     for number in range(1, max(1, config.max_attempts) + 1):
         began = time.monotonic()
@@ -342,7 +357,12 @@ def scene_only(
             generated = _generate(
                 ImageGenerationRequest(
                     model=config.image_model,
-                    prompt=prompts.banner_scene_prompt(template.prompt, config.style),
+                    prompt=prompts.banner_scene_prompt(
+                        template.scene or pipeline.FALLBACK_SCENE,
+                        config.style,
+                        reference=reference is not None,
+                    ),
+                    images=(reference,) if reference is not None else (),
                     aspect_ratio=GEN_RATIO,
                     image_size=config.image_size,
                     thinking_level=config.thinking_level,
@@ -358,7 +378,7 @@ def scene_only(
             raise
         final = _crop(generated)
         if config.qa_check:
-            attempt.qa = _qa(final, providers, config, usage, with_products=False)
+            attempt.qa = qa(final, providers, config, usage, with_products=False)
             if any(attempt.qa.get(name) for name in prompts.BANNER_QA_FAILS):
                 attempt.error = pipeline.RESULT_REJECTED
                 attempt.seconds = round(time.monotonic() - began, 2)

@@ -9,7 +9,6 @@ from typing import Any
 import pytest
 from django.test import Client, override_settings
 from django.urls import reverse
-from PIL import Image
 from rest_framework.test import APIClient
 
 from glowderma.assistant.models import SceneJob, SceneSettings, SceneTemplate
@@ -141,13 +140,13 @@ def test_a_typed_scene_saved_as_a_template(staff_client: APIClient, ai_on: Scene
     assert response.status_code == 201, response.json()
     saved = response.json()
     assert saved["key"] == f"custom-{job_id}" and saved["kind"] == "ai_scene" and saved["name"] == "Розы"
-    assert saved["preview_url"].endswith(".webp")
+    # the card shows the scene alone (no staff product): a picture of it is made from the words
+    assert saved["preview_url"] is None
     row = SceneTemplate.objects.get(key=f"custom-{job_id}")
     assert row.prompt == ENGLISH and row.enabled and row.created_by is not None
+    assert SceneJob.objects.filter(kind=enums.SceneJobKind.PREVIEW, template=row).exists()
     before = SceneTemplate.objects.exclude(pk=row.pk).order_by("-position").values_list("position", flat=True)
     assert row.position == before[0] + 1
-    with Image.open(row.preview.path) as picture:
-        assert picture.width == scene_services.PREVIEW_WIDTH
     listed = staff_client.get(f"{ADMIN}scenes/templates/").json()["results"]
     assert listed[-1]["key"] == row.key
     job = staff_client.get(f"{ADMIN}scenes/jobs/{job_id}/").json()
@@ -162,7 +161,9 @@ def test_saving_after_the_scene_was_accepted(staff_client: APIClient, ai_on: Sce
     accepted = staff_client.post(f"{ADMIN}scenes/jobs/{job_id}/accept/", {}, format="json")
     assert accepted.status_code == 200, accepted.json()
     response = staff_client.post(f"{ADMIN}scenes/jobs/{job_id}/template/", {"name": "Roses"}, format="json")
-    assert response.status_code == 201 and response.json()["preview_url"]  # from the accepted photo
+    assert response.status_code == 201
+    row = SceneTemplate.objects.get(pk=response.json()["id"])
+    assert SceneJob.objects.filter(kind=enums.SceneJobKind.PREVIEW, template=row).exists()
 
 
 def test_only_a_finished_typed_scene_can_be_saved(staff_client: APIClient, ai_on: SceneSettings) -> None:
@@ -210,7 +211,8 @@ def test_an_ai_preview_is_a_billed_job_once_per_template(ai_on: SceneSettings, s
     assert done is not None and done.state == enums.JobState.SUCCEEDED, done and done.error_code
     assert done.outcome == enums.SceneJobOutcome.ACCEPTED and done.expires_at is None
     marble.refresh_from_db()
-    assert marble.preview_url and fake_image_model().calls  # the image model drew it
+    assert marble.reference_source == "generated" and marble.preview_url == marble.reference_url
+    assert fake_image_model().calls and fake_image_model().calls[-1].images == ()  # the scene alone
     assert scene_services.expire_candidates() == 0  # nothing to review, nothing expires
 
     # The prompt changes: the old picture shows another scene, so it goes (an AI one is not redrawn).
@@ -218,7 +220,7 @@ def test_an_ai_preview_is_a_billed_job_once_per_template(ai_on: SceneSettings, s
 
     writes.update_scene_template(marble.pk, {"prompt": "Black slate, wet, moody light."}, actor=staff)
     marble.refresh_from_db()
-    assert not marble.preview
+    assert not marble.reference and not marble.preview
 
 
 def test_a_preview_of_a_template_edited_meanwhile_is_dropped(ai_on: SceneSettings, staff: Any) -> None:
@@ -229,7 +231,7 @@ def test_a_preview_of_a_template_edited_meanwhile_is_dropped(ai_on: SceneSetting
     done = scene_services.run(job.pk)
     assert done is not None and done.state == enums.JobState.SUCCEEDED
     marble.refresh_from_db()
-    assert not marble.preview
+    assert not marble.reference
 
 
 def test_previews_respect_the_scene_budget(ai_on: SceneSettings, staff: Any) -> None:

@@ -30,6 +30,12 @@ urlpatterns: list[URLPattern | URLResolver] = [
     ),
     path("scenes/status/", views.ScenesStatusView.as_view(), name="admin-scenes-status"),
     path("scenes/templates/", views.SceneTemplatesView.as_view(), name="admin-scene-templates"),
+    path("scenes/templates/<int:pk>/", views.SceneTemplateDetailView.as_view(), name="admin-scene-template"),
+    path(
+        "scenes/templates/<int:pk>/reference/",
+        views.SceneTemplateReferenceView.as_view(),
+        name="admin-scene-template-reference",
+    ),
     path(
         "products/<int:product_id>/images/<int:image_id>/scenes/",
         views.SceneJobStartView.as_view(),

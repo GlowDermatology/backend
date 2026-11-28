@@ -1836,6 +1836,52 @@ Unreviewed candidates expire after `candidate_ttl_hours` (default 72; beat `assi
 Audit: `assistant.scene_accepted` (entity `product`; `{job_id, kind, image_id, source_image_id}`) plus the
 catalog's own `product.image_added` / `product.image_renditions`.
 
+#### 2.20.9 Templates: references and the admin editor
+
+A template card shows the scene alone (no product). An AI template is a **reference** picture of the scene
+and/or a **text**:
+
+- Gemini sees the reference itself as a second input image ("recreate its surface, backdrop, props, light and
+  palette; copy no product, text or person").
+- Bria's best mode (`fibo2`) takes text only, so it gets the reference's English description, written by the
+  analyst when the picture was uploaded. A live comparison chose this over Bria's `high_control` with
+  `ref_images`, which drew a prop out of the product.
+
+A queued job keeps the reference it started with (its snapshot names the file; a replaced file is not deleted
+while a job reads it).
+
+`GET scenes/templates/` adds:
+- `names` `{uz, ru, en}`;
+- `text`: the words staff typed, else the English text;
+- `reference_url`;
+- `reference_source`: `upload` | `generated` | "";
+- `enabled`;
+- `saved_by_staff`.
+
+`preview_url` stays "the card's picture": the reference, a studio template's background, or (until an AI
+template gets a reference) its older sample picture.
+
+**`POST scenes/templates/`** creates an AI template. Body (JSON or multipart):
+- `name` (`{uz, ru, en}`; `name.uz` …), `uz` required;
+- `text` (any language, ≤ 400): translated and screened, 400 `text` when refused;
+- `reference` (file, ≤ 5 MB): screened and described in the request, 400 `reference` when it shows a product,
+  a person or text.
+
+At least one of `text` and `reference` is needed (400 `text`). 409 `scenes_disabled` / `scene_ai_disabled`.
+
+**`PATCH scenes/templates/{id}/`** takes `name`, `enabled`, and for AI templates `text`, `reference` and
+`remove_reference`. A new text clears a reference made from the old one; an uploaded one stays. Studio colours
+stay in the ops console (400 `text`).
+
+**`POST scenes/templates/{id}/reference/`** («Rasmini yaratish») → 202 `SceneJob` (kind `preview`). It makes
+the reference from the text: the scene alone at 4:5, one image call within the budget. A second call returns
+the pending job. 409 `scene_template_needs_text`.
+
+«Shablon sifatida saqlash» (§2.20) now makes the new template's reference this way instead of showing the
+staff's own product.
+
+Audit: `assistant.scene_template_created` / `…_updated` (names, enabled, text length, reference source).
+
 #### 2.20.8 Banner images
 
 An AI image for a home-screen banner (§2.5): exactly **2.15:1**, the app's banner, which shows all of it; the

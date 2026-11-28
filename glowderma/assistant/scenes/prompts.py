@@ -46,6 +46,11 @@ colour, with no text or graphics."""
 STRICTER = """IMPORTANT: the previous attempt moved or altered the product. Leave every product pixel \
 exactly where it is in the input."""
 
+REFERENCE_RULE = """The second attached image is a REFERENCE photo of the scene alone. Recreate its surface, \
+backdrop, props, light and colour palette around the product. It is a style reference, not a layout: the \
+product stays exactly where the first image has it, and the framing is the first image's. Copy no product, \
+packaging, bottle, text, logo or person from the reference."""
+
 QA_PROMPT = """This is a finished product photo for an online shop. Answer with JSON only.
 "hands_or_people": any hand, finger, arm, face or person anywhere in the image.
 "office_remnants": any desk, monitor, keyboard, office chair, paper, shelf or other trace of an office or \
@@ -81,7 +86,9 @@ def _percent(value: float) -> int:
     return round(100 * value)
 
 
-def scene_prompt(layout: Layout, scene: str, style: str, *, occluded: bool, stricter: bool) -> str:
+def scene_prompt(
+    layout: Layout, scene: str, style: str, *, occluded: bool, stricter: bool, reference: bool = False
+) -> str:
     x0, y0, x1, y1 = layout.box
     rules = SCENE_RULES.format(
         x0=_percent(x0 / layout.width),
@@ -91,6 +98,8 @@ def scene_prompt(layout: Layout, scene: str, style: str, *, occluded: bool, stri
         base=_percent(y1 / layout.height),
     )
     parts = [rules]
+    if reference:
+        parts.append(REFERENCE_RULE)
     if occluded:
         parts.append(OCCLUSION_RULE)
     if stricter:
@@ -212,6 +221,7 @@ def banner_products_prompt(
     style: str,
     *,
     stricter: bool,
+    reference: bool = False,
 ) -> str:
     base = _percent(max(box[3] for box in boxes) / size[1])
     parts = [
@@ -219,6 +229,8 @@ def banner_products_prompt(
             count=count, places=_product_places(boxes, size), base=base, layout=BANNER_LAYOUT
         )
     ]
+    if reference:
+        parts.append(BANNER_REFERENCE_RULE)
     if stricter:
         parts.append(STRICTER)
     parts.append(f"SCENE: {banner_scene(scene).strip()}")
@@ -227,8 +239,16 @@ def banner_products_prompt(
     return "\n".join(parts)
 
 
-def banner_scene_prompt(scene: str, style: str) -> str:
-    parts = [BANNER_SCENE_RULES.format(layout=BANNER_LAYOUT), f"SCENE: {banner_scene(scene).strip()}"]
+BANNER_REFERENCE_RULE = """The last attached image is a REFERENCE photo of a scene (another shape): recreate \
+its surface, backdrop, props, light and colour palette across this wide frame. It is a style reference, not \
+a layout: follow the layout rules above, and copy no product, packaging, text, logo or person from it."""
+
+
+def banner_scene_prompt(scene: str, style: str, *, reference: bool = False) -> str:
+    parts = [BANNER_SCENE_RULES.format(layout=BANNER_LAYOUT)]
+    if reference:
+        parts.append(BANNER_REFERENCE_RULE)
+    parts.append(f"SCENE: {banner_scene(scene).strip()}")
     if style.strip():
         parts.append(f"STYLE: {style.strip()}")
     return "\n".join(parts)
@@ -294,3 +314,52 @@ def banner_qa_prompt(*, with_products: bool) -> str:
         '"busy_lower_left": the lower left quarter is busy or high-contrast (objects, bright patterns) '
         "instead of calm."
     )
+
+
+# --- template references ------------------------------------------------------------------------------------
+# A reference staff upload is described once (English, for Bria's text-only mode) and screened: a picture
+# with a product, a person or lettering in it would put them in every scene.
+REFERENCE_DESCRIBE_PROMPT = """Staff of a skincare shop uploaded this photo as the reference of a product \
+scene: the setting their products will be photographed in. Answer with JSON only.
+1. "scene": the setting in plain English, 60-90 words: the surface, the backdrop, the props, the light and \
+the colour palette. Never describe products, packaging, people or text.
+2. "has_product": true when the photo shows any product, bottle, jar, tube, box or packaging.
+3. "has_people": true when it shows a person, a face, a hand or another body part.
+4. "has_text": true when it shows text, letters, numbers, a logo or a watermark."""
+REFERENCE_DESCRIBE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "scene": {"type": "string"},
+        "has_product": {"type": "boolean"},
+        "has_people": {"type": "boolean"},
+        "has_text": {"type": "boolean"},
+    },
+    "required": ["scene", "has_product", "has_people", "has_text"],
+}
+
+REFERENCE_SCENE_RULES = """A photorealistic photograph, 4:5 portrait, of an empty scene for a premium \
+skincare shop's product photos: the setting described under SCENE, with an empty space in the middle of \
+the surface where a product will stand later. No product, packaging, bottle or jar in it. No text, \
+letters, logos or watermarks. No hands, people, faces or body parts. Camera at product height, straight \
+on. Fill the whole frame."""
+
+BRIA_REFERENCE_ENDING = (
+    "An empty space in the middle of the surface, no product, no bottle, no jar. Premium skincare "
+    "photography, no people, no hands, no text, no logos."
+)
+
+
+def reference_scene_prompt(scene: str, style: str) -> str:
+    parts = [REFERENCE_SCENE_RULES, f"SCENE: {scene.strip()}"]
+    if style.strip():
+        parts.append(f"STYLE: {style.strip()}")
+    return "\n".join(parts)
+
+
+def bria_reference(scene: str, style: str) -> str:
+    def plain(text: str) -> list[str]:
+        return _BRIA_UNSAFE.sub(" ", text.replace("\u2019", "'")).split()
+
+    head, ending = plain(scene), plain(BRIA_REFERENCE_ENDING)
+    room = max(0, BRIA_MAX_WORDS - len(head) - len(ending))
+    return " ".join(head + plain(style)[:room] + ending)
